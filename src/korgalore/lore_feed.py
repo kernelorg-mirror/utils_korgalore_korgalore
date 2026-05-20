@@ -218,6 +218,13 @@ class LoreFeed(PIFeed):
         gitargs = ['fetch', 'origin', '--shallow-since=1.week.ago', '--update-shallow']
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
+            # Shallow fetch with --shallow-since can fail for dormant lists
+            # that have no commits in the time window. Fall back to --depth=1
+            # which always succeeds regardless of commit dates.
+            logger.debug('Shallow fetch failed, retrying with --depth=1: %s', error.decode())
+            gitargs = ['fetch', 'origin', '--depth=1', '--update-shallow']
+            retcode, output, error = run_git_command(str(gitdir), gitargs)
+        if retcode != 0:
             raise RemoteError(f"Git fetch failed (exit {retcode}): {error.decode()}")
 
         updated = self.feed_updated(highest_local_epoch)
