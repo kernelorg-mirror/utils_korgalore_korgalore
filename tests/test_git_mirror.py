@@ -243,6 +243,64 @@ class TestUpdateFeedMirror:
             _, kwargs = fetch_calls[0]
             assert kwargs['git_config'] == expected_config
 
+    def test_fetch_fallback_to_depth_one_on_shallow_failure(self, tmp_path: Path) -> None:
+        """When --shallow-since fetch fails (dormant list), retry with --depth=1."""
+        mock_node = MagicMock()
+        mock_node.origins = ['https://sea.lore.kernel.org', 'https://lore.kernel.org']
+        mock_node.canonical_origin = 'https://lore.kernel.org'
+
+        feed_dir = tmp_path / 'test-feed'
+        feed_dir.mkdir()
+        (feed_dir / 'git' / '0.git').mkdir(parents=True)
+
+        feed = LoreFeed('test', feed_dir, 'https://lore.kernel.org/lkml', lore_node=mock_node)
+
+        feed_state = {
+            'epochs': {'0': {'latest_commit': 'abc123'}},
+            'last_update': '2026-01-01T00:00:00',
+            'update_successful': True,
+        }
+        state_file = feed_dir / 'korgalore.feed'
+        import json
+        state_file.write_text(json.dumps(feed_state))
+
+        epochs_info = [{'epoch': 0, 'path': '/lkml/git/0.git', 'fpr': 'abc'}]
+        (feed_dir / 'epochs.json').write_text(json.dumps(epochs_info))
+
+        import gzip
+        manifest = {'/lkml/git/0.git': {'fingerprint': 'changed'}}
+        manifest_bytes = gzip.compress(json.dumps(manifest).encode())
+        mock_response = MagicMock()
+        mock_response.content = manifest_bytes
+        mock_response.raise_for_status = MagicMock()
+        mock_node.request.return_value = mock_response
+
+        expected_config = {
+            'url.https://sea.lore.kernel.org/.insteadOf': 'https://lore.kernel.org/',
+        }
+
+        with patch('korgalore.lore_feed.run_git_command') as mock_git, \
+             patch.object(feed, 'feed_updated', return_value=True), \
+             patch.object(feed, 'save_feed_state'):
+            # First fetch (--shallow-since) fails, second fetch (--depth=1) succeeds
+            mock_git.side_effect = [
+                (128, b'', b'fatal: error processing shallow info: 4'),
+                (0, b'', b''),
+            ]
+            feed.update_feed()
+
+            fetch_calls = [c for c in mock_git.call_args_list
+                           if len(c[0]) >= 2 and 'fetch' in c[0][1]]
+            assert len(fetch_calls) == 2
+            # First call uses --shallow-since
+            assert '--shallow-since=1.week.ago' in fetch_calls[0][0][1]
+            # Second call uses --depth=1
+            assert '--depth=1' in fetch_calls[1][0][1]
+            assert '--shallow-since=1.week.ago' not in fetch_calls[1][0][1]
+            # Both calls reuse the mirror config
+            for c in fetch_calls:
+                assert c[1]['git_config'] == expected_config
+
 
 class TestGetLoreNode:
     """Tests for get_lore_node() origin-based caching."""

@@ -232,9 +232,16 @@ class LoreFeed(PIFeed):
         logger.debug(f"Highest local epoch: {highest_local_epoch}")
         gitdir = self.get_gitdir(highest_local_epoch)
         # Pull the latest changes
+        mirror_config = self._git_mirror_config()
         gitargs = ['fetch', 'origin', '--shallow-since=1.week.ago', '--update-shallow']
-        retcode, output, error = run_git_command(str(gitdir), gitargs,
-                                                 git_config=self._git_mirror_config())
+        retcode, output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
+        if retcode != 0:
+            # Shallow fetch with --shallow-since can fail for dormant lists
+            # that have no commits in the time window. Fall back to --depth=1
+            # which always succeeds regardless of commit dates.
+            logger.debug('Shallow fetch failed, retrying with --depth=1: %s', error.decode())
+            gitargs = ['fetch', 'origin', '--depth=1', '--update-shallow']
+            retcode, output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
         if retcode != 0:
             raise RemoteError(f"Git fetch failed (exit {retcode}): {error.decode()}")
 
