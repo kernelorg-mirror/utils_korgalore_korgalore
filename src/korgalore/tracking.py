@@ -6,6 +6,7 @@ storing metadata in a separate manifest file from the main configuration.
 import json
 import logging
 import shutil
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -345,7 +346,7 @@ class TrackingManifest:
 def create_lei_thread_search(msgid: str, output_path: Path) -> Tuple[int, bytes]:
     """Create a new lei search for a thread by message ID.
 
-    Uses: lei q "mid:<msgid>" --threads --only https://lore.kernel.org/all -o v2:<output_path>
+    Uses: lei q "dt:19700101000000.." --only https://lore.kernel.org/all/<msgid> -o v2:<output_path>
 
     Args:
         msgid: The message ID to search for (without angle brackets).
@@ -360,8 +361,11 @@ def create_lei_thread_search(msgid: str, output_path: Path) -> Tuple[int, bytes]
     # Ensure output directory's parent exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    args = ['q', f'mid:{msgid}', '--threads',
-            '--only', 'https://lore.kernel.org/all',
+    # We use the dt:19700101000000.. query to mean "search for all", it's the Message-ID in the url that
+    # returns the full thread of that message.
+    qmsgid = urllib.parse.quote_plus(msgid)
+    args = ['q', 'dt:19700101000000..',
+            '--only', f'https://lore.kernel.org/all/{qmsgid}',
             '-o', f'v2:{output_path}']
     logger.debug('Creating lei thread search: lei %s', ' '.join(args))
 
