@@ -539,7 +539,7 @@ How Thread Tracking Works
 
 1. When you run ``track add``, korgalore:
 
-   * Creates a lei search for the thread using ``lei q "mid:<msgid>" --threads``
+   * Creates a lei search for the thread
    * Populates the search with current thread messages
    * Delivers all existing messages to your target
    * Saves tracking metadata in ``~/.local/share/korgalore/tracking.json``
