@@ -1,8 +1,48 @@
 Korgalore Changelog
 ===================
 
+v0.6.1 (2026-06-23)
+-------------------
+
+Bug Fixes
+~~~~~~~~~
+
+* Fix thread tracking not delivering new messages after a few days
+
+  - Thread tracking used a ``msgid:<msgid>`` query combined with
+    ``--threads``, which interacted badly with how ``lei update`` limits
+    queries to ~2 days before the last retrieved message
+  - Once a thread kept receiving messages past that window, the date filter
+    caused the query to return nothing and delivery silently stopped
+
+* Fall back to ``--depth=1`` when a shallow fetch fails on stale repos
+
+  - When a feed's epoch repository received no commits within the
+    ``--shallow-since=1.week.ago`` window, git aborted the fetch with
+    "error processing shallow info: 4" (exit 128) and skipped the feed
+  - ``update_feed()`` now mirrors ``clone_epoch()`` and retries with
+    ``--depth=1`` so the fetch self-heals instead of surfacing a cryptic
+    error
+
+* Fix noop retry rewind causing infinite re-delivery of messages
+
+  - The noop (rm/purge) retry path failed to forward the ``was_failing``
+    flag, so retried entries were never removed from the failed list
+  - ``mark_successful_delivery`` also rewound the "last" commit pointer for
+    retried commits, causing all subsequent commits to be re-delivered on
+    every pull cycle (hundreds of duplicate messages per sync)
+
+* Fix crash on a bad-object commit during failed delivery retry
+
+  - When a commit in the failed delivery list was no longer available
+    locally (missing packfile), ``is_noop_commit()`` mistook it for a noop
+    and the downstream ``save_delivery_info()`` crashed
+  - ``is_noop_commit()`` now verifies the commit object exists first and
+    raises ``GitError`` for genuinely missing commits, which is caught and
+    recorded as a failed delivery instead of crashing the retry loop
+
 v0.6.0 (2026-03-05)
------------------
+-------------------
 
 New Features
 ~~~~~~~~~~~~
