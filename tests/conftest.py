@@ -33,9 +33,9 @@ def mock_feed(temp_feed_dir: Path) -> "PIFeed":
             super().__init__(feed_key="test-feed", feed_dir=feed_dir)
             self.feed_type = "test"
 
-        def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
+        def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
             """Mock implementation that returns a test subject."""
-            return f"Test subject for {commit_hash}"
+            return f"Test subject for {commitish}"
 
         def get_highest_epoch(self) -> int:
             """Mock implementation."""

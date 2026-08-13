@@ -264,8 +264,8 @@ class TestFeedLocking:
                 super().__init__(feed_key="test-feed", feed_dir=feed_dir)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
             def get_highest_epoch(self) -> int:
                 return 0
@@ -324,8 +324,8 @@ class TestFeedLocking:
                 super().__init__(feed_key="unlocked-feed", feed_dir=feed_dir)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
             def get_highest_epoch(self) -> int:
                 return 0
@@ -353,8 +353,8 @@ class TestLegacyMigration:
                 super().__init__(feed_key="new-feed", feed_dir=feed_dir)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
         # Create feed directory without git subdirectory
         feed_dir = tmp_path / "new-feed"
@@ -375,8 +375,8 @@ class TestLegacyMigration:
                 super().__init__(feed_key="partial-feed", feed_dir=feed_dir)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
         # Create feed directory with empty git/ subdirectory (e.g. from a
         # failed or interrupted clone that left the parent dir behind)
@@ -405,8 +405,8 @@ class TestGetFirstCommit:
                 super().__init__(feed_key="test-feed", feed_dir=fd)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
             def get_highest_epoch(self) -> int:
                 return 0
@@ -513,8 +513,8 @@ class TestIsEmptyRepoCache:
                 super().__init__(feed_key="test-feed", feed_dir=fd)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
             def get_highest_epoch(self) -> int:
                 return 0
@@ -647,8 +647,8 @@ class TestIsNoopCommit:
                 super().__init__(feed_key="test-feed", feed_dir=fd)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
             def get_highest_epoch(self) -> int:
                 return 0
@@ -869,8 +869,8 @@ class TestSaveDeliveryInfoEmptyMessage:
                 super().__init__(feed_key="test-feed", feed_dir=fd)
                 self.feed_type = "test"
 
-            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-                return f"Test subject for {commit_hash}"
+            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+                return f"Test subject for {commitish}"
 
             def get_highest_epoch(self) -> int:
                 return 0

@@ -29,9 +29,9 @@ class MockPIFeed(PIFeed):
         """Return mocked default branch."""
         return self._default_branch
 
-    def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
+    def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
         """Mock implementation."""
-        return f"Test subject for {commit_hash}"
+        return f"Test subject for {commitish}"
 
 
 def create_feed_with_epochs(tmp_path: Path, epochs: List[int]) -> MockPIFeed:

@@ -22,8 +22,8 @@ class _StubPIFeed(PIFeed):
         super().__init__(feed_key=feed_key, feed_dir=feed_dir)
         self.feed_type = "test"
 
-    def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
-        return f"Test subject for {commit_hash}"
+    def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
+        return f"Test subject for {commitish}"
 
     def get_highest_epoch(self) -> int:
         return 0
