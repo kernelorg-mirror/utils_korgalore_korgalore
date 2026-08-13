@@ -111,7 +111,7 @@ def get_maintainers_file(data_dir: Path) -> Path:
         raise click.ClickException(
             f"Failed to fetch MAINTAINERS file from {MAINTAINERS_URL}: {e}\n"
             "Use -m/--maintainers to specify a local copy."
-        )
+        ) from e
 
     # Cache the file
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -278,7 +278,7 @@ def get_gmail_target(identifier: str, credentials_file: str,
                          interactive=interactive)
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
-        raise click.Abort()
+        raise click.Abort() from fe
 
     return gt
 
@@ -293,7 +293,7 @@ def get_maildir_target(identifier: str, maildir_path: str) -> MaildirTarget:
         mt = MaildirTarget(identifier=identifier, maildir_path=maildir_path)
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
-        raise click.Abort()
+        raise click.Abort() from fe
 
     return mt
 
@@ -328,7 +328,7 @@ def get_jmap_target(identifier: str, server: str, username: str,
         )
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
-        raise click.Abort()
+        raise click.Abort() from fe
 
     return jt
 
@@ -375,7 +375,7 @@ def get_imap_target(identifier: str, server: str, username: str,
         )
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
-        raise click.Abort()
+        raise click.Abort() from fe
 
     return it
 
@@ -390,7 +390,7 @@ def get_pipe_target(identifier: str, command: str) -> PipeTarget:
         pt = PipeTarget(identifier=identifier, command=command)
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
-        raise click.Abort()
+        raise click.Abort() from fe
 
     return pt
 
@@ -531,7 +531,7 @@ def load_config(cfgfile: Path) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error('Error loading config: %s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
 
 def retry_failed_commits(feed_dir: Path, pi_feed: Union[LeiFeed, LoreFeed], target_service: Any,
@@ -809,7 +809,7 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
                     except ValueError as e:
                         raise ConfigurationError(
                             f"Invalid strftime format in subfolder for delivery '{delivery_name}': {e}"
-                        )
+                        ) from e
                 else:
                     raise ConfigurationError(
                         f"strftime templates in subfolder are only supported for Maildir targets "
@@ -977,7 +977,7 @@ def main(ctx: click.Context, cfgfile: str, logfile: Optional[click.Path]) -> Non
     try:
         _init_git_user_agent()
     except GitError as e:
-        raise click.ClickException(str(e))
+        raise click.ClickException(str(e)) from e
 
     # Ensure XDG data directory exists
     data_dir = get_xdg_data_dir()
@@ -1160,7 +1160,7 @@ def labels(ctx: click.Context, target: str, ids: bool = False) -> None:
 
     except Exception as e:
         logger.critical('Failed to fetch labels: %s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
 
 def perform_pull(ctx: click.Context, no_update: bool, force: bool,
@@ -1441,7 +1441,7 @@ def yank(ctx: click.Context, target: Optional[str],
             messages = split_mbox_as_bytes(mbox)
         except liblore.RemoteError as e:
             logger.critical('Failed to fetch thread: %s', str(e))
-            raise click.Abort()
+            raise click.Abort() from e
 
         logger.info('Found %d messages in thread', len(messages))
 
@@ -1477,7 +1477,7 @@ def yank(ctx: click.Context, target: Optional[str],
             raw_message = node.get_message_by_msgid(msgid)
         except liblore.RemoteError as e:
             logger.critical('Failed to fetch message: %s', str(e))
-            raise click.Abort()
+            raise click.Abort() from e
 
         # Parse to get the subject for logging
         msg = parse_message(raw_message)
@@ -1493,7 +1493,7 @@ def yank(ctx: click.Context, target: Optional[str],
             logger.info('Successfully uploaded message.')
         except liblore.RemoteError as e:
             logger.critical('Failed to upload message: %s', str(e))
-            raise click.Abort()
+            raise click.Abort() from e
 
 
 def get_tracking_manifest(ctx: click.Context) -> TrackingManifest:
@@ -1629,7 +1629,7 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
         retcode, output = create_lei_thread_search(msgid, lei_path)
     except PublicInboxError as e:
         logger.critical('Failed to create lei search: %s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
     if retcode != 0:
         logger.critical('Lei query failed: %s', output.decode())
@@ -1641,7 +1641,7 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
         retcode, output = update_lei_search(lei_path)
     except PublicInboxError as e:
         logger.critical('Failed to update lei search: %s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
     if retcode != 0:
         logger.critical('Lei update failed: %s', output.decode())
@@ -1754,9 +1754,9 @@ def track_stop(ctx: click.Context, track_id: str, delete: bool) -> None:
 
     try:
         thread = manifest.get_thread(track_id)
-    except KeyError:
+    except KeyError as e:
         logger.critical('Tracked thread "%s" not found.', track_id)
-        raise click.Abort()
+        raise click.Abort() from e
 
     manifest.remove_thread(track_id, delete_data=delete)
 
@@ -1776,9 +1776,9 @@ def track_pause(ctx: click.Context, track_id: str) -> None:
 
     try:
         manifest.pause_thread(track_id)
-    except KeyError:
+    except KeyError as e:
         logger.critical('Tracked thread "%s" not found.', track_id)
-        raise click.Abort()
+        raise click.Abort() from e
 
     logger.info('Paused tracking for %s', track_id)
 
@@ -1792,9 +1792,9 @@ def track_resume(ctx: click.Context, track_id: str) -> None:
 
     try:
         thread = manifest.get_thread(track_id)
-    except KeyError:
+    except KeyError as e:
         logger.critical('Tracked thread "%s" not found.', track_id)
-        raise click.Abort()
+        raise click.Abort() from e
 
     if thread.status == TrackStatus.ACTIVE:
         logger.warning('Thread %s is already active.', track_id)
@@ -1861,7 +1861,7 @@ def subscribe_add(ctx: click.Context, url: str, target: Optional[str],
             feed_key = Path(url).name
     except (RemoteError, PublicInboxError) as e:
         logger.critical('%s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
     # Check for duplicate feed or delivery in the merged config
     feeds = config.get('feeds', {})
@@ -2065,7 +2065,7 @@ def gui(ctx: click.Context) -> None:
         from korgalore.gui import start_gui
     except ImportError as e:
         logger.critical('GUI dependencies not found: %s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
     # Set GUI mode to disable interactive OAuth flows
     ctx.obj['gui_mode'] = True
@@ -2073,7 +2073,7 @@ def gui(ctx: click.Context) -> None:
         start_gui(ctx)
     except RuntimeError as e:
         logger.critical('%s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
 
 @main.command('track-subsystem')
@@ -2265,7 +2265,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
         entry = get_subsystem(maintainers_path, subsystem_name)
     except KeyError as e:
         logger.critical('%s', str(e))
-        raise click.Abort()
+        raise click.Abort() from e
 
     logger.info('Found subsystem: %s', entry.name)
 

@@ -456,9 +456,9 @@ class PIFeed:
         lockfh = open(lock_file_path, 'w')
         try:
             lockf(lockfh, LOCK_EX | LOCK_NB)
-        except BlockingIOError:
+        except BlockingIOError as e:
             lockfh.close()
-            raise PublicInboxError(f"Feed '{self.feed_dir}' is already locked by another process.")
+            raise PublicInboxError(f"Feed '{self.feed_dir}' is already locked by another process.") from e
         except Exception:
             lockfh.close()
             raise
@@ -476,8 +476,8 @@ class PIFeed:
             del LOCKED_FEEDS[key]
             self._empty_repo_cache.clear()
             logger.debug("Released lock for feed '%s'.", key)
-        except KeyError:
-            raise PublicInboxError(f"Feed '{key}' is not locked.")
+        except KeyError as e:
+            raise PublicInboxError(f"Feed '{key}' is not locked.") from e
 
     def get_failed_commits_for_delivery(self, delivery_name: str) -> List[Tuple[int, str]]:
         """Return list of (epoch, commit) tuples that previously failed delivery."""

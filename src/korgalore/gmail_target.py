@@ -75,7 +75,7 @@ class GmailTarget:
             if self.creds and self.creds.expired and self.creds.refresh_token:
                 try:
                     self.creds.refresh(Request())  # type: ignore
-                except RefreshError:
+                except RefreshError as e:
                     logger.warning('Gmail token for %s has expired or been revoked.',
                                    self.identifier)
                     invalid_token_file = self._token_file + '.invalid'
@@ -91,7 +91,7 @@ class GmailTarget:
                         f"Please re-authenticate.",
                         target_id=self.identifier,
                         target_type='gmail'
-                    )
+                    ) from e
             elif os.path.exists(self._credentials_file):
                 if not self._interactive:
                     # In non-interactive mode (GUI), don't run OAuth flow
@@ -136,7 +136,7 @@ class GmailTarget:
             return labels  # type: ignore
 
         except HttpError as error:
-            raise RemoteError(f'An error occurred: {error}')
+            raise RemoteError(f'An error occurred: {error}') from error
 
     def translate_labels(self, labels: List[str]) -> List[str]:
         """Translate label names to Gmail label IDs.
@@ -207,7 +207,7 @@ class GmailTarget:
             return result
 
         except HttpError as error:
-            raise RemoteError(f'An error occurred: {error}')
+            raise RemoteError(f'An error occurred: {error}') from error
 
     @property
     def needs_auth(self) -> bool:

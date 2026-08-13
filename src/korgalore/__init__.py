@@ -109,8 +109,8 @@ def _init_git_user_agent() -> None:
     """
     try:
         result = subprocess.run([GITCMD, '--version'], capture_output=True)
-    except FileNotFoundError:
-        raise GitError(f"Git command '{GITCMD}' not found. Is it installed?")
+    except FileNotFoundError as e:
+        raise GitError(f"Git command '{GITCMD}' not found. Is it installed?") from e
 
     if result.returncode != 0:
         raise GitError(f"Git command failed: {result.stderr.decode().strip()}")
@@ -144,8 +144,8 @@ def run_git_command(gitdir: Optional[str], args: List[str],
 
     try:
         result = subprocess.run(cmd, capture_output=True, input=stdin)
-    except FileNotFoundError:
-        raise GitError(f"Git command '{GITCMD}' not found. Is it installed?")
+    except FileNotFoundError as e:
+        raise GitError(f"Git command '{GITCMD}' not found. Is it installed?") from e
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
@@ -171,8 +171,8 @@ def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
 
     try:
         result = subprocess.run(cmd, capture_output=True)
-    except FileNotFoundError:
-        raise PublicInboxError(f"LEI command '{LEICMD}' not found. Is it installed?")
+    except FileNotFoundError as e:
+        raise PublicInboxError(f"LEI command '{LEICMD}' not found. Is it installed?") from e
     return result.returncode, result.stdout.strip()
 
 

@@ -94,10 +94,10 @@ class PipeTarget:
             logger.debug('Piped message to command: %s', self.command_args[0])
             return result.returncode
 
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             raise DeliveryError(
                 f"Pipe command not found: {self.command_args[0]}"
-            )
+            ) from e
         except Exception as e:
             if isinstance(e, DeliveryError):
                 raise
