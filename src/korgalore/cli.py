@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import click
-import click_log
+import click_log  # type: ignore[import-untyped]
 import requests
 from liblore.utils import get_msgid_from_url, parse_message, split_mbox_as_bytes
 
@@ -279,7 +279,7 @@ def get_target(ctx: click.Context, identifier: str) -> Any:
     # Check if Gmail target needs authentication (in non-interactive/GUI mode)
     # Note: IMAP OAuth2 targets handle this during connect() instead, which
     # allows the 'auth' command to work properly.
-    if target_type == 'gmail' and service.needs_auth:
+    if isinstance(service, GmailTarget) and service.needs_auth:
         raise AuthenticationError(
             f"Gmail target '{identifier}' requires authentication.",
             target_id=identifier,
@@ -960,7 +960,9 @@ def retry_all_failed_deliveries(ctx: click.Context) -> None:
 
 @click.group()
 @click.version_option(version=__version__)
-@click_log.simple_verbosity_option(logger)
+# click_log ships no type information, so mypy treats the decorated
+# function as untyped. The import ignore above does not cover this.
+@click_log.simple_verbosity_option(logger)  # type: ignore[untyped-decorator]
 @click.option('--cfgfile', '-c', help='Path to configuration file.')
 @click.option('-l', '--logfile', default=None, type=click.Path(), help='Path to log file.')
 @click.pass_context

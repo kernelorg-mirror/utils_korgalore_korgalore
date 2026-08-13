@@ -330,7 +330,7 @@ class KorgaloreApp:
         content_area.pack_start(entry_msgid, False, False, 0)
 
         # Target dropdown (only show if multiple targets)
-        combo_target: Optional[Gtk.ComboBoxText] = None
+        combo_target: Any = None
         if len(target_names) > 1:
             label_target = Gtk.Label(label="Target:")
             label_target.set_halign(Gtk.Align.START)

@@ -42,7 +42,7 @@ class TestGetRequestsSession:
         korgalore._user_agent_plus = 'should-not-appear'
         try:
             session = get_requests_session()
-            assert '+should-not-appear' not in session.headers["User-Agent"]
+            assert '+should-not-appear' not in str(session.headers["User-Agent"])
             assert session.headers["User-Agent"] == f"korgalore/{__version__}"
         finally:
             korgalore._user_agent_plus = None

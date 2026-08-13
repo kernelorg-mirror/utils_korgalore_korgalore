@@ -73,7 +73,7 @@ class JmapTarget:
         if self._reqsession is not None:
             return self._reqsession
         # Fall back to requests module directly (creates new connection each time)
-        return requests  # type: ignore[return-value]
+        return requests  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
     def connect(self) -> None:
         """Connect to JMAP server and discover session."""

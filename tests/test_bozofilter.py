@@ -1,6 +1,7 @@
 """Tests for the bozofilter module."""
 
 from pathlib import Path
+from typing import cast
 
 from korgalore.bozofilter import (
     add_to_bozofilter,
@@ -160,7 +161,9 @@ class TestExtractEmailAddress:
     def test_returns_none_for_empty(self) -> None:
         """Returns None for empty input."""
         assert extract_email_address('') is None
-        assert extract_email_address(None) is None  # type: ignore[arg-type]
+        # Passing None is not part of the signature, but callers feed this
+        # straight from header lookups, so the guard has to hold.
+        assert extract_email_address(cast(str, None)) is None
 
     def test_handles_complex_names(self) -> None:
         """Handles names with special characters."""

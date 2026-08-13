@@ -1,6 +1,7 @@
 """Tests for JmapTarget message delivery."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -451,8 +452,11 @@ class TestJmapTargetTranslateFolders:
 
         assert target._mailbox_map is None
         result = target.translate_folders(["inbox"])
-        assert target._mailbox_map is not None
         assert result == ["mb-1"]
+        # Read into a fresh local: the assert above narrowed the attribute to
+        # None, and the checkers cannot see translate_folders() populate it.
+        populated: Any = target._mailbox_map
+        assert populated is not None
 
 
 class TestJmapTargetImportMessage:

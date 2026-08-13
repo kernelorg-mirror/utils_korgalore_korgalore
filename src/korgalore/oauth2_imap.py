@@ -166,7 +166,10 @@ class ImapOAuth2Authenticator:
                 # Try full re-auth in interactive mode
                 self._run_auth_flow()
 
-        if self._token is None:
+        # Pyright keeps the narrowing from the block above and so calls this
+        # check dead, but _run_auth_flow() in the except path above can leave
+        # _token unset, and this is the last stop before it is dereferenced.
+        if self._token is None:  # pyright: ignore[reportUnnecessaryComparison]
             raise AuthenticationError(
                 f"No valid token for IMAP target '{self.identifier}'.",
                 target_id=self.identifier,

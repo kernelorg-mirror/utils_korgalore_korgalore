@@ -2,6 +2,7 @@
 
 import imaplib
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -915,7 +916,10 @@ class TestImapTargetDisconnect:
         assert target.imap is None
 
         target.connect()
-        assert target.imap is not None
+        # Read into a fresh local: the assert above narrowed the attribute to
+        # None, and the checkers cannot see connect() repopulate it.
+        reconnected: Any = target.imap
+        assert reconnected is not None
         assert mock_imap_class.call_count == 2
 
 

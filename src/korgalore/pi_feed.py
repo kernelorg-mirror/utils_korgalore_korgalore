@@ -669,12 +669,12 @@ class PIFeed:
             return known_top_commit != current_top_commit
 
         # We go by epoch and return True whenever we find a changed epoch
-        for epoch in epochs:
-            known_top_commit = epochs[epoch].get('latest_commit')
+        for epoch_key in epochs:
+            known_top_commit = epochs[epoch_key].get('latest_commit')
             try:
-                current_top_commit = self.get_top_commit(epoch)
+                current_top_commit = self.get_top_commit(int(epoch_key))
             except GitError:
-                logger.warning('Could not get top commit for epoch %s, skipping.', epoch)
+                logger.warning('Could not get top commit for epoch %s, skipping.', epoch_key)
                 continue
             if known_top_commit != current_top_commit:
                 return True
@@ -706,6 +706,7 @@ class PIFeed:
         if latest_commit is None:
             latest_commit = self.get_top_commit(epoch)
 
+        state: Dict[str, Any]
         if state_file.exists():
             with open(state_file, 'r') as f:
                 state = json.load(f)
