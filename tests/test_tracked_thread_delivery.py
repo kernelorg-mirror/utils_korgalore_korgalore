@@ -6,6 +6,7 @@ can unpack them without a ValueError.
 """
 
 from pathlib import Path
+from typing import List, Optional
 from unittest.mock import MagicMock, patch
 
 import click
@@ -16,7 +17,7 @@ from korgalore.tracking import TrackedThread, TrackStatus
 
 def _make_tracked_thread(track_id: str = 'track-abc123',
                          target: str = 'local',
-                         labels: list | None = None) -> TrackedThread:
+                         labels: Optional[List[str]] = None) -> TrackedThread:
     """Create a TrackedThread with sensible defaults."""
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
@@ -54,7 +55,7 @@ class TestTrackedThreadDeliveryTuple:
     @patch('korgalore.cli.get_tracking_manifest')
     @patch('korgalore.cli.LeiFeed')
     def test_delivery_tuple_has_four_elements(
-        self, mock_lei_cls, mock_manifest, mock_target
+        self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock
     ) -> None:
         """map_tracked_threads must store (feed, target, labels, subfolder)."""
         tracked = _make_tracked_thread()
@@ -80,7 +81,7 @@ class TestTrackedThreadDeliveryTuple:
     @patch('korgalore.cli.get_tracking_manifest')
     @patch('korgalore.cli.LeiFeed')
     def test_subfolder_is_none(
-        self, mock_lei_cls, mock_manifest, mock_target
+        self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock
     ) -> None:
         """Tracked threads do not support subfolders; fourth element must be None."""
         tracked = _make_tracked_thread()
@@ -102,7 +103,7 @@ class TestTrackedThreadDeliveryTuple:
     @patch('korgalore.cli.get_tracking_manifest')
     @patch('korgalore.cli.LeiFeed')
     def test_labels_preserved(
-        self, mock_lei_cls, mock_manifest, mock_target
+        self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock
     ) -> None:
         """Labels from the tracked thread must appear in the delivery tuple."""
         tracked = _make_tracked_thread(labels=['patch-review', 'urgent'])
@@ -124,7 +125,7 @@ class TestTrackedThreadDeliveryTuple:
     @patch('korgalore.cli.get_tracking_manifest')
     @patch('korgalore.cli.LeiFeed')
     def test_tuple_unpacks_like_regular_delivery(
-        self, mock_lei_cls, mock_manifest, mock_target
+        self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock
     ) -> None:
         """The tuple must unpack as (feed, target, labels, subfolder) without error."""
         tracked = _make_tracked_thread()

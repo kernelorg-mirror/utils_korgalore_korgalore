@@ -136,8 +136,8 @@ class TestDeliveryStateInitOnClone:
     @patch('korgalore.cli.retry_all_failed_deliveries')
     @patch('korgalore.cli.update_all_feeds')
     def test_initialized_feed_gets_delivery_state(
-        self, mock_update, mock_retry, mock_unlock, mock_lock,
-        mock_tracked, mock_map, tmp_path: Path
+        self, mock_update: MagicMock, mock_retry: MagicMock, mock_unlock: MagicMock, mock_lock: MagicMock,
+        mock_tracked: MagicMock, mock_map: MagicMock, tmp_path: Path
     ) -> None:
         """save_delivery_info is called for a newly initialised feed."""
         from korgalore.cli import perform_pull
@@ -168,8 +168,8 @@ class TestDeliveryStateInitOnClone:
     @patch('korgalore.cli.retry_all_failed_deliveries')
     @patch('korgalore.cli.update_all_feeds')
     def test_existing_state_not_reinitialised(
-        self, mock_update, mock_retry, mock_unlock, mock_lock,
-        mock_tracked, mock_map, tmp_path: Path
+        self, mock_update: MagicMock, mock_retry: MagicMock, mock_unlock: MagicMock, mock_lock: MagicMock,
+        mock_tracked: MagicMock, mock_map: MagicMock, tmp_path: Path
     ) -> None:
         """If delivery state already exists, save_delivery_info is not called."""
         from korgalore.cli import perform_pull
@@ -207,8 +207,8 @@ class TestDeliveryStateInitOnClone:
     @patch('korgalore.cli.retry_all_failed_deliveries')
     @patch('korgalore.cli.update_all_feeds')
     def test_no_init_when_no_update(
-        self, mock_update, mock_retry, mock_unlock, mock_lock,
-        mock_tracked, mock_map, tmp_path: Path
+        self, mock_update: MagicMock, mock_retry: MagicMock, mock_unlock: MagicMock, mock_lock: MagicMock,
+        mock_tracked: MagicMock, mock_map: MagicMock, tmp_path: Path
     ) -> None:
         """With no_update=True, no initialisation is attempted."""
         from korgalore.cli import perform_pull
@@ -239,8 +239,8 @@ class TestDeliveryStateInitOnClone:
     @patch('korgalore.cli.retry_all_failed_deliveries')
     @patch('korgalore.cli.update_all_feeds')
     def test_multiple_deliveries_for_initialized_feed(
-        self, mock_update, mock_retry, mock_unlock, mock_lock,
-        mock_tracked, mock_map, tmp_path: Path
+        self, mock_update: MagicMock, mock_retry: MagicMock, mock_unlock: MagicMock, mock_lock: MagicMock,
+        mock_tracked: MagicMock, mock_map: MagicMock, tmp_path: Path
     ) -> None:
         """All deliveries for an initialized feed get state initialised."""
         from korgalore.cli import perform_pull
@@ -276,8 +276,8 @@ class TestDeliveryStateInitOnClone:
     @patch('korgalore.cli.retry_all_failed_deliveries')
     @patch('korgalore.cli.update_all_feeds')
     def test_unrelated_feed_not_initialized(
-        self, mock_update, mock_retry, mock_unlock, mock_lock,
-        mock_tracked, mock_map, tmp_path: Path
+        self, mock_update: MagicMock, mock_retry: MagicMock, mock_unlock: MagicMock, mock_lock: MagicMock,
+        mock_tracked: MagicMock, mock_map: MagicMock, tmp_path: Path
     ) -> None:
         """Deliveries for non-initialized feeds are not touched."""
         from korgalore.cli import perform_pull

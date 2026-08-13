@@ -448,7 +448,7 @@ class TestSubscribeAdd:
 class TestSubscribeList:
     """Tests for the subscribe list command."""
 
-    def test_list_active_and_paused(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_list_active_and_paused(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """subscribe list shows both active and paused subscriptions."""
         from korgalore.cli import subscribe_list
 
