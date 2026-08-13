@@ -9,6 +9,13 @@
 
 set -eu
 
+# The base image ships no local signing key, so archlinux-keyring's
+# post-upgrade hook prints "error: command failed to execute correctly" and
+# pacman still exits 0. Nothing is actually broken -- package signatures are
+# verified against the distro keyring either way -- but an unexplained
+# "error:" in a CI log is worth one line to remove.
+pacman-key --init >/dev/null 2>&1
+
 pacman -Syu --noconfirm --needed \
     git python python-pip \
     python-click python-click-log python-requests \
