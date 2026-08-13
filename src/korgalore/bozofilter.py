@@ -6,7 +6,7 @@ import subprocess
 from datetime import date
 from email.utils import parseaddr
 from pathlib import Path
-from typing import Set, Optional
+from typing import Optional, Set
 
 logger = logging.getLogger('korgalore')
 

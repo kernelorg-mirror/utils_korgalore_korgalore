@@ -4,6 +4,7 @@ import logging
 import mailbox
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 from korgalore import ConfigurationError
 from korgalore.message import RawMessage
 

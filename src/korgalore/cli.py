@@ -1,45 +1,58 @@
 """Command-line interface for korgalore."""
 
+import hashlib
+import logging
 import os
 import re
-import hashlib
-import uuid
-import urllib.parse
-import click
 import tomllib
-import logging
+import urllib.parse
+import uuid
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
+import click
 import click_log
 import requests
+from liblore.utils import get_msgid_from_url, parse_message, split_mbox_as_bytes
 
-from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional, Union, Callable, Set
-from korgalore.lore_feed import LoreFeed
-from korgalore.lei_feed import LeiFeed
-from korgalore.gmail_target import GmailTarget
-from korgalore.maildir_target import MaildirTarget
-from korgalore.jmap_target import JmapTarget
-from korgalore.imap_target import ImapTarget
-from korgalore.pipe_target import PipeTarget
-from korgalore import (
-    __version__, ConfigurationError, StateError, GitError,
-    RemoteError, PublicInboxError, AuthenticationError, format_key_for_display,
-    _init_git_user_agent, get_requests_session, close_requests_session,
-    make_lore_node
-)
 import liblore
-from liblore.utils import parse_message, get_msgid_from_url, split_mbox_as_bytes
-from korgalore.tracking import (
-    TrackingManifest, TrackStatus,
-    create_lei_thread_search, create_lei_query_search, update_lei_search,
-    forget_lei_search
+from korgalore import (
+    AuthenticationError,
+    ConfigurationError,
+    GitError,
+    PublicInboxError,
+    RemoteError,
+    StateError,
+    __version__,
+    _init_git_user_agent,
+    close_requests_session,
+    format_key_for_display,
+    get_requests_session,
+    make_lore_node,
 )
+from korgalore.bozofilter import add_to_bozofilter, edit_bozofilter, is_bozofied, load_bozofilter
+from korgalore.gmail_target import GmailTarget
+from korgalore.imap_target import ImapTarget
+from korgalore.jmap_target import JmapTarget
+from korgalore.lei_feed import LeiFeed
+from korgalore.lore_feed import LoreFeed
+from korgalore.maildir_target import MaildirTarget
 from korgalore.maintainers import (
-    get_subsystem, normalize_subsystem_name,
-    build_mailinglist_query, build_patches_query,
-    generate_subsystem_config, DEFAULT_CATCHALL_LISTS
+    DEFAULT_CATCHALL_LISTS,
+    build_mailinglist_query,
+    build_patches_query,
+    generate_subsystem_config,
+    get_subsystem,
+    normalize_subsystem_name,
 )
-from korgalore.bozofilter import (
-    load_bozofilter, add_to_bozofilter, edit_bozofilter, is_bozofied
+from korgalore.pipe_target import PipeTarget
+from korgalore.tracking import (
+    TrackingManifest,
+    TrackStatus,
+    create_lei_query_search,
+    create_lei_thread_search,
+    forget_lei_search,
+    update_lei_search,
 )
 
 logger = logging.getLogger('korgalore')
@@ -630,18 +643,17 @@ def normalize_feed_key(feed_url: str) -> str:
     if feed_url.startswith('https://lore.kernel.org/'):
         # Extract list name from URL
         return feed_url.replace('https://lore.kernel.org/', '').strip('/')
-    elif feed_url.startswith('lei:'):
+    if feed_url.startswith('lei:'):
         # Keep full lei path as key
         return feed_url
-    else:
-        # Sanitize URL for use as a directory name
-        url_without_scheme = feed_url.replace('https://', '').replace('http://', '')
-        sanitized = re.sub(r'[^a-zA-Z0-9_.-]', '-', url_without_scheme)
-        sanitized = sanitized.strip('-./')
-        if len(sanitized) > 200:
-            url_hash = hashlib.sha256(feed_url.encode()).hexdigest()[:16]
-            sanitized = f'feed-{url_hash}'
-        return sanitized
+    # Sanitize URL for use as a directory name
+    url_without_scheme = feed_url.replace('https://', '').replace('http://', '')
+    sanitized = re.sub(r'[^a-zA-Z0-9_.-]', '-', url_without_scheme)
+    sanitized = sanitized.strip('-./')
+    if len(sanitized) > 200:
+        url_hash = hashlib.sha256(feed_url.encode()).hexdigest()[:16]
+        sanitized = f'feed-{url_hash}'
+    return sanitized
 
 
 
@@ -743,14 +755,13 @@ def get_feed_for_delivery(delivery_details: Dict[str, Any], ctx: click.Context) 
         lore_feed = LoreFeed(feed_key, feed_dir, feed_url, lore_node=get_lore_node(ctx, feed_url))
         feeds[feed_key] = lore_feed
         return lore_feed
-    elif feed_url.startswith('lei:'):
+    if feed_url.startswith('lei:'):
         # LEI feed
         lei_feed = LeiFeed(feed_key, feed_url)
         feeds[feed_key] = lei_feed
         return lei_feed
-    else:
-        logger.critical('Unknown feed type for delivery: %s', feed_url)
-        raise ConfigurationError(f'Unknown feed type for delivery: {feed_url}')
+    logger.critical('Unknown feed type for delivery: %s', feed_url)
+    raise ConfigurationError(f'Unknown feed type for delivery: {feed_url}')
 
 
 def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
@@ -1374,14 +1385,13 @@ def perform_yank(ctx: click.Context, target_name: str, msgid_or_url: str,
                     failed += 1
 
             return uploaded, failed
-        else:
-            msgid = get_msgid_from_url(msgid_or_url)
-            raw_message = node.get_message_by_msgid(msgid)
-            msg = parse_message(raw_message)
-            subject = msg.get('Subject', '(no subject)')
-            logger.debug('Uploading: %s', subject)
-            ts.import_message(raw_message, labels=labels_list)
-            return 1, 0
+        msgid = get_msgid_from_url(msgid_or_url)
+        raw_message = node.get_message_by_msgid(msgid)
+        msg = parse_message(raw_message)
+        subject = msg.get('Subject', '(no subject)')
+        logger.debug('Uploading: %s', subject)
+        ts.import_message(raw_message, labels=labels_list)
+        return 1, 0
     finally:
         if hasattr(ts, 'disconnect'):
             ts.disconnect()
@@ -1562,7 +1572,6 @@ def update_tracked_thread_activity(ctx: click.Context, changes: Dict[str, int]) 
 @click.pass_context
 def track(ctx: click.Context) -> None:
     """Track email threads for updates via lei queries."""
-    pass
 
 
 @track.command('add')
@@ -1597,17 +1606,15 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
         if existing.status == TrackStatus.ACTIVE:
             logger.warning('Already tracking this thread as %s', existing.track_id)
             return
-        else:
-            # Offer to resume
-            logger.info('Thread previously tracked as %s (status: %s)',
-                       existing.track_id, existing.status.value)
-            if click.confirm('Resume tracking?'):
-                manifest.resume_thread(existing.track_id)
-                logger.info('Resumed tracking thread %s', existing.track_id)
-                return
-            else:
-                logger.info('Aborted.')
-                return
+        # Offer to resume
+        logger.info('Thread previously tracked as %s (status: %s)',
+                   existing.track_id, existing.status.value)
+        if click.confirm('Resume tracking?'):
+            manifest.resume_thread(existing.track_id)
+            logger.info('Resumed tracking thread %s', existing.track_id)
+            return
+        logger.info('Aborted.')
+        return
 
     # Create lei search directory
     data_dir = ctx.obj.get('data_dir', get_xdg_data_dir())
@@ -1816,7 +1823,6 @@ class DefaultCommandGroup(click.Group):
 @click.pass_context
 def subscribe(ctx: click.Context) -> None:
     """Manage mailing list subscriptions."""
-    pass
 
 
 @subscribe.command('add')

@@ -7,13 +7,14 @@ the old and new epochs.
 """
 
 import json
-import pytest
 from pathlib import Path
 from typing import List
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from korgalore.pi_feed import PIFeed
+import pytest
+
 from korgalore import GitError, PublicInboxError
+from korgalore.pi_feed import PIFeed
 
 
 class MockPIFeed(PIFeed):

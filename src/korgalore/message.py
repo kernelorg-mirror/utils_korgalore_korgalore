@@ -4,9 +4,10 @@ from email.message import EmailMessage
 from email.utils import formatdate
 from typing import Optional
 
+from liblore.utils import parse_message
+
 from korgalore import __version__
 from liblore import emlpolicy
-from liblore.utils import parse_message
 
 
 class RawMessage:
@@ -175,6 +176,5 @@ class RawMessage:
         if boundary == -1:
             # No body, append header at the end
             return message + trace_bytes
-        else:
-            # Insert header before the blank line
-            return message[:boundary + 1] + trace_bytes + message[boundary + 1:]
+        # Insert header before the blank line
+        return message[:boundary + 1] + trace_bytes + message[boundary + 1:]

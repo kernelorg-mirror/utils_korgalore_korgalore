@@ -1,16 +1,15 @@
-import os
 import logging
-from typing import Optional, List, Dict, Any
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow # type: ignore
-from googleapiclient.discovery import build # type: ignore
-from googleapiclient.errors import HttpError # type: ignore
+import os
+from typing import Any, Dict, List, Optional
 
 from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
+from googleapiclient.discovery import build  # type: ignore
+from googleapiclient.errors import HttpError  # type: ignore
 
-from korgalore import ConfigurationError, RemoteError, AuthenticationError
+from korgalore import AuthenticationError, ConfigurationError, RemoteError
 from korgalore.message import RawMessage
 
 logger = logging.getLogger('korgalore')

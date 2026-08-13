@@ -7,7 +7,7 @@ mtime update in _run_edit_config without requiring GTK or AppIndicator3.
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:
     from korgalore.gui import KorgaloreApp

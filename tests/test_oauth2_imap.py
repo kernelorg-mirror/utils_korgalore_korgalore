@@ -2,15 +2,20 @@
 
 import json
 import os
-import pytest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from korgalore import AuthenticationError, ConfigurationError
 from korgalore.oauth2_imap import (
-    OAuth2Token, ImapOAuth2Authenticator, xoauth2_callback,
-    MS_AUTH_URL, MS_TOKEN_URL, IMAP_SCOPE
+    IMAP_SCOPE,
+    MS_AUTH_URL,
+    MS_TOKEN_URL,
+    ImapOAuth2Authenticator,
+    OAuth2Token,
+    xoauth2_callback,
 )
 
 

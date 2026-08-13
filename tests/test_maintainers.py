@@ -1,22 +1,23 @@
 """Tests for MAINTAINERS file parser and query builders."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from korgalore.maintainers import (
     SubsystemEntry,
-    normalize_subsystem_name,
-    extract_email,
-    is_field_line,
-    is_subsystem_title,
-    is_simple_pattern,
-    email_to_list_id,
-    parse_maintainers,
-    get_subsystem,
-    build_maintainers_query,
     build_mailinglist_query,
+    build_maintainers_query,
     build_patches_query,
+    email_to_list_id,
+    extract_email,
     generate_subsystem_config,
+    get_subsystem,
+    is_field_line,
+    is_simple_pattern,
+    is_subsystem_title,
+    normalize_subsystem_name,
+    parse_maintainers,
 )
 
 

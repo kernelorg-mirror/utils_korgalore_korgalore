@@ -5,7 +5,7 @@ The current implementation in cli.py uses a nested loop which we want to
 optimize to use a reverse index for O(1) lookups.
 """
 
-from typing import Dict, List, Tuple, Any
+from typing import Any, Dict, List, Tuple
 from unittest.mock import MagicMock
 
 
@@ -18,7 +18,7 @@ def find_deliveries_for_updated_feeds_original(
     """
     run_deliveries: List[str] = []
     for feed_key in updated_feeds:
-        for dname in deliveries.keys():
+        for dname in deliveries:
             feed = deliveries[dname][0]
             if feed.feed_key == feed_key:
                 run_deliveries.append(dname)

@@ -11,8 +11,8 @@ import pytest
 
 from korgalore import ConfigurationError
 from korgalore.cli import map_deliveries, refresh_subfolder_templates
-from korgalore.maildir_target import MaildirTarget
 from korgalore.imap_target import ImapTarget
+from korgalore.maildir_target import MaildirTarget
 
 
 def create_mock_context(targets: Dict[str, Any]) -> click.Context:

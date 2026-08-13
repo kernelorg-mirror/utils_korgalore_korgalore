@@ -1,9 +1,10 @@
 """Tests for MaildirTarget message delivery."""
 
 import mailbox
-import pytest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from korgalore import ConfigurationError
 from korgalore.maildir_target import MaildirTarget

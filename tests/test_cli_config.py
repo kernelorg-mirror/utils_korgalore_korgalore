@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Dict, List
 
-from korgalore.cli import merge_config, load_config
+from korgalore.cli import load_config, merge_config
 from korgalore.maintainers import normalize_subsystem_name
 
 

@@ -8,14 +8,14 @@ import pytest
 
 import korgalore
 from korgalore import (
-    __version__,
-    get_requests_session,
-    close_requests_session,
-    _init_git_user_agent,
-    make_lore_node,
-    run_lei_command,
     GitError,
     PublicInboxError,
+    __version__,
+    _init_git_user_agent,
+    close_requests_session,
+    get_requests_session,
+    make_lore_node,
+    run_lei_command,
 )
 
 

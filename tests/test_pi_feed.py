@@ -7,12 +7,13 @@ These tests cover the delivery tracking functionality including:
 """
 
 import json
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from korgalore.pi_feed import PIFeed, RETRY_FAILED_INTERVAL
+import pytest
+
+from korgalore.pi_feed import RETRY_FAILED_INTERVAL, PIFeed
 
 
 class TestJSONLOperations:
@@ -315,8 +316,8 @@ class TestFeedLocking:
 
     def test_unlock_without_lock_raises_error(self, tmp_path: Path) -> None:
         """Attempting to unlock a feed that isn't locked raises an error."""
-        from korgalore.pi_feed import PIFeed
         from korgalore import PublicInboxError
+        from korgalore.pi_feed import PIFeed
 
         class TestPIFeed(PIFeed):
             def __init__(self, feed_dir: Path) -> None:
@@ -778,6 +779,7 @@ class TestDeliverBadObjectCommit:
     def test_bad_object_during_retry_records_failure(self) -> None:
         """deliver_commit marks a bad-object commit as failed, not crashed."""
         from unittest.mock import MagicMock
+
         from korgalore import GitError
         from korgalore.cli import deliver_commit
 
@@ -812,7 +814,8 @@ class TestRetryNoopDoesNotRewindPointer:
     def test_noop_retry_passes_was_failing(self) -> None:
         """deliver_commit passes was_failing to mark_successful_delivery for noops."""
         from unittest.mock import MagicMock
-        from korgalore.cli import deliver_commit, SKIPPED_NOOP_COMMIT
+
+        from korgalore.cli import SKIPPED_NOOP_COMMIT, deliver_commit
 
         feed = MagicMock()
         feed.is_noop_commit.return_value = True

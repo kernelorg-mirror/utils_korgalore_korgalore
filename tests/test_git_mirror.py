@@ -1,10 +1,9 @@
 """Tests for git mirror failover via url.insteadOf."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import click
-import pytest
 
 from korgalore import run_git_command
 from korgalore.cli import get_lore_node
@@ -219,7 +218,6 @@ class TestUpdateFeedMirror:
 
         # Mock manifest to return same epochs (triggers fetch, not clone)
         import gzip
-        import io
         manifest = {'/lkml/git/0.git': {'fingerprint': 'changed'}}
         manifest_bytes = gzip.compress(json.dumps(manifest).encode())
         mock_response = MagicMock()

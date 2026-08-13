@@ -3,11 +3,11 @@
 from pathlib import Path
 
 from korgalore.bozofilter import (
-    load_bozofilter,
     add_to_bozofilter,
     extract_email_address,
-    is_bozofied,
     get_bozofilter_path,
+    is_bozofied,
+    load_bozofilter,
 )
 
 

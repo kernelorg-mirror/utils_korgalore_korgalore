@@ -8,17 +8,21 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional, Any
+from typing import Any, Optional
 
 import click
 
-from korgalore import AuthenticationError, __version__
-from korgalore.cli import (
-    perform_pull, perform_yank, get_xdg_config_dir, validate_config_file,
-    load_config, refresh_subfolder_templates
-)
 import liblore
+from korgalore import AuthenticationError, __version__
 from korgalore.bozofilter import ensure_bozofilter_exists, load_bozofilter
+from korgalore.cli import (
+    get_xdg_config_dir,
+    load_config,
+    perform_pull,
+    perform_yank,
+    refresh_subfolder_templates,
+    validate_config_file,
+)
 from korgalore.gmail_target import GmailTarget
 from korgalore.imap_target import ImapTarget
 
@@ -28,7 +32,7 @@ HAS_GTK = False
 try:
     import gi  # type: ignore
     gi.require_version('Gtk', '3.0')
-    from gi.repository import Gtk, GLib, Gio  # type: ignore
+    from gi.repository import Gio, GLib, Gtk  # type: ignore
     # Try AppIndicator3 first, fall back to AyatanaAppIndicator3
     try:
         gi.require_version('AppIndicator3', '0.1')

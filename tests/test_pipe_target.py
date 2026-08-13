@@ -1,7 +1,8 @@
 """Tests for PipeTarget message delivery."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from korgalore import ConfigurationError, DeliveryError
 from korgalore.pipe_target import PipeTarget

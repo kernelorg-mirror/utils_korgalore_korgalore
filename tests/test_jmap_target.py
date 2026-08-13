@@ -1,13 +1,13 @@
 """Tests for JmapTarget message delivery."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 import requests
 
 from korgalore import ConfigurationError, RemoteError
 from korgalore.jmap_target import JmapTarget
-
 
 # Sample JMAP session response
 SAMPLE_SESSION = {

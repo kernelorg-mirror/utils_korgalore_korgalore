@@ -3,8 +3,8 @@ import logging
 from pathlib import Path
 from typing import List, Tuple
 
+from korgalore import ConfigurationError, GitError, PublicInboxError, StateError, run_git_command, run_lei_command
 from korgalore.pi_feed import PIFeed
-from korgalore import run_git_command, run_lei_command, GitError, PublicInboxError, ConfigurationError, StateError
 
 logger = logging.getLogger('korgalore')
 

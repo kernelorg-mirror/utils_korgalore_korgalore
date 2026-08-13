@@ -11,12 +11,12 @@ import click
 import pytest
 
 from korgalore import PublicInboxError, RemoteError
-from korgalore.lei_feed import LeiFeed
-from korgalore.lore_feed import LoreFeed
 from korgalore.cli import (
     find_subscription_file,
     generate_subscription_config,
 )
+from korgalore.lei_feed import LeiFeed
+from korgalore.lore_feed import LoreFeed
 
 
 class TestValidatePublicInboxUrl:

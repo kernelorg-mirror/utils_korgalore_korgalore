@@ -3,11 +3,12 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import requests
 
 import liblore
 from liblore import LoreNode
-import requests
-from typing import Dict, List, Optional, Tuple
 
 __version__ = "0.7-dev"
 __author__ = "Konstantin Ryabitsev"
@@ -73,31 +74,24 @@ def make_lore_node(url: str = 'https://lore.kernel.org/all',
 # Custom exceptions
 class KorgaloreError(Exception):
     """Base exception for all Korgalore errors."""
-    pass
 
 class ConfigurationError(KorgaloreError):
     """Raised when there is an error in configuration."""
-    pass
 
 class GitError(KorgaloreError):
     """Raised when there is an error with Git operations."""
-    pass
 
 class RemoteError(KorgaloreError, liblore.RemoteError):
     """Raised when there is an error communicating with remote services."""
-    pass
 
 class PublicInboxError(KorgaloreError, liblore.PublicInboxError):
     """Raised when something is wrong with Public-Inbox."""
-    pass
 
 class StateError(KorgaloreError):
     """Raised when there is an error with the internal state."""
-    pass
 
 class DeliveryError(KorgaloreError):
     """Raised when there is an error during message delivery."""
-    pass
 
 class AuthenticationError(KorgaloreError):
     """Raised when authentication fails and re-authentication is required."""

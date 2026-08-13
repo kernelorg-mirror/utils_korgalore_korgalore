@@ -2,17 +2,15 @@ import json
 import logging
 import os
 import tempfile
-
+from datetime import datetime, timezone
 from email.message import EmailMessage
+from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, lockf
 from pathlib import Path
-from korgalore import run_git_command, PublicInboxError, GitError, StateError
-from fcntl import lockf, LOCK_EX, LOCK_UN, LOCK_NB
-
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from datetime import datetime, timezone
-
 from liblore.utils import parse_message
+
+from korgalore import GitError, PublicInboxError, StateError, run_git_command
 
 logger = logging.getLogger('korgalore')
 

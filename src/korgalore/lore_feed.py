@@ -1,15 +1,13 @@
-from typing import List, Dict, Tuple, Any, Optional
-from gzip import GzipFile
-from pathlib import Path
 import io
 import json
-
 import logging
+from gzip import GzipFile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from liblore import LoreNode
-from korgalore import run_git_command, StateError, RemoteError
+from korgalore import RemoteError, StateError, run_git_command
 from korgalore.pi_feed import PIFeed
-
+from liblore import LoreNode
 
 logger = logging.getLogger('korgalore')
 

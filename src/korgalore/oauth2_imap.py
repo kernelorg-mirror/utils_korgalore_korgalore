@@ -262,7 +262,6 @@ class ImapOAuth2Authenticator:
 
             def log_message(self, format: str, *args: Any) -> None:
                 """Suppress default logging."""
-                pass
 
             def do_GET(self) -> None:
                 """Handle GET request with auth callback."""

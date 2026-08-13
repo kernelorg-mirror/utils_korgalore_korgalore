@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 import requests
 

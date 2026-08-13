@@ -1,9 +1,10 @@
 """Tests for ImapTarget message delivery."""
 
 import imaplib
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from korgalore import ConfigurationError, RemoteError
 from korgalore.imap_target import ImapTarget

@@ -1,11 +1,12 @@
 """Tests for GmailTarget message delivery."""
 
 import base64
+from unittest.mock import MagicMock, mock_open, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
 
 from korgalore import ConfigurationError, RemoteError
-from korgalore.gmail_target import GmailTarget, SCOPES
+from korgalore.gmail_target import SCOPES, GmailTarget
 
 
 class TestGmailTargetInit:

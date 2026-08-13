@@ -1,9 +1,10 @@
 """Service for delivering messages by piping to an external command."""
 
 import logging
-import subprocess
 import shlex
+import subprocess
 from typing import Any, List, Optional
+
 from korgalore import ConfigurationError, DeliveryError
 from korgalore.message import RawMessage
 

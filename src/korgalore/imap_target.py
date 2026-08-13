@@ -1,9 +1,9 @@
 """Service for delivering messages to IMAP mail servers."""
 
-import logging
 import imaplib
+import logging
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple, cast
 
 from korgalore import ConfigurationError, RemoteError
 from korgalore.message import RawMessage
@@ -76,7 +76,7 @@ class ImapTarget:
         if auth_type == 'oauth2':
             # OAuth2 authentication
             # Import here to avoid circular imports and optional dependency issues
-            from korgalore.oauth2_imap import ImapOAuth2Authenticator, DEFAULT_CLIENT_ID
+            from korgalore.oauth2_imap import DEFAULT_CLIENT_ID, ImapOAuth2Authenticator
 
             # Use default client_id if not specified
             effective_client_id = client_id if client_id else DEFAULT_CLIENT_ID
