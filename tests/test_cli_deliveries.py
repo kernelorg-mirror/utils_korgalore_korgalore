@@ -57,8 +57,8 @@ class TestSubfolderTemplateMaildir:
         _, _, _, subfolder = ctx.obj['deliveries']['test-delivery']
         # Should match YYYY/MM format
         assert re.match(r'^\d{4}/\d{2}$', subfolder)
-        # Should be current date
-        expected = datetime.now().strftime('%Y/%m')
+        # Should be current date, expanded the same way production does
+        expected = datetime.now().astimezone().strftime('%Y/%m')
         assert subfolder == expected
 
     def test_strftime_template_stored_for_refresh(self, tmp_path: Path) -> None:
@@ -108,13 +108,16 @@ class TestSubfolderTemplateMaildir:
 
         # Get initial expanded value
         _, _, _, initial_subfolder = ctx.obj['deliveries']['test-delivery']
+        assert re.match(r'^\d{4}-\d{2}-\d{2}_\d{2}$', initial_subfolder)
 
         # Refresh should re-expand (will be same if run immediately)
         refresh_subfolder_templates(ctx)
 
         _, _, _, refreshed_subfolder = ctx.obj['deliveries']['test-delivery']
-        # Should still match the pattern
+        # Should still match the pattern, and re-expanding the stored template
+        # must not have degraded it to the raw '%Y-%m-%d_%H' string.
         assert re.match(r'^\d{4}-\d{2}-\d{2}_\d{2}$', refreshed_subfolder)
+        assert refreshed_subfolder == initial_subfolder
 
     def test_invalid_strftime_format_raises(self, tmp_path: Path) -> None:
         """Invalid strftime format raises ConfigurationError."""

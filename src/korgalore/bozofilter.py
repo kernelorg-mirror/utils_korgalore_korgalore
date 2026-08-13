@@ -3,7 +3,7 @@
 import logging
 import os
 import subprocess
-from datetime import date
+from datetime import datetime
 from email.utils import parseaddr
 from pathlib import Path
 from typing import Optional, Set
@@ -74,7 +74,7 @@ def add_to_bozofilter(config_dir: Path, addresses: list[str],
     # Prepare new entries
     added = 0
     new_lines: list[str] = []
-    today = date.today().isoformat()
+    today = datetime.now().astimezone().date().isoformat()
 
     for addr in addresses:
         addr_lower = addr.lower().strip()

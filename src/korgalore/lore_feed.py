@@ -134,7 +134,7 @@ class LoreFeed(PIFeed):
         gitdir = self.get_gitdir(epoch)
         # does tgt_dir exist?
         if Path(gitdir).exists():
-            logger.debug(f"Target directory {gitdir} already exists, skipping clone.")
+            logger.debug('Target directory %s already exists, skipping clone.', gitdir)
             return
 
         repo_url = f"{self.feed_url.rstrip('/')}/git/{epoch}.git"
@@ -144,14 +144,14 @@ class LoreFeed(PIFeed):
         gitargs += [repo_url, str(gitdir)]
 
         mirror_config = self._git_mirror_config()
-        retcode, output, error = run_git_command(None, gitargs, git_config=mirror_config)
+        retcode, _output, error = run_git_command(None, gitargs, git_config=mirror_config)
         if retcode != 0 and shallow:
             # Shallow clone with --shallow-since can fail for dormant lists
             # that have no commits in the time window. Fall back to --depth=1
             # which always succeeds regardless of commit dates.
             logger.debug('Shallow clone failed, retrying with --depth=1: %s', error.decode())
             gitargs = ['clone', '--mirror', '--depth=1', repo_url, str(gitdir)]
-            retcode, output, error = run_git_command(None, gitargs, git_config=mirror_config)
+            retcode, _output, error = run_git_command(None, gitargs, git_config=mirror_config)
         if retcode != 0:
             raise RemoteError(f"Git clone failed (exit {retcode}): {error.decode()}")
 
@@ -168,7 +168,7 @@ class LoreFeed(PIFeed):
                 fpr = str(manifest[epoch_path]['fingerprint'])
                 epochs.append((epoch_num, epoch_path, fpr))
             except ValueError:
-                logger.warning(f"Invalid epoch string: {epoch_str} in {self.feed_url}")
+                logger.warning('Invalid epoch string: %s in %s', epoch_str, self.feed_url)
         # Sort epochs by their numeric value
         epochs.sort(key=lambda x: x[0])
         self.store_epochs_info(epochs)
@@ -227,19 +227,19 @@ class LoreFeed(PIFeed):
 
         # What is our highest epoch?
         highest_local_epoch = max(int(e) for e in feed_state['epochs'])
-        logger.debug(f"Highest local epoch: {highest_local_epoch}")
+        logger.debug('Highest local epoch: %s', highest_local_epoch)
         gitdir = self.get_gitdir(highest_local_epoch)
         # Pull the latest changes
         mirror_config = self._git_mirror_config()
         gitargs = ['fetch', 'origin', '--shallow-since=1.week.ago', '--update-shallow']
-        retcode, output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
+        retcode, _output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
         if retcode != 0:
             # Shallow fetch with --shallow-since can fail for dormant lists
             # that have no commits in the time window. Fall back to --depth=1
             # which always succeeds regardless of commit dates.
             logger.debug('Shallow fetch failed, retrying with --depth=1: %s', error.decode())
             gitargs = ['fetch', 'origin', '--depth=1', '--update-shallow']
-            retcode, output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
+            retcode, _output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
         if retcode != 0:
             raise RemoteError(f"Git fetch failed (exit {retcode}): {error.decode()}")
 

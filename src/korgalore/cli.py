@@ -673,7 +673,7 @@ def generate_subscription_config(feed_key: str, url: str,
     from datetime import datetime
 
     labels_str = ', '.join(f"'{label}'" for label in labels)
-    timestamp = datetime.now().isoformat(timespec='seconds')
+    timestamp = datetime.now().astimezone().isoformat(timespec='seconds')
 
     # Determine the URL value to write
     if url.startswith(('https:', 'http:')):
@@ -804,7 +804,7 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
                     try:
                         # Validate the strftime template and store original for refresh
                         templates[delivery_name] = subfolder
-                        subfolder = datetime.now().strftime(subfolder)
+                        subfolder = datetime.now().astimezone().strftime(subfolder)
                         logger.debug('Expanded subfolder template to: %s', subfolder)
                     except ValueError as e:
                         raise ConfigurationError(
@@ -846,7 +846,7 @@ def refresh_subfolder_templates(ctx: click.Context) -> None:
         if delivery_name not in deliveries:
             continue
         feed, target, labels, _ = deliveries[delivery_name]
-        new_subfolder = datetime.now().strftime(template)
+        new_subfolder = datetime.now().astimezone().strftime(template)
         deliveries[delivery_name] = (feed, target, labels, new_subfolder)
         logger.debug('Refreshed subfolder template for %s: %s', delivery_name, new_subfolder)
 
@@ -1154,9 +1154,9 @@ def labels(ctx: click.Context, target: str, ids: bool = False) -> None:
         logger.info('Available labels:')
         for label in labels_list:
             if ids:
-                logger.info(f"  - {label['name']} (ID: {label['id']})")
+                logger.info('  - %s (ID: %s)', label['name'], label['id'])
             else:
-                logger.info(f"  - {label['name']}")
+                logger.info('  - %s', label['name'])
 
     except Exception as e:
         logger.critical('Failed to fetch labels: %s', str(e))

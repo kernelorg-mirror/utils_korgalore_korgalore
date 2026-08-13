@@ -280,12 +280,12 @@ class TestDefaultCommandGroup:
             pass
 
         # A known command resolves normally
-        cmd_name, cmd, args = group.resolve_command(
+        cmd_name, _cmd, args = group.resolve_command(
             click.Context(group), ['list'])
         assert cmd_name == 'list'
 
         # An unknown token falls back to 'add'
-        cmd_name, cmd, args = group.resolve_command(
+        cmd_name, _cmd, args = group.resolve_command(
             click.Context(group), ['https://lore.kernel.org/lkml/'])
         assert cmd_name == 'add'
         assert args == ['https://lore.kernel.org/lkml/']

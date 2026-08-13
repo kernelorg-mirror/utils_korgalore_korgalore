@@ -200,7 +200,7 @@ class PIFeed:
             return branch_name
 
         # Last fallback: assume 'master'
-        logger.warning(f"Could not detect default branch in {gitdir}, falling back to 'master'")
+        logger.warning("Could not detect default branch in %s, falling back to 'master'", gitdir)
         branch_name = 'master'
         self._branch_cache[gitdir_str] = branch_name
         return branch_name
@@ -219,7 +219,7 @@ class PIFeed:
                     epoch_num = int(epoch_str)
                     existing_epochs.append(epoch_num)
                 except ValueError:
-                    logger.debug(f"Invalid epoch directory: {item.name}")
+                    logger.debug('Invalid epoch directory: %s', item.name)
         if not existing_epochs:
             raise PublicInboxError(f"No existing epochs found in {epochs_dir}.")
         return sorted(existing_epochs)
@@ -258,7 +258,7 @@ class PIFeed:
         if not commit_date_str:
             raise StateError(f"No commit_date found in the state file for {delivery_name}.")
         commit_date = datetime.strptime(commit_date_str, '%Y-%m-%d %H:%M:%S %z')
-        logger.debug(f"Last processed commit date: {commit_date.isoformat()}")
+        logger.debug('Last processed commit date: %s', commit_date.isoformat())
         # Try to find the new hash of this commit in the log by matching the subject and
         # message-id.
         gitdir = self.get_gitdir(epoch)
@@ -285,7 +285,7 @@ class PIFeed:
             subject = msg.get('Subject', '(no subject)')
             msgid = msg.get('Message-ID', '(no message-id)')
             if subject == info.get('subject') and msgid == info.get('msgid'):
-                logger.debug(f"Found matching commit: {commit}")
+                logger.debug('Found matching commit: %s', commit)
                 last_commit = commit
                 break
         if not last_commit:
@@ -314,7 +314,7 @@ class PIFeed:
         # Grab the highest epoch we know about
         known_epochs = [int(e) for e in dinfo.get('epochs', {})]
         highest_known_epoch = max(known_epochs)
-        logger.debug(f"Highest known epoch for delivery {delivery_name}: {highest_known_epoch}")
+        logger.debug('Highest known epoch for delivery %s: %s', delivery_name, highest_known_epoch)
         since_commit = dinfo['epochs'][str(highest_known_epoch)]['last']
 
         # is this still a valid commit?
@@ -324,7 +324,7 @@ class PIFeed:
         if retcode != 0:
             # The commit is not valid anymore, so try to find the latest commit by other
             # means.
-            logger.debug(f"Since commit {since_commit} not found, trying to recover after rebase.")
+            logger.debug('Since commit %s not found, trying to recover after rebase.', since_commit)
             since_commit = self.recover_after_rebase(delivery_name, highest_known_epoch)
         gitargs = ['rev-list', '--reverse', f'{since_commit}..HEAD']
         retcode, output, error = run_git_command(str(gitdir), gitargs)
@@ -338,7 +338,7 @@ class PIFeed:
         # Now check if the underlying repo has rolled over to the new epoch
         highest_found_epoch = self.get_highest_epoch()
         if highest_found_epoch > highest_known_epoch:
-            logger.debug(f"New epoch detected: {highest_found_epoch}")
+            logger.debug('New epoch detected: %s', highest_found_epoch)
             # Get all commits in this epoch
             commits = self.get_all_commits_in_epoch(highest_found_epoch)
             if commits:

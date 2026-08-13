@@ -395,7 +395,7 @@ class TestBuildPatchesQuery:
             files=["drivers/"],
             excluded=["drivers/staging/"],
         )
-        query, skipped = build_patches_query(entry, "30.days.ago")
+        query, _skipped = build_patches_query(entry, "30.days.ago")
         assert query is not None
         assert "dfn:drivers/" in query
         assert "NOT dfn:drivers/staging/" in query
@@ -470,7 +470,7 @@ class TestBuildPatchesQuery:
             name="TEST",
             files=["drivers/test/"],
         )
-        query, skipped = build_patches_query(entry, "30.days.ago")
+        query, _skipped = build_patches_query(entry, "30.days.ago")
         assert query == "dfn:drivers/test/ AND d:30.days.ago.."
 
     def test_multiple_patterns_with_parens(self) -> None:
@@ -479,7 +479,7 @@ class TestBuildPatchesQuery:
             name="TEST",
             files=["drivers/a/", "drivers/b/"],
         )
-        query, skipped = build_patches_query(entry, "30.days.ago")
+        query, _skipped = build_patches_query(entry, "30.days.ago")
         assert query is not None
         assert "(dfn:drivers/a/ OR dfn:drivers/b/)" in query
 
