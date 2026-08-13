@@ -24,28 +24,12 @@ from korgalore.cli import (
     validate_config_file,
 )
 from korgalore.gmail_target import GmailTarget
-from korgalore.imap_target import ImapTarget
 
-# Optional GTK/AppIndicator3 support - checked at runtime
-# AppIndicator3 is called AyatanaAppIndicator3 on some systems (e.g., Debian)
-HAS_GTK = False
-try:
-    import gi  # type: ignore
-    gi.require_version('Gtk', '3.0')
-    from gi.repository import Gio, GLib, Gtk  # type: ignore
-    # Try AppIndicator3 first, fall back to AyatanaAppIndicator3
-    try:
-        gi.require_version('AppIndicator3', '0.1')
-        from gi.repository import AppIndicator3
-    except ValueError:
-        gi.require_version('AyatanaAppIndicator3', '0.1')
-        from gi.repository import AyatanaAppIndicator3 as AppIndicator3
-    HAS_GTK = True
-except (ValueError, ImportError):
-    Gtk = None
-    GLib = None
-    Gio = None
-    AppIndicator3 = None
+# Optional GTK/AppIndicator3 support, resolved at import time by gtk_compat,
+# which also handles the AyatanaAppIndicator3 naming used on some systems.
+# All four namespaces are None unless HAS_GTK is True.
+from korgalore.gtk_compat import HAS_GTK, AppIndicator3, Gio, GLib, Gtk
+from korgalore.imap_target import ImapTarget
 
 logger = logging.getLogger('korgalore.gui')
 
