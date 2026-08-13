@@ -277,8 +277,12 @@ class PIFeed:
             latest_commit = self.get_top_commit(epoch)
             return latest_commit
 
-        last_commit = ''
         first_commit = possible_commits[0]
+        last_commit = ''
+        # Holds the parsed message for whichever commit we settle on. Tracking
+        # it separately from the loop variable keeps it unambiguously bound on
+        # both paths out of the loop.
+        matched_msg: Optional[EmailMessage] = None
         for commit in possible_commits:
             raw_message = self.get_message_at_commit(epoch, commit)
             msg = parse_message(raw_message)
@@ -287,17 +291,18 @@ class PIFeed:
             if subject == info.get('subject') and msgid == info.get('msgid'):
                 logger.debug('Found matching commit: %s', commit)
                 last_commit = commit
+                matched_msg = msg
                 break
-        if not last_commit:
+        if matched_msg is None:
             logger.error("Could not find exact commit after rebase.")
             logger.error("Returning first possible commit after date: %s", first_commit)
             last_commit = first_commit
             raw_message = self.get_message_at_commit(epoch, last_commit)
-            msg = parse_message(raw_message)
+            matched_msg = parse_message(raw_message)
         else:
             logger.debug("Recovered exact matching commit after rebase: %s", last_commit)
 
-        self.save_delivery_info(delivery_name, epoch, latest_commit=last_commit, message=msg)
+        self.save_delivery_info(delivery_name, epoch, latest_commit=last_commit, message=matched_msg)
         return last_commit
 
     def get_latest_commits_for_delivery(self, delivery_name: str) -> List[Tuple[int, str]]:
@@ -580,6 +585,12 @@ class PIFeed:
         if retcode != 0:
             raise GitError(f"Git show failed (exit {retcode}): {error.decode()}")
         commit_date = output.decode()
+        # Seed both fields, because neither branch below is guaranteed to set
+        # them: a commit whose 'm' file exists but is empty is not a no-op, so
+        # get_message_at_commit() returns b'' and the parsing block is skipped
+        # entirely. The state file needs both keys regardless.
+        subject = '(no subject)'
+        msgid = '(no message-id)'
         if not message and self.is_noop_commit(epoch, latest_commit):
             subject = '(noop)'
             msgid = '(noop)'

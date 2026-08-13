@@ -851,3 +851,75 @@ class TestRetryNoopDoesNotRewindPointer:
         with patch.object(mock_feed, "save_delivery_info") as mock_save:
             mock_feed.mark_successful_delivery("test-delivery", 0, "abc123", was_failing=False)
             mock_save.assert_called_once()
+
+
+class TestSaveDeliveryInfoEmptyMessage:
+    """Regression: save_delivery_info must not crash on an empty 'm' blob.
+
+    A commit whose tree contains an 'm' file is not a no-op, so
+    save_delivery_info() falls through to get_message_at_commit(). If that
+    blob happens to be empty, the returned bytes are falsy and the block
+    that derives 'subject' and 'msgid' is skipped, which used to leave both
+    names unbound and raise UnboundLocalError while writing the state file.
+    """
+
+    def _make_feed(self, feed_dir: Path) -> PIFeed:
+        class TestPIFeed(PIFeed):
+            def __init__(self, fd: Path) -> None:
+                super().__init__(feed_key="test-feed", feed_dir=fd)
+                self.feed_type = "test"
+
+            def get_subject_at_commit(self, epoch: int, commit_hash: str) -> str:
+                return f"Test subject for {commit_hash}"
+
+            def get_highest_epoch(self) -> int:
+                return 0
+
+        return TestPIFeed(feed_dir)
+
+    def _repo_with_empty_m(self, gitdir: Path) -> str:
+        """Create a bare repo whose HEAD commit has an empty 'm' file."""
+        import subprocess
+        import tempfile
+
+        subprocess.run(['git', 'init', '--bare', str(gitdir)],
+                       check=True, capture_output=True)
+        with tempfile.TemporaryDirectory() as work:
+            subprocess.run(['git', 'clone', str(gitdir), work],
+                           check=True, capture_output=True)
+            # An 'm' that exists but is zero bytes: not a no-op commit, yet
+            # nothing to parse a Subject or Message-ID out of.
+            (Path(work) / 'm').write_bytes(b'')
+            subprocess.run(['git', '-C', work, 'add', '-A'],
+                           check=True, capture_output=True)
+            subprocess.run(
+                ['git', '-C', work,
+                 '-c', 'user.name=Test', '-c', 'user.email=test@test',
+                 'commit', '-m', 'empty message blob'],
+                check=True, capture_output=True)
+            subprocess.run(['git', '-C', work, 'push'],
+                           check=True, capture_output=True)
+            result = subprocess.run(['git', '-C', work, 'rev-parse', 'HEAD'],
+                                    check=True, capture_output=True, text=True)
+            return result.stdout.strip()
+
+    def test_empty_message_blob_writes_placeholder_state(self, tmp_path: Path) -> None:
+        """State is written with placeholders instead of raising."""
+        feed_dir = tmp_path / "test-feed"
+        feed_dir.mkdir()
+        gitdir = feed_dir / "git" / "0.git"
+        gitdir.mkdir(parents=True)
+        commit = self._repo_with_empty_m(gitdir)
+
+        feed = self._make_feed(feed_dir)
+        # The commit carries an 'm', so it must not be treated as a no-op.
+        assert feed.is_noop_commit(0, commit) is False
+
+        feed.save_delivery_info('test-delivery', 0, latest_commit=commit)
+
+        state = json.loads(
+            (feed_dir / 'korgalore.test-delivery.info').read_text())
+        entry = state['epochs']['0']
+        assert entry['last'] == commit
+        assert entry['subject'] == '(no subject)'
+        assert entry['msgid'] == '(no message-id)'
