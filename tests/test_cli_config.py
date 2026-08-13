@@ -3,7 +3,10 @@
 from pathlib import Path
 from typing import Any, Dict, List
 
-from korgalore.cli import load_config, merge_config
+import click
+import pytest
+
+from korgalore.cli import load_config, merge_config, resolve_target_name
 from korgalore.maintainers import normalize_subsystem_name
 
 
@@ -392,3 +395,30 @@ class TestTrackSubsystemList:
         if not display_name:
             display_name = 'amd_gpu'.replace('_', ' ').upper()
         assert display_name == 'AMD GPU'
+
+
+class TestResolveTargetName:
+    """Tests for resolve_target_name, the shared --target default helper."""
+
+    def test_explicit_known_target_passes_through(self) -> None:
+        """A configured target name is returned unchanged."""
+        targets: Dict[str, Any] = {'first': {}, 'second': {}}
+        assert resolve_target_name('second', targets) == 'second'
+
+    def test_omitted_target_uses_first_configured(self) -> None:
+        """None falls back to the first target in configuration order."""
+        targets: Dict[str, Any] = {'first': {}, 'second': {}}
+        assert resolve_target_name(None, targets) == 'first'
+
+    def test_unknown_target_aborts(self) -> None:
+        """An explicit but unconfigured target is a user error."""
+        with pytest.raises(click.Abort):
+            resolve_target_name('nope', {'first': {}})
+
+    def test_no_targets_configured_aborts(self) -> None:
+        """With nothing configured there is no default to fall back to.
+
+        This used to raise IndexError from list(targets.keys())[0].
+        """
+        with pytest.raises(click.Abort):
+            resolve_target_name(None, {})

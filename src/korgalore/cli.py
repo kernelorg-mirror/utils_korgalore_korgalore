@@ -181,6 +181,33 @@ def get_xdg_config_dir() -> Path:
     return korgalore_config_dir
 
 
+def resolve_target_name(target: Optional[str], targets: Dict[str, Any]) -> str:
+    """Return the target name to use, defaulting to the first one configured.
+
+    Click passes None for an omitted --target, so every command taking one
+    has to fall back to the first configured target. Returning a plain str
+    saves each caller from re-proving the value is not None.
+
+    Raises:
+        click.Abort: if the named target is unknown, or if none are
+            configured and there is therefore nothing to default to.
+    """
+    if target:
+        if target not in targets:
+            logger.critical('Target "%s" not found in configuration.', target)
+            logger.critical('Known targets: %s', ', '.join(targets.keys()))
+            raise click.Abort()
+        return target
+
+    if not targets:
+        logger.critical('No targets are configured, so no default is available.')
+        raise click.Abort()
+
+    default = next(iter(targets))
+    logger.info('Using default target: %s', default)
+    return default
+
+
 def get_target(ctx: click.Context, identifier: str) -> Any:
     """Get or create a target service instance by identifier."""
     if identifier in ctx.obj['targets']:
@@ -1413,10 +1440,7 @@ def yank(ctx: click.Context, target: Optional[str],
     config = ctx.obj.get('config', {})
     targets = config.get('targets', {})
 
-    # Auto-select target if not specified (use first configured target)
-    if not target:
-        target = list(targets.keys())[0]
-        logger.info('Using default target: %s', target)
+    target = resolve_target_name(target, targets)
 
     try:
         ts = get_target(ctx, target)
@@ -1586,14 +1610,7 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
     config = ctx.obj.get('config', {})
     targets = config.get('targets', {})
 
-    # Auto-select target if not specified (use first configured target)
-    if not target:
-        target = list(targets.keys())[0]
-        logger.info('Using default target: %s', target)
-    elif target not in targets:
-        logger.critical('Target "%s" not found in configuration.', target)
-        logger.critical('Known targets: %s', ', '.join(targets.keys()))
-        raise click.Abort()
+    target = resolve_target_name(target, targets)
 
     # Extract message ID from URL if needed
     msgid = get_msgid_from_url(msgid_or_url)
@@ -1841,14 +1858,7 @@ def subscribe_add(ctx: click.Context, url: str, target: Optional[str],
     config = ctx.obj.get('config', {})
     targets = config.get('targets', {})
 
-    # Auto-select target if not specified (use first configured target)
-    if not target:
-        target = list(targets.keys())[0]
-        logger.info('Using default target: %s', target)
-    elif target not in targets:
-        logger.critical('Target "%s" not found in configuration.', target)
-        logger.critical('Known targets: %s', ', '.join(targets.keys()))
-        raise click.Abort()
+    target = resolve_target_name(target, targets)
 
     # Determine feed type and validate
     try:
@@ -2248,14 +2258,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
         catchall_lists = set(DEFAULT_CATCHALL_LISTS)
     targets = config.get('targets', {})
 
-    # Auto-select target if not specified (use first configured target)
-    if not target:
-        target = list(targets.keys())[0]
-        logger.info('Using default target: %s', target)
-    elif target not in targets:
-        logger.critical('Target "%s" not found in configuration.', target)
-        logger.critical('Known targets: %s', ', '.join(targets.keys()))
-        raise click.Abort()
+    target = resolve_target_name(target, targets)
 
     # Get target instance for default labels
     target_service = get_target(ctx, target)
