@@ -126,6 +126,16 @@ class GmailTarget:
             logger.debug('Connecting to Gmail service for %s', self.identifier)
             self.service = build('gmail', 'v1', credentials=self.creds, cache_discovery=False)
 
+    def _api(self) -> Any:
+        """Return the connected Gmail API service, connecting first if needed.
+
+        googleapiclient is untyped, so self.service can only be Optional[Any].
+        Going through here keeps the None out of the call chains below without
+        a suppression at every use site.
+        """
+        self.connect()
+        return self.service
+
     def list_labels(self) -> List[Dict[str, str]]:
         """List all labels in the user's mailbox.
 
@@ -133,9 +143,9 @@ class GmailTarget:
             List of label objects
         """
         try:
-            results = self.service.users().labels().list(userId='me').execute()  # type: ignore
-            labels = results.get('labels', [])
-            return labels  # type: ignore
+            results = self._api().users().labels().list(userId='me').execute()
+            labels: List[Dict[str, str]] = results.get('labels', [])
+            return labels
 
         except HttpError as error:
             raise RemoteError(f'An error occurred: {error}') from error
@@ -199,14 +209,7 @@ class GmailTarget:
                 message_body['labelIds'] = label_ids
 
             # Upload the message
-            result = (
-                self.service.users()
-                .messages()
-                .import_(  # type: ignore
-                    userId='me', body=message_body
-                )
-                .execute()
-            )
+            result = self._api().users().messages().import_(userId='me', body=message_body).execute()
 
             return result
 
