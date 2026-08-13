@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -92,15 +92,19 @@ class JmapTarget:
                 timeout=self.timeout
             )
             response.raise_for_status()
-            self.session = response.json()
         except requests.RequestException as e:
             raise RemoteError(
                 f"Failed to discover JMAP session at {session_url}: {e}"
             ) from e
 
+        # Bound to a local of known type as well as to the attribute, so the
+        # lookups below do not have to defeat the attribute's Optional.
+        session: Dict[str, Any] = response.json()
+        self.session = session
+
         # Extract endpoints and account
-        self.api_url = self.session.get('apiUrl')
-        upload_url_template = self.session.get('uploadUrl')
+        self.api_url = session.get('apiUrl')
+        upload_url_template = session.get('uploadUrl')
 
         if not self.api_url or not upload_url_template:
             raise RemoteError(
@@ -108,7 +112,7 @@ class JmapTarget:
             )
 
         # Find account by username
-        accounts = self.session.get('accounts', {})
+        accounts = session.get('accounts', {})
         for acc_id, acc_info in accounts.items():
             if acc_info.get('name') == self.username:
                 self.account_id = acc_id
@@ -151,10 +155,8 @@ class JmapTarget:
             if not blob_id or not isinstance(blob_id, str):
                 raise RemoteError(f"No blobId in upload response: {result}")
 
-            # mypy needs explicit cast after isinstance check
-            blob_id_str = cast(str, blob_id)
-            logger.debug('Uploaded blob: %s (%d bytes)', blob_id_str, len(raw_message))
-            return blob_id_str
+            logger.debug('Uploaded blob: %s (%d bytes)', blob_id, len(raw_message))
+            return blob_id
         except requests.RequestException as e:
             raise RemoteError(f"Failed to upload message blob: {e}") from e
 

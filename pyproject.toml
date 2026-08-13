@@ -152,3 +152,9 @@ all = "error"
 # fallback (typing.override is 3.12+), which is too much weight for a style
 # rule. Revisit if/when the supported Python floor moves to 3.12.
 missing-override-decorator = "ignore"
+# We run three type checkers, and they disagree about which third-party
+# modules carry usable type information. ty resolves google-auth and
+# googleapiclient fine, so it sees the "type: ignore" comments those imports
+# need for mypy and pyright as redundant. Whether a suppression is unused is
+# not a question one checker out of three can answer on its own.
+unused-type-ignore-comment = "ignore"

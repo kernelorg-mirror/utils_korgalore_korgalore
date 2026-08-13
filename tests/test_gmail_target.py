@@ -410,7 +410,7 @@ class TestGmailTargetImportMessage:
         target = self._create_target_with_service()
         assert target.service is not None
 
-        from googleapiclient.errors import HttpError
+        from googleapiclient.errors import HttpError  # type: ignore
         mock_response = MagicMock()
         mock_response.status = 500
         target.service.users().messages().import_().execute.side_effect = HttpError(

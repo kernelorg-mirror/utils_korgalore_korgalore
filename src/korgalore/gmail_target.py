@@ -1,8 +1,9 @@
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from google.auth.exceptions import RefreshError
+from google.auth.external_account_authorized_user import Credentials as ExternalAccountCredentials
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
@@ -22,6 +23,12 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.labels',
     'https://www.googleapis.com/auth/gmail.insert',
     ]
+
+# InstalledAppFlow.run_local_server() returns either flavour depending on what
+# the client_secrets file describes. Both expose the valid/expired/refresh_token
+# attributes and the to_json() and refresh() methods used below, so the code
+# does not care which one it gets -- but the declared type has to allow both.
+GmailCredentials = Union[Credentials, ExternalAccountCredentials]
 
 
 class GmailTarget:
@@ -46,7 +53,7 @@ class GmailTarget:
                                or if interactive=False and no token exists.
         """
         self.identifier = identifier
-        self.creds: Optional[Credentials] = None
+        self.creds: Optional[GmailCredentials] = None
         self.service: Optional[Any] = None
         self._label_map: Optional[Dict[str, str]] = None
         # Store expanded paths for potential re-authentication
@@ -68,7 +75,7 @@ class GmailTarget:
         """
         # The file token.json stores the user's access and refresh tokens
         if os.path.exists(self._token_file):
-            self.creds = Credentials.from_authorized_user_file(self._token_file, SCOPES) # type: ignore
+            self.creds = Credentials.from_authorized_user_file(self._token_file, SCOPES)  # type: ignore
 
         # If there are no (valid) credentials available, let the user log in
         if not self.creds or not self.creds.valid:
