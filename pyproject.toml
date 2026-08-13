@@ -27,7 +27,11 @@ dependencies = [
     "google-auth>=2.0.0",
     "google-auth-oauthlib>=1.0.0",
     "google-auth-httplib2>=0.1.0",
-    "google-api-python-client>=2.0.0",
+    # 2.34.0 is the first release that stopped importing pkg_resources at
+    # module scope. Anything older fails to import on a modern venv, where
+    # setuptools is not installed by default. Found by ci-matrix.sh's
+    # floor lane; do not lower this without re-running it.
+    "google-api-python-client>=2.34.0",
     "click>=8.3.0",
     "click-log>=0.4.0",
     "liblore>=0.9.0",
