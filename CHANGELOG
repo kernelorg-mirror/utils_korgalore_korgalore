@@ -56,10 +56,72 @@ Refactoring
   - Removed ``set_user_agent_id()`` in favor of reading
     ``lore.useragentplus`` via ``LoreNode.user_agent_plus`` property
 
-* Requires liblore >= 0.7.0 (was >= 0.4.0)
+* Requires liblore >= 0.9.0 (was >= 0.4.0)
+
+* Requires google-api-python-client >= 2.34.0 (was >= 2.0.0)
+
+  - Releases before 2.34.0 import ``pkg_resources`` at module scope, which
+    fails on any environment without setuptools installed -- the default for
+    modern virtual environments -- making every Gmail target import fail
+  - The old bound was never exercised, since dependency resolution always
+    picked a much newer release
+
+Bug Fixes
+~~~~~~~~~
+
+* Fix ``UnboundLocalError`` when a public-inbox commit has an empty message
+  blob
+
+  - ``save_delivery_info()`` only bound its message variable inside a
+    conditional, so a commit carrying an ``m`` object with no content
+    crashed instead of being skipped
+
+* Fix epoch comparison in ``feed_updated()`` using the wrong type
+
+  - The loop reused the function's ``epoch`` parameter as its variable while
+    iterating over state keys, passing a string to ``get_top_commit()``,
+    which expects an integer
+
+* Fix ``IndexError`` when a command defaults ``--target`` with no targets
+  configured
+
+  - The fallback indexed the first configured target without checking that
+    any existed; it now reports the problem and aborts cleanly
+  - The default-target logic was duplicated across ``yank``, ``track add``,
+    ``subscribe add`` and ``track-subsystem``, and is now shared
+
+Development
+~~~~~~~~~~~
+
+* Add ``ci.sh``, running ruff format, ruff check, ty, mypy, pyright and
+  pytest as separately numbered gates
+
+  - The tree is now clean under all three type checkers and ``ruff format``
+  - Fixing the reported problems is what surfaced the three bugs above
+
+* Add ``ci-matrix.sh``, sweeping Python 3.11 through 3.14 plus a lane that
+  installs the project at its declared minimum dependency versions
+
+  - The floor lane is what caught the ``google-api-python-client`` bound
+
+* Add ``distro-matrix.sh``, running the suite inside Fedora, AlmaLinux,
+  Debian stable and Arch containers with dependencies taken from each
+  distro's own packages
+
+  - Covers versions that sit *below* our declared floors, which no
+    uv-resolved lane can see
+  - Known gap it revealed: korgalore does not yet run on stock Debian
+    stable or EL10, whose click predates the ``progressbar(hidden=...)``
+    keyword used by ``kgl pull``
+
+* Move the optional GTK imports into ``gtk_compat``, so the GUI code no
+  longer reads as attribute access on ``None`` to type checkers
+
+* Remove ``requirements-dev.txt``; development dependencies live in
+  ``pyproject.toml`` under ``[dependency-groups]``
 
 v0.6.0 (2026-03-05)
------------------
+-------------------
 
 New Features
 ~~~~~~~~~~~~
