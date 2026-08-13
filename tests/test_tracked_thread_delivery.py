@@ -15,11 +15,12 @@ from korgalore.cli import map_tracked_threads
 from korgalore.tracking import TrackedThread, TrackStatus
 
 
-def _make_tracked_thread(track_id: str = 'track-abc123',
-                         target: str = 'local',
-                         labels: Optional[List[str]] = None) -> TrackedThread:
+def _make_tracked_thread(
+    track_id: str = 'track-abc123', target: str = 'local', labels: Optional[List[str]] = None
+) -> TrackedThread:
     """Create a TrackedThread with sensible defaults."""
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     return TrackedThread(
         track_id=track_id,
@@ -73,16 +74,12 @@ class TestTrackedThreadDeliveryTuple:
         map_tracked_threads(ctx)
 
         delivery = ctx.obj['deliveries'][tracked.track_id]
-        assert len(delivery) == 4, (
-            f'Expected 4-tuple (feed, target, labels, subfolder), got {len(delivery)}'
-        )
+        assert len(delivery) == 4, f'Expected 4-tuple (feed, target, labels, subfolder), got {len(delivery)}'
 
     @patch('korgalore.cli.get_target')
     @patch('korgalore.cli.get_tracking_manifest')
     @patch('korgalore.cli.LeiFeed')
-    def test_subfolder_is_none(
-        self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock
-    ) -> None:
+    def test_subfolder_is_none(self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock) -> None:
         """Tracked threads do not support subfolders; fourth element must be None."""
         tracked = _make_tracked_thread()
         manifest = MagicMock()
@@ -102,9 +99,7 @@ class TestTrackedThreadDeliveryTuple:
     @patch('korgalore.cli.get_target')
     @patch('korgalore.cli.get_tracking_manifest')
     @patch('korgalore.cli.LeiFeed')
-    def test_labels_preserved(
-        self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock
-    ) -> None:
+    def test_labels_preserved(self, mock_lei_cls: MagicMock, mock_manifest: MagicMock, mock_target: MagicMock) -> None:
         """Labels from the tracked thread must appear in the delivery tuple."""
         tracked = _make_tracked_thread(labels=['patch-review', 'urgent'])
         manifest = MagicMock()

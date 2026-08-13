@@ -21,6 +21,7 @@ LOCKED_FEEDS: Dict[str, Any] = dict()
 # We retry failed deliveries for 5 days and then give up
 RETRY_FAILED_INTERVAL = 5 * 24 * 60 * 60  # 5 days in seconds
 
+
 class PIFeed:
     """Base class for public-inbox feed implementations.
 
@@ -90,7 +91,7 @@ class PIFeed:
         """Append a tuple as a JSONL entry to a state file."""
         with open(filepath, 'a') as f:
             line = json.dumps(obj)
-            f.write(line + '\n' )
+            f.write(line + '\n')
 
     def _perform_legacy_migration(self) -> None:
         """
@@ -155,18 +156,13 @@ class PIFeed:
 
         latest_commit = lgi.get('last')
 
-        self.save_delivery_info(
-            delivery_name=delivery_name,
-            epoch=highest_epoch,
-            latest_commit=latest_commit
-        )
+        self.save_delivery_info(delivery_name=delivery_name, epoch=highest_epoch, latest_commit=latest_commit)
 
         self.save_feed_state(
             epoch=highest_epoch,
             latest_commit=latest_commit,
             success=True,
         )
-
 
     def _get_state_file_path(self, delivery_name: Optional[str] = None, suffix: str = 'info') -> Path:
         if not delivery_name:
@@ -209,7 +205,7 @@ class PIFeed:
         """Find all epoch directories in the feed and return sorted list."""
         epochs_dir = self.feed_dir / 'git'
         if not epochs_dir.exists():
-            raise PublicInboxError(f"No existing epochs found in {epochs_dir}.")
+            raise PublicInboxError(f'No existing epochs found in {epochs_dir}.')
         # List this directory for existing epochs
         existing_epochs: List[int] = list()
         for item in epochs_dir.iterdir():
@@ -221,7 +217,7 @@ class PIFeed:
                 except ValueError:
                     logger.debug('Invalid epoch directory: %s', item.name)
         if not existing_epochs:
-            raise PublicInboxError(f"No existing epochs found in {epochs_dir}.")
+            raise PublicInboxError(f'No existing epochs found in {epochs_dir}.')
         return sorted(existing_epochs)
 
     def get_highest_epoch(self) -> int:
@@ -236,7 +232,7 @@ class PIFeed:
         gitargs = ['rev-list', '--reverse', branch]
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
-            raise GitError(f"Git rev-list failed (exit {retcode}): {error.decode()}")
+            raise GitError(f'Git rev-list failed (exit {retcode}): {error.decode()}')
         if len(output):
             commits = output.decode().splitlines()
         else:
@@ -250,13 +246,13 @@ class PIFeed:
         if str(epoch) in delivery_info.get('epochs', {}):
             info = delivery_info['epochs'][str(epoch)]
         else:
-            raise StateError(f"No delivery info found for epoch {epoch} in delivery {delivery_name}.")
+            raise StateError(f'No delivery info found for epoch {epoch} in delivery {delivery_name}.')
 
         # Get the commit's date and parse it into datetime
         # The string is ISO with tzinfo: "2025-11-04 20:47:21 +0000"
         commit_date_str = info.get('commit_date')
         if not commit_date_str:
-            raise StateError(f"No commit_date found in the state file for {delivery_name}.")
+            raise StateError(f'No commit_date found in the state file for {delivery_name}.')
         commit_date = datetime.strptime(commit_date_str, '%Y-%m-%d %H:%M:%S %z')
         logger.debug('Last processed commit date: %s', commit_date.isoformat())
         # Try to find the new hash of this commit in the log by matching the subject and
@@ -266,7 +262,7 @@ class PIFeed:
         retcode, output, _err = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
             # Not sure what happened here, just give up and return the latest commit
-            logger.warning("Could not run rev-list to recover after rebase, returning latest commit.")
+            logger.warning('Could not run rev-list to recover after rebase, returning latest commit.')
             latest_commit = self.get_top_commit(epoch)
             return latest_commit
 
@@ -294,13 +290,13 @@ class PIFeed:
                 matched_msg = msg
                 break
         if matched_msg is None:
-            logger.error("Could not find exact commit after rebase.")
-            logger.error("Returning first possible commit after date: %s", first_commit)
+            logger.error('Could not find exact commit after rebase.')
+            logger.error('Returning first possible commit after date: %s', first_commit)
             last_commit = first_commit
             raw_message = self.get_message_at_commit(epoch, last_commit)
             matched_msg = parse_message(raw_message)
         else:
-            logger.debug("Recovered exact matching commit after rebase: %s", last_commit)
+            logger.debug('Recovered exact matching commit after rebase: %s', last_commit)
 
         self.save_delivery_info(delivery_name, epoch, latest_commit=last_commit, message=matched_msg)
         return last_commit
@@ -334,7 +330,7 @@ class PIFeed:
         gitargs = ['rev-list', '--reverse', f'{since_commit}..HEAD']
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
-            raise GitError(f"Git rev-list failed (exit {retcode}): {error.decode()}")
+            raise GitError(f'Git rev-list failed (exit {retcode}): {error.decode()}')
         if len(output):
             new_commits = [(highest_known_epoch, x) for x in output.decode().splitlines()]
         else:
@@ -375,7 +371,7 @@ class PIFeed:
         # First verify the commit object exists locally.
         retcode, _output, _err = run_git_command(str(gitdir), ['cat-file', '-e', commitish])
         if retcode != 0:
-            raise GitError(f"Bad object {commitish} in epoch {epoch}")
+            raise GitError(f'Bad object {commitish} in epoch {epoch}')
         # Now check whether the commit tree contains an 'm' file.
         gitargs = ['cat-file', '-e', f'{commitish}:m']
         retcode, _output, _err = run_git_command(str(gitdir), gitargs)
@@ -387,9 +383,9 @@ class PIFeed:
         gitargs = ['show', f'{commitish}:m']
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode == 128:
-            raise StateError(f"Commit {commitish} does not have a message file.")
+            raise StateError(f'Commit {commitish} does not have a message file.')
         if retcode != 0:
-            raise GitError(f"Git show failed (exit {retcode}): {error.decode()}")
+            raise GitError(f'Git show failed (exit {retcode}): {error.decode()}')
         return output
 
     def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
@@ -414,7 +410,7 @@ class PIFeed:
         gitdir = self.get_gitdir(epoch)
         retcode, output, error = run_git_command(str(gitdir), ['branch', '--list'])
         if retcode != 0:
-            raise GitError(f"Git branch --list failed (exit {retcode}): {error.decode()}")
+            raise GitError(f'Git branch --list failed (exit {retcode}): {error.decode()}')
         empty = not output.strip()
         self._empty_repo_cache[epoch] = empty
         return empty
@@ -431,7 +427,7 @@ class PIFeed:
         gitargs = ['rev-list', '-n', '1', branch]
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
-            raise GitError(f"Git rev-list failed (exit {retcode}): {error.decode()}")
+            raise GitError(f'Git rev-list failed (exit {retcode}): {error.decode()}')
         top_commit = output.decode().strip()
         return top_commit
 
@@ -447,7 +443,7 @@ class PIFeed:
         gitargs = ['rev-list', '--max-parents=0', branch]
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
-            raise GitError(f"Git rev-list failed (exit {retcode}): {error.decode()}")
+            raise GitError(f'Git rev-list failed (exit {retcode}): {error.decode()}')
         first_commit = output.decode().strip()
         return first_commit
 
@@ -493,8 +489,14 @@ class PIFeed:
             results.append((int(entry[0]), str(entry[1])))
         return results
 
-    def mark_successful_delivery(self, delivery_name: str, epoch: int, commit_hash: str,
-                                   message: Optional[bytes] = None, was_failing: bool = False) -> None:
+    def mark_successful_delivery(
+        self,
+        delivery_name: str,
+        epoch: int,
+        commit_hash: str,
+        message: Optional[bytes] = None,
+        was_failing: bool = False,
+    ) -> None:
         """Mark a commit as successfully delivered and remove from failed list if present."""
         # We've successfully delivered a message, so remove it from the
         # korgalore.{delivery_name}.failed file if it exists there.
@@ -506,8 +508,12 @@ class PIFeed:
             failed = [e for e in failed if not (e[0] == epoch and e[1] == commit_hash)]
             if len(failed) < original_len:
                 self._write_jsonl_file(state_file, failed)
-                logger.debug("Marked commit %s in epoch %d as successfully delivered for delivery %s.",
-                            commit_hash, epoch, delivery_name)
+                logger.debug(
+                    'Marked commit %s in epoch %d as successfully delivered for delivery %s.',
+                    commit_hash,
+                    epoch,
+                    delivery_name,
+                )
             # Don't update the delivery pointer for retried commits —
             # they are older than the current pointer and overwriting
             # it would rewind the state, causing all subsequent commits
@@ -520,12 +526,12 @@ class PIFeed:
         # Remove the failed state file if it's empty
         state_file = self._get_state_file_path(delivery_name, 'failed')
         if not state_file.exists():
-            logger.debug("No failed state file for delivery %s, nothing to clean up.", delivery_name)
+            logger.debug('No failed state file for delivery %s, nothing to clean up.', delivery_name)
             return
         failed = self.get_failed_commits_for_delivery(delivery_name)
         if not len(failed):
             state_file.unlink()
-            logger.debug("Removed empty failed state file for delivery %s.", delivery_name)
+            logger.debug('Removed empty failed state file for delivery %s.', delivery_name)
 
     def mark_failed_delivery(self, delivery_name: str, epoch: int, commit_hash: str) -> None:
         """Record a failed delivery attempt for later retry."""
@@ -547,10 +553,10 @@ class PIFeed:
             delta = now_dt - first_failed_dt
             if delta.total_seconds() > RETRY_FAILED_INTERVAL:
                 subject = self.get_subject_at_commit(epoch, commit_hash)
-                logger.warning("Delivery for %s has exceeded retry interval, will not retry.", commit_hash)
-                logger.warning(" Feed: %s", self.feed_dir)
-                logger.warning(" Delivery: %s", delivery_name)
-                logger.warning(" Subject: %s", subject)
+                logger.warning('Delivery for %s has exceeded retry interval, will not retry.', commit_hash)
+                logger.warning(' Feed: %s', self.feed_dir)
+                logger.warning(' Delivery: %s', delivery_name)
+                logger.warning(' Subject: %s', subject)
                 # Move to rejected file
                 rejected_file = self._get_state_file_path(delivery_name, 'rejected')
                 rejected_entry = list(entry) + [now_dt.isoformat()]
@@ -568,9 +574,13 @@ class PIFeed:
         new_entry = (epoch, commit_hash, now_dt.isoformat(), 1)
         self._append_to_jsonl_file(state_file, new_entry)
 
-    def save_delivery_info(self, delivery_name: str, epoch: Optional[int] = None,
-                             latest_commit: Optional[str] = None,
-                             message: Optional[Union[bytes, EmailMessage]] = None) -> None:
+    def save_delivery_info(
+        self,
+        delivery_name: str,
+        epoch: Optional[int] = None,
+        latest_commit: Optional[str] = None,
+        message: Optional[Union[bytes, EmailMessage]] = None,
+    ) -> None:
         """Save delivery progress state to disk."""
         if not epoch:
             epoch = self.get_highest_epoch()
@@ -583,7 +593,7 @@ class PIFeed:
         gitargs = ['show', '-s', '--format=%ci', latest_commit]
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
-            raise GitError(f"Git show failed (exit {retcode}): {error.decode()}")
+            raise GitError(f'Git show failed (exit {retcode}): {error.decode()}')
         commit_date = output.decode()
         # Seed both fields, because neither branch below is guaranteed to set
         # them: a commit whose 'm' file exists but is empty is not a no-op, so
@@ -609,9 +619,7 @@ class PIFeed:
         if state_file.exists():
             state_info = self.load_delivery_info(delivery_name)
         else:
-            state_info = {
-                'epochs': {}
-            }
+            state_info = {'epochs': {}}
         state_info['epochs'][str(epoch)] = {
             'last': latest_commit,
             'subject': subject,
@@ -633,8 +641,8 @@ class PIFeed:
             # Is it a valid epoch?
             gitdir = self.get_gitdir(epoch)
             if not gitdir.exists():
-                raise StateError(f"Epoch {epoch} does not exist in feed {self.feed_dir}.")
-            raise StateError(f"No delivery info found for epoch {epoch} in delivery {delivery_name}.")
+                raise StateError(f'Epoch {epoch} does not exist in feed {self.feed_dir}.')
+            raise StateError(f'No delivery info found for epoch {epoch} in delivery {delivery_name}.')
         epoch_info: Dict[str, Any] = info['epochs'][str(epoch)]
         return epoch_info
 
@@ -688,15 +696,16 @@ class PIFeed:
         if not state_file.exists():
             self._perform_legacy_migration()
             if not state_file.exists():
-                raise StateError(f"Feed state not found: {state_file}")
+                raise StateError(f'Feed state not found: {state_file}')
 
         with open(state_file, 'r') as f:
             result = json.load(f)
             assert isinstance(result, dict)
             return result
 
-    def save_feed_state(self, epoch: Optional[int] = None,
-                        latest_commit: Optional[str] = None, success: bool = True) -> None:
+    def save_feed_state(
+        self, epoch: Optional[int] = None, latest_commit: Optional[str] = None, success: bool = True
+    ) -> None:
         """Save feed-level state to disk."""
         state_file = self._get_state_file_path(delivery_name=None, suffix='feed')
 
@@ -716,7 +725,7 @@ class PIFeed:
                 'extra_data': {
                     'feed_type': self.feed_type,
                     'feed_url': self.feed_url,
-                }
+                },
             }
 
         state['epochs'][str(epoch)] = {
@@ -726,4 +735,3 @@ class PIFeed:
         }
 
         self._atomic_write(state_file, json.dumps(state, indent=2))
-

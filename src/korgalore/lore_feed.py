@@ -15,8 +15,7 @@ logger = logging.getLogger('korgalore')
 class LoreFeed(PIFeed):
     """Service for interacting with lore.kernel.org public-inbox archives."""
 
-    def __init__(self, feed_key: str, feed_dir: Path, feed_url: str,
-                 lore_node: Optional[LoreNode] = None) -> None:
+    def __init__(self, feed_key: str, feed_dir: Path, feed_url: str, lore_node: Optional[LoreNode] = None) -> None:
         """Initialize a LoreFeed instance.
 
         Args:
@@ -33,6 +32,7 @@ class LoreFeed(PIFeed):
             self._node = lore_node
         else:
             from korgalore import make_lore_node
+
             self._node = make_lore_node(url=feed_url)
 
     @staticmethod
@@ -55,7 +55,8 @@ class LoreFeed(PIFeed):
                 contains inconsistent list prefixes.
         """
         from korgalore import make_lore_node
-        manifest_url = f"{url.rstrip('/')}/manifest.js.gz"
+
+        manifest_url = f'{url.rstrip("/")}/manifest.js.gz'
         logger.debug('Fetching manifest from %s', manifest_url)
 
         node = make_lore_node(url=url)
@@ -63,9 +64,7 @@ class LoreFeed(PIFeed):
             response = node.request('GET', manifest_url)
             response.raise_for_status()
         except Exception as e:
-            raise RemoteError(
-                f"Failed to fetch manifest from {manifest_url}: {e}"
-            ) from e
+            raise RemoteError(f'Failed to fetch manifest from {manifest_url}: {e}') from e
         finally:
             node.close()
 
@@ -73,12 +72,10 @@ class LoreFeed(PIFeed):
             raw = GzipFile(fileobj=io.BytesIO(response.content)).read()
             manifest = json.loads(raw)
         except Exception as e:
-            raise RemoteError(
-                f"Failed to parse manifest from {manifest_url}: {e}"
-            ) from e
+            raise RemoteError(f'Failed to parse manifest from {manifest_url}: {e}') from e
 
         if not manifest:
-            raise RemoteError(f"Empty manifest from {manifest_url}")
+            raise RemoteError(f'Empty manifest from {manifest_url}')
 
         # Extract list name prefixes (e.g. /lkml/git/0.git -> lkml)
         prefixes: set[str] = set()
@@ -88,23 +85,18 @@ class LoreFeed(PIFeed):
                 prefixes.add(parts[0])
 
         if len(prefixes) != 1:
-            raise RemoteError(
-                f"Manifest entries have inconsistent list prefixes: "
-                f"{', '.join(sorted(prefixes))}"
-            )
+            raise RemoteError(f'Manifest entries have inconsistent list prefixes: {", ".join(sorted(prefixes))}')
 
         return prefixes.pop()
 
     def get_manifest(self) -> Dict[str, Any]:
         """Fetch and parse the gzipped manifest from the Lore server."""
-        manifest_url = f"{self.feed_url.rstrip('/')}/manifest.js.gz"
+        manifest_url = f'{self.feed_url.rstrip("/")}/manifest.js.gz'
         try:
             response = self._node.request('GET', manifest_url)
             response.raise_for_status()
         except Exception as e:
-            raise RemoteError(
-                f"Failed to fetch manifest from {self.feed_url}: {e}"
-            ) from e
+            raise RemoteError(f'Failed to fetch manifest from {self.feed_url}: {e}') from e
         # ungzip and parse the manifest
         manifest: Dict[str, Any] = dict()
         with GzipFile(fileobj=io.BytesIO(response.content)) as f:
@@ -137,7 +129,7 @@ class LoreFeed(PIFeed):
             logger.debug('Target directory %s already exists, skipping clone.', gitdir)
             return
 
-        repo_url = f"{self.feed_url.rstrip('/')}/git/{epoch}.git"
+        repo_url = f'{self.feed_url.rstrip("/")}/git/{epoch}.git'
         gitargs = ['clone', '--mirror']
         if shallow:
             gitargs += ['--shallow-since=1.week.ago']
@@ -153,7 +145,7 @@ class LoreFeed(PIFeed):
             gitargs = ['clone', '--mirror', '--depth=1', repo_url, str(gitdir)]
             retcode, _output, error = run_git_command(None, gitargs, git_config=mirror_config)
         if retcode != 0:
-            raise RemoteError(f"Git clone failed (exit {retcode}): {error.decode()}")
+            raise RemoteError(f'Git clone failed (exit {retcode}): {error.decode()}')
 
     def get_manifest_epochs(self) -> List[Tuple[int, str, str]]:
         """Parse manifest to extract sorted list of (epoch, path, fingerprint) tuples."""
@@ -179,11 +171,7 @@ class LoreFeed(PIFeed):
         epochs_file = self.feed_dir / 'epochs.json'
         epochs_info = []
         for enum, epath, fpr in epochs:
-            epochs_info.append({
-                'epoch': enum,
-                'path': epath,
-                'fpr': fpr
-            })
+            epochs_info.append({'epoch': enum, 'path': epath, 'fpr': fpr})
         with open(epochs_file, 'w') as ef:
             json.dump(epochs_info, ef, indent=2)
 
@@ -191,7 +179,7 @@ class LoreFeed(PIFeed):
         """Load epoch information from local JSON file."""
         epochs_file = self.feed_dir / 'epochs.json'
         if not epochs_file.exists():
-            raise StateError(f"Epochs file {epochs_file} does not exist.")
+            raise StateError(f'Epochs file {epochs_file} does not exist.')
         with open(epochs_file, 'r') as ef:
             epochs_data = json.load(ef)
         epochs: List[Tuple[int, str, str]] = []
@@ -241,14 +229,11 @@ class LoreFeed(PIFeed):
             gitargs = ['fetch', 'origin', '--depth=1', '--update-shallow']
             retcode, _output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
         if retcode != 0:
-            raise RemoteError(f"Git fetch failed (exit {retcode}): {error.decode()}")
+            raise RemoteError(f'Git fetch failed (exit {retcode}): {error.decode()}')
 
         updated = self.feed_updated(highest_local_epoch)
 
-        self.save_feed_state(
-            epoch=highest_local_epoch,
-            success=True
-        )
+        self.save_feed_state(epoch=highest_local_epoch, success=True)
 
         # Now see if we have any new epochs on the remote
         highest_remote_epoch = max(e[0] for e in remote_epoch_info)
@@ -265,9 +250,5 @@ class LoreFeed(PIFeed):
         logger.debug('Cloning new epoch %d for feed %s', highest_remote_epoch, self.feed_dir)
         # We don't clone shallow for new epochs, since we want all the mail there for the initial run
         self.clone_epoch(epoch=highest_remote_epoch, shallow=False)
-        self.save_feed_state(
-            epoch=highest_remote_epoch,
-            success=True
-        )
+        self.save_feed_state(epoch=highest_remote_epoch, success=True)
         return self.STATUS_UPDATED
-

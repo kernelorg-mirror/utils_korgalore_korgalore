@@ -22,7 +22,7 @@ logger = logging.getLogger('korgalore')
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.labels',
     'https://www.googleapis.com/auth/gmail.insert',
-    ]
+]
 
 # InstalledAppFlow.run_local_server() returns either flavour depending on what
 # the client_secrets file describes. Both expose the valid/expired/refresh_token
@@ -36,8 +36,7 @@ class GmailTarget:
 
     DEFAULT_LABELS: List[str] = ['INBOX', 'UNREAD']
 
-    def __init__(self, identifier: str, credentials_file: str, token_file: str,
-                 interactive: bool = True) -> None:
+    def __init__(self, identifier: str, credentials_file: str, token_file: str, interactive: bool = True) -> None:
         """Initialize a GmailTarget instance.
 
         Args:
@@ -83,8 +82,7 @@ class GmailTarget:
                 try:
                     self.creds.refresh(Request())  # type: ignore
                 except RefreshError as e:
-                    logger.warning('Gmail token for %s has expired or been revoked.',
-                                   self.identifier)
+                    logger.warning('Gmail token for %s has expired or been revoked.', self.identifier)
                     invalid_token_file = self._token_file + '.invalid'
                     if os.path.exists(invalid_token_file):
                         os.remove(invalid_token_file)
@@ -94,10 +92,9 @@ class GmailTarget:
                         # In non-interactive mode, just return - caller will check needs_auth
                         return
                     raise AuthenticationError(
-                        f"Gmail token for '{self.identifier}' is invalid. "
-                        f"Please re-authenticate.",
+                        f"Gmail token for '{self.identifier}' is invalid. Please re-authenticate.",
                         target_id=self.identifier,
-                        target_type='gmail'
+                        target_type='gmail',
                     ) from e
             elif os.path.exists(self._credentials_file):
                 if not self._interactive:
@@ -107,12 +104,11 @@ class GmailTarget:
                     return
                 logger.critical('Log in to Gmail account for %s', self.identifier)
 
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self._credentials_file, SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(self._credentials_file, SCOPES)
                 self.creds = flow.run_local_server(port=0)
             else:
                 raise ConfigurationError(
-                    f"{self._credentials_file} not found. Please download it from Google Cloud Console."
+                    f'{self._credentials_file} not found. Please download it from Google Cloud Console.'
                 )
 
             # Save the credentials for the next run
@@ -120,7 +116,6 @@ class GmailTarget:
                 token.write(self.creds.to_json())
 
         self._needs_auth = False
-
 
     def connect(self) -> None:
         """Establish connection to the Gmail API service.
@@ -175,7 +170,7 @@ class GmailTarget:
         labels: List[str],
         feed_name: Optional[str] = None,
         delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None
+        subfolder: Optional[str] = None,
     ) -> Any:
         """Import a raw email message into Gmail.
 
@@ -196,9 +191,7 @@ class GmailTarget:
             import base64
 
             msg = RawMessage(raw_message)
-            encoded_message = base64.urlsafe_b64encode(
-                msg.as_bytes(feed_name, delivery_name)
-            ).decode()
+            encoded_message = base64.urlsafe_b64encode(msg.as_bytes(feed_name, delivery_name)).decode()
             message_body: Dict[str, Any] = {'raw': encoded_message}
 
             if labels:
@@ -206,10 +199,14 @@ class GmailTarget:
                 message_body['labelIds'] = label_ids
 
             # Upload the message
-            result = self.service.users().messages().import_(  # type: ignore
-                userId='me',
-                body=message_body
-            ).execute()
+            result = (
+                self.service.users()
+                .messages()
+                .import_(  # type: ignore
+                    userId='me', body=message_body
+                )
+                .execute()
+            )
 
             return result
 
@@ -232,13 +229,12 @@ class GmailTarget:
         """
         if not os.path.exists(self._credentials_file):
             raise ConfigurationError(
-                f"{self._credentials_file} not found. Please download it from Google Cloud Console."
+                f'{self._credentials_file} not found. Please download it from Google Cloud Console.'
             )
 
         logger.info('Starting re-authentication for Gmail account %s', self.identifier)
 
-        flow = InstalledAppFlow.from_client_secrets_file(
-            self._credentials_file, SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(self._credentials_file, SCOPES)
         self.creds = flow.run_local_server(port=0)
 
         # Save the credentials

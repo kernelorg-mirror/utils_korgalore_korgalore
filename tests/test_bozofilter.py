@@ -28,35 +28,35 @@ class TestLoadBozofilter:
 
     def test_parses_simple_addresses(self, tmp_path: Path) -> None:
         """Parses simple email addresses."""
-        content = "spam@example.com\ntroll@example.org\n"
+        content = 'spam@example.com\ntroll@example.org\n'
         (tmp_path / 'bozofilter.txt').write_text(content)
         result = load_bozofilter(tmp_path)
         assert result == {'spam@example.com', 'troll@example.org'}
 
     def test_skips_comment_lines(self, tmp_path: Path) -> None:
         """Skips lines that start with #."""
-        content = "# This is a comment\nspam@example.com\n# Another comment\n"
+        content = '# This is a comment\nspam@example.com\n# Another comment\n'
         (tmp_path / 'bozofilter.txt').write_text(content)
         result = load_bozofilter(tmp_path)
         assert result == {'spam@example.com'}
 
     def test_strips_trailing_comments(self, tmp_path: Path) -> None:
         """Strips trailing comments from entries."""
-        content = "spam@example.com # sends junk\ntroll@example.org # annoying\n"
+        content = 'spam@example.com # sends junk\ntroll@example.org # annoying\n'
         (tmp_path / 'bozofilter.txt').write_text(content)
         result = load_bozofilter(tmp_path)
         assert result == {'spam@example.com', 'troll@example.org'}
 
     def test_lowercases_addresses(self, tmp_path: Path) -> None:
         """Normalizes addresses to lowercase."""
-        content = "SPAM@EXAMPLE.COM\nTroll@Example.Org\n"
+        content = 'SPAM@EXAMPLE.COM\nTroll@Example.Org\n'
         (tmp_path / 'bozofilter.txt').write_text(content)
         result = load_bozofilter(tmp_path)
         assert result == {'spam@example.com', 'troll@example.org'}
 
     def test_skips_blank_lines(self, tmp_path: Path) -> None:
         """Skips blank lines."""
-        content = "spam@example.com\n\n\ntroll@example.org\n"
+        content = 'spam@example.com\n\n\ntroll@example.org\n'
         (tmp_path / 'bozofilter.txt').write_text(content)
         result = load_bozofilter(tmp_path)
         assert result == {'spam@example.com', 'troll@example.org'}

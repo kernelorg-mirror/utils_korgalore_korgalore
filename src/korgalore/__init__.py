@@ -1,4 +1,5 @@
 """Korgalore - A command-line tool to put public-inbox sources directly into Gmail."""
+
 import logging
 import os
 import subprocess
@@ -10,13 +11,13 @@ import requests
 import liblore
 from liblore import LoreNode
 
-__version__ = "0.7-dev"
-__author__ = "Konstantin Ryabitsev"
-__email__ = "konstantin@linuxfoundation.org"
-__user_agent__ = f"korgalore/{__version__}"
+__version__ = '0.7-dev'
+__author__ = 'Konstantin Ryabitsev'
+__email__ = 'konstantin@linuxfoundation.org'
+__user_agent__ = f'korgalore/{__version__}'
 
-GITCMD: str = "git"
-LEICMD: str = "lei"
+GITCMD: str = 'git'
+LEICMD: str = 'lei'
 
 logger = logging.getLogger('korgalore')
 
@@ -37,9 +38,7 @@ def get_requests_session() -> requests.Session:
     global _REQSESSION
     if _REQSESSION is None:
         _REQSESSION = requests.Session()
-        _REQSESSION.headers.update({
-            'User-Agent': __user_agent__
-        })
+        _REQSESSION.headers.update({'User-Agent': __user_agent__})
     return _REQSESSION
 
 
@@ -51,8 +50,7 @@ def close_requests_session() -> None:
         _REQSESSION = None
 
 
-def make_lore_node(url: str = 'https://lore.kernel.org/all',
-                   cache_dir: Optional[str] = None) -> LoreNode:
+def make_lore_node(url: str = 'https://lore.kernel.org/all', cache_dir: Optional[str] = None) -> LoreNode:
     """Create a LoreNode with failover/probing from git config.
 
     Reads the ``[lore]`` section from git config via
@@ -75,26 +73,34 @@ def make_lore_node(url: str = 'https://lore.kernel.org/all',
 class KorgaloreError(Exception):
     """Base exception for all Korgalore errors."""
 
+
 class ConfigurationError(KorgaloreError):
     """Raised when there is an error in configuration."""
+
 
 class GitError(KorgaloreError):
     """Raised when there is an error with Git operations."""
 
+
 class RemoteError(KorgaloreError, liblore.RemoteError):
     """Raised when there is an error communicating with remote services."""
+
 
 class PublicInboxError(KorgaloreError, liblore.PublicInboxError):
     """Raised when something is wrong with Public-Inbox."""
 
+
 class StateError(KorgaloreError):
     """Raised when there is an error with the internal state."""
+
 
 class DeliveryError(KorgaloreError):
     """Raised when there is an error during message delivery."""
 
+
 class AuthenticationError(KorgaloreError):
     """Raised when authentication fails and re-authentication is required."""
+
     def __init__(self, message: str, target_id: str, target_type: str = 'gmail') -> None:
         super().__init__(message)
         self.target_id = target_id
@@ -113,20 +119,23 @@ def _init_git_user_agent() -> None:
         raise GitError(f"Git command '{GITCMD}' not found. Is it installed?") from e
 
     if result.returncode != 0:
-        raise GitError(f"Git command failed: {result.stderr.decode().strip()}")
+        raise GitError(f'Git command failed: {result.stderr.decode().strip()}')
 
     # Parse "git version 2.52.0" -> "2.52.0"
     version_output = result.stdout.decode().strip()
     git_version = version_output.split()[-1]
-    kgl_ua = f"{__user_agent__}+{_user_agent_plus}" if _user_agent_plus else __user_agent__
-    user_agent = f"git/{git_version} ({kgl_ua})"
+    kgl_ua = f'{__user_agent__}+{_user_agent_plus}' if _user_agent_plus else __user_agent__
+    user_agent = f'git/{git_version} ({kgl_ua})'
     os.environ['GIT_HTTP_USER_AGENT'] = user_agent
     logger.debug('Set GIT_HTTP_USER_AGENT to: %s', user_agent)
 
-def run_git_command(gitdir: Optional[str], args: List[str],
-                    stdin: Optional[bytes] = None,
-                    git_config: Optional[Dict[str, str]] = None,
-                    ) -> Tuple[int, bytes, bytes]:
+
+def run_git_command(
+    gitdir: Optional[str],
+    args: List[str],
+    stdin: Optional[bytes] = None,
+    git_config: Optional[Dict[str, str]] = None,
+) -> Tuple[int, bytes, bytes]:
     """Run a git command in the specified git directory and return (returncode, stdout, stderr).
 
     Uses --git-dir instead of -C to work with safe.bareRepository=explicit.
@@ -164,7 +173,7 @@ def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
     # --user-agent is only supported by 'q' and 'up' commands
     cmd = [LEICMD, args[0]]
     if args[0] in ('q', 'up'):
-        lei_ua = f"{__user_agent__}+{_user_agent_plus}" if _user_agent_plus else __user_agent__
+        lei_ua = f'{__user_agent__}+{_user_agent_plus}' if _user_agent_plus else __user_agent__
         cmd += ['--user-agent', lei_ua]
     cmd += args[1:]
     logger.debug('Running lei command: %s', ' '.join(cmd))
@@ -179,10 +188,10 @@ def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
 def format_key_for_display(key: Optional[str]) -> str:
     """Format a key (feed or delivery) for user-facing display by trimming lei paths."""
     if key is None:
-        return ""
+        return ''
     if key.startswith('lei:'):
         try:
-            return f"lei:{Path(key[4:]).name}"
+            return f'lei:{Path(key[4:]).name}'
         except Exception:
             return key
     return key

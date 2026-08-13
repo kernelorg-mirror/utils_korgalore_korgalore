@@ -34,10 +34,8 @@ class TestSubfolderTemplateMaildir:
 
     def test_strftime_template_expanded(self, tmp_path: Path) -> None:
         """strftime template in subfolder is expanded for Maildir targets."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         # Pre-create the target
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
@@ -63,10 +61,8 @@ class TestSubfolderTemplateMaildir:
 
     def test_strftime_template_stored_for_refresh(self, tmp_path: Path) -> None:
         """Original strftime template is stored for GUI refresh."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
         deliveries = {
@@ -87,10 +83,8 @@ class TestSubfolderTemplateMaildir:
 
     def test_refresh_subfolder_templates(self, tmp_path: Path) -> None:
         """refresh_subfolder_templates re-expands stored templates."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         target = MaildirTarget('local', str(maildir_path))
         ctx.obj['targets']['local'] = target
 
@@ -121,10 +115,8 @@ class TestSubfolderTemplateMaildir:
 
     def test_invalid_strftime_format_raises(self, tmp_path: Path) -> None:
         """Invalid strftime format raises ConfigurationError."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
         deliveries = {
@@ -145,10 +137,8 @@ class TestSubfolderTemplateMaildir:
 
     def test_subfolder_without_template_unchanged(self, tmp_path: Path) -> None:
         """Subfolder without % is not treated as template."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
         deliveries = {
@@ -174,20 +164,21 @@ class TestSubfolderTemplateNonMaildir:
 
     def test_imap_rejects_strftime_template(self, tmp_path: Path) -> None:
         """IMAP target rejects strftime template in subfolder."""
-        pw_file = tmp_path / "password.txt"
-        pw_file.write_text("secret")
+        pw_file = tmp_path / 'password.txt'
+        pw_file.write_text('secret')
 
-        ctx = create_mock_context({
-            'imap-server': {
-                'type': 'imap',
-                'server': 'imap.example.com',
-                'username': 'user@example.com',
-                'password_file': str(pw_file),
+        ctx = create_mock_context(
+            {
+                'imap-server': {
+                    'type': 'imap',
+                    'server': 'imap.example.com',
+                    'username': 'user@example.com',
+                    'password_file': str(pw_file),
+                }
             }
-        })
+        )
         ctx.obj['targets']['imap-server'] = ImapTarget(
-            'imap-server', 'imap.example.com', 'user@example.com',
-            password_file=str(pw_file)
+            'imap-server', 'imap.example.com', 'user@example.com', password_file=str(pw_file)
         )
 
         deliveries = {
@@ -203,25 +194,26 @@ class TestSubfolderTemplateNonMaildir:
             with pytest.raises(ConfigurationError) as exc_info:
                 map_deliveries(ctx, deliveries)
 
-        assert "strftime templates in subfolder are only supported for Maildir" in str(exc_info.value)
-        assert "ImapTarget" in str(exc_info.value)
+        assert 'strftime templates in subfolder are only supported for Maildir' in str(exc_info.value)
+        assert 'ImapTarget' in str(exc_info.value)
 
     def test_imap_allows_subfolder_without_template(self, tmp_path: Path) -> None:
         """IMAP target allows subfolder without % character."""
-        pw_file = tmp_path / "password.txt"
-        pw_file.write_text("secret")
+        pw_file = tmp_path / 'password.txt'
+        pw_file.write_text('secret')
 
-        ctx = create_mock_context({
-            'imap-server': {
-                'type': 'imap',
-                'server': 'imap.example.com',
-                'username': 'user@example.com',
-                'password_file': str(pw_file),
+        ctx = create_mock_context(
+            {
+                'imap-server': {
+                    'type': 'imap',
+                    'server': 'imap.example.com',
+                    'username': 'user@example.com',
+                    'password_file': str(pw_file),
+                }
             }
-        })
+        )
         ctx.obj['targets']['imap-server'] = ImapTarget(
-            'imap-server', 'imap.example.com', 'user@example.com',
-            password_file=str(pw_file)
+            'imap-server', 'imap.example.com', 'user@example.com', password_file=str(pw_file)
         )
 
         deliveries = {
@@ -245,10 +237,8 @@ class TestLabelsTemplateRejection:
 
     def test_labels_with_percent_rejected(self, tmp_path: Path) -> None:
         """Labels containing % are rejected."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
         deliveries = {
@@ -264,15 +254,13 @@ class TestLabelsTemplateRejection:
             with pytest.raises(ConfigurationError) as exc_info:
                 map_deliveries(ctx, deliveries)
 
-        assert "strftime templates in labels are not supported" in str(exc_info.value)
-        assert "Archive/%Y" in str(exc_info.value)
+        assert 'strftime templates in labels are not supported' in str(exc_info.value)
+        assert 'Archive/%Y' in str(exc_info.value)
 
     def test_labels_without_percent_allowed(self, tmp_path: Path) -> None:
         """Labels without % are allowed."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
         deliveries = {
@@ -296,10 +284,8 @@ class TestSubfolderValidation:
 
     def test_subfolder_list_rejected(self, tmp_path: Path) -> None:
         """Subfolder as list is rejected."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
         deliveries = {
@@ -315,14 +301,12 @@ class TestSubfolderValidation:
             with pytest.raises(ConfigurationError) as exc_info:
                 map_deliveries(ctx, deliveries)
 
-        assert "must be a string, not a list" in str(exc_info.value)
+        assert 'must be a string, not a list' in str(exc_info.value)
 
     def test_empty_subfolder_treated_as_none(self, tmp_path: Path) -> None:
         """Empty string subfolder is treated as None."""
-        maildir_path = tmp_path / "mail"
-        ctx = create_mock_context({
-            'local': {'type': 'maildir', 'path': str(maildir_path)}
-        })
+        maildir_path = tmp_path / 'mail'
+        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
         ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
 
         deliveries = {

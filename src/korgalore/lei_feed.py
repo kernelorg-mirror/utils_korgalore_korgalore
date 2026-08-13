@@ -8,6 +8,7 @@ from korgalore.pi_feed import PIFeed
 
 logger = logging.getLogger('korgalore')
 
+
 class LeiFeed(PIFeed):
     """Feed class for interacting with lei (local email interface) searches."""
 
@@ -47,7 +48,7 @@ class LeiFeed(PIFeed):
         args = ['ls-search', '-l', '-f', 'json']
         retcode, output = run_lei_command(args)
         if retcode != 0:
-            raise PublicInboxError(f"LEI list searches failed: {output.decode()}")
+            raise PublicInboxError(f'LEI list searches failed: {output.decode()}')
 
         ls_data = json.loads(output.decode())
         resolved_path = str(Path(path).resolve())
@@ -59,7 +60,7 @@ class LeiFeed(PIFeed):
                     logger.debug('Validated lei path: %s', path)
                     return path
 
-        raise PublicInboxError(f"Path not found as a v2 lei search: {path}")
+        raise PublicInboxError(f'Path not found as a v2 lei search: {path}')
 
     def get_latest_epoch_info(self) -> List[Tuple[int, str]]:
         """Get current ref information for all epochs.
@@ -77,7 +78,7 @@ class LeiFeed(PIFeed):
             gitargs = ['show-ref']
             retcode, output, error = run_git_command(str(epoch_dir), gitargs)
             if retcode != 0:
-                raise GitError(f"Git show-ref failed (exit {retcode}): {error.decode()}")
+                raise GitError(f'Git show-ref failed (exit {retcode}): {error.decode()}')
             # It's just one ref in lei repos
             refdata = output.decode()
             logger.debug('Epoch %d refdata: %s', epoch, refdata)
@@ -95,7 +96,7 @@ class LeiFeed(PIFeed):
         args = ['ls-search', '-l', '-f', 'json']
         retcode, output = run_lei_command(args)
         if retcode != 0:
-            raise PublicInboxError(f"LEI list searches failed: {output.decode()}")
+            raise PublicInboxError(f'LEI list searches failed: {output.decode()}')
         json_output = output.decode()
         ls_data = json.loads(json_output)
         # Only return the names of v2 searches
@@ -139,7 +140,7 @@ class LeiFeed(PIFeed):
         leiargs = ['up', str(self.feed_dir)]
         retcode, output = run_lei_command(leiargs)
         if retcode != 0:
-            raise PublicInboxError(f"LEI update failed: {output.decode()}")
+            raise PublicInboxError(f'LEI update failed: {output.decode()}')
 
         try:
             finfo = self.load_feed_state()
@@ -152,20 +153,13 @@ class LeiFeed(PIFeed):
 
         updated = self.feed_updated(highest_known_epoch)
 
-        self.save_feed_state(
-            epoch=highest_known_epoch,
-            success=True
-        )
+        self.save_feed_state(epoch=highest_known_epoch, success=True)
 
         # Do we have a new epoch?
         highest_existing_epoch = self.get_highest_epoch()
         if highest_existing_epoch > highest_known_epoch:
-            logger.debug('New epoch detected for LEI search %s: %d',
-                        self.feed_dir, highest_existing_epoch)
-            self.save_feed_state(
-                epoch=highest_existing_epoch,
-                success=True
-            )
+            logger.debug('New epoch detected for LEI search %s: %d', self.feed_dir, highest_existing_epoch)
+            self.save_feed_state(epoch=highest_existing_epoch, success=True)
             return self.STATUS_UPDATED
 
         return self.STATUS_UPDATED if updated else self.STATUS_NOCHANGE

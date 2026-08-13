@@ -137,9 +137,7 @@ class TestCheckReloadConfig:
 
     @patch('korgalore.gui.load_config')
     @patch('korgalore.gui.validate_config_file')
-    def test_no_reload_when_unchanged(
-        self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_no_reload_when_unchanged(self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path) -> None:
         cfgpath = tmp_path / 'korgalore.toml'
         cfgpath.write_text('[main]\n')
         ctx = _make_ctx({'gui': {'sync_interval': 300}}, cfgpath)
@@ -152,9 +150,7 @@ class TestCheckReloadConfig:
 
     @patch('korgalore.gui.load_config')
     @patch('korgalore.gui.validate_config_file', return_value=(True, ''))
-    def test_reloads_when_mtime_changes(
-        self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_reloads_when_mtime_changes(self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path) -> None:
         cfgpath = tmp_path / 'korgalore.toml'
         cfgpath.write_text('[main]\n')
         new_config = {'gui': {'sync_interval': 600}, 'targets': {}}
@@ -202,8 +198,7 @@ class TestCheckReloadConfig:
         mock_validate.assert_not_called()
 
     @patch('korgalore.gui.load_config')
-    @patch('korgalore.gui.validate_config_file',
-           return_value=(False, 'syntax error'))
+    @patch('korgalore.gui.validate_config_file', return_value=(False, 'syntax error'))
     def test_keeps_old_config_on_validation_failure(
         self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path
     ) -> None:
@@ -225,8 +220,7 @@ class TestCheckReloadConfig:
         assert ctx.obj['config'] is original_config
 
     @patch('korgalore.gui.load_config')
-    @patch('korgalore.gui.validate_config_file',
-           return_value=(False, 'syntax error'))
+    @patch('korgalore.gui.validate_config_file', return_value=(False, 'syntax error'))
     def test_updates_mtime_on_validation_failure(
         self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path
     ) -> None:
@@ -250,9 +244,7 @@ class TestCheckReloadConfig:
 
     @patch('korgalore.gui.load_config')
     @patch('korgalore.gui.validate_config_file', return_value=(True, ''))
-    def test_clears_cached_instances(
-        self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_clears_cached_instances(self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path) -> None:
         cfgpath = tmp_path / 'korgalore.toml'
         cfgpath.write_text('[main]\n')
         mock_load.return_value = {'gui': {}}
@@ -280,8 +272,7 @@ class TestEditConfigMtimeUpdate:
     @patch('korgalore.gui.validate_config_file', return_value=(True, ''))
     @patch('subprocess.Popen')
     def test_edit_config_updates_mtime(
-        self, mock_popen: MagicMock, mock_validate: MagicMock,
-        mock_load: MagicMock, tmp_path: Path
+        self, mock_popen: MagicMock, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path
     ) -> None:
         cfgpath = tmp_path / 'korgalore.toml'
         cfgpath.write_text('[main]\n')

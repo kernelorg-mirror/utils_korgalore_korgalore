@@ -19,16 +19,21 @@ class ImapTarget:
 
     DEFAULT_LABELS: List[str] = []
 
-    def __init__(self, identifier: str, server: str, username: str,
-                 folder: str = 'INBOX',
-                 password: Optional[str] = None,
-                 password_file: Optional[str] = None,
-                 timeout: int = 60,
-                 auth_type: str = 'password',
-                 client_id: Optional[str] = None,
-                 tenant: str = 'common',
-                 token: Optional[str] = None,
-                 interactive: bool = True) -> None:
+    def __init__(
+        self,
+        identifier: str,
+        server: str,
+        username: str,
+        folder: str = 'INBOX',
+        password: Optional[str] = None,
+        password_file: Optional[str] = None,
+        timeout: int = 60,
+        auth_type: str = 'password',
+        client_id: Optional[str] = None,
+        tenant: str = 'common',
+        token: Optional[str] = None,
+        interactive: bool = True,
+    ) -> None:
         """Initialize IMAP service.
 
         Args:
@@ -60,17 +65,13 @@ class ImapTarget:
 
         # Validate required configuration
         if not server:
-            raise ConfigurationError(
-                f"No server specified for IMAP target: {identifier}"
-            )
+            raise ConfigurationError(f'No server specified for IMAP target: {identifier}')
 
         if not username:
-            raise ConfigurationError(
-                f"No username specified for IMAP target: {identifier}"
-            )
+            raise ConfigurationError(f'No username specified for IMAP target: {identifier}')
 
         # Initialize authentication based on auth_type
-        self._oauth2_authenticator: Optional["ImapOAuth2Authenticator"] = None
+        self._oauth2_authenticator: Optional['ImapOAuth2Authenticator'] = None
         self.password: Optional[str] = None
 
         if auth_type == 'oauth2':
@@ -84,6 +85,7 @@ class ImapTarget:
             # Generate default token file path if not specified
             if not token:
                 from korgalore.cli import get_xdg_config_dir
+
                 config_dir = get_xdg_config_dir()
                 token = str(config_dir / f'imap-{identifier}-oauth2-token.json')
 
@@ -102,19 +104,14 @@ class ImapTarget:
             elif password_file:
                 password_path = Path(password_file).expanduser()
                 if not password_path.exists():
-                    raise ConfigurationError(
-                        f"Password file not found: {password_file}"
-                    )
+                    raise ConfigurationError(f'Password file not found: {password_file}')
                 with open(password_path, 'r') as f:
                     self.password = f.read().strip()
             else:
-                raise ConfigurationError(
-                    f"No password or password_file specified for IMAP target: {identifier}"
-                )
+                raise ConfigurationError(f'No password or password_file specified for IMAP target: {identifier}')
         else:
             raise ConfigurationError(
-                f"Invalid auth_type '{auth_type}' for IMAP target: {identifier}. "
-                "Must be 'password' or 'oauth2'."
+                f"Invalid auth_type '{auth_type}' for IMAP target: {identifier}. Must be 'password' or 'oauth2'."
             )
 
         # Connection timeout
@@ -138,9 +135,7 @@ class ImapTarget:
             AuthenticationError: If authentication fails.
         """
         if self._oauth2_authenticator is None:
-            raise ConfigurationError(
-                f"Target '{self.identifier}' is not configured for OAuth2 authentication."
-            )
+            raise ConfigurationError(f"Target '{self.identifier}' is not configured for OAuth2 authentication.")
 
         self._oauth2_authenticator.reauthenticate()
         # Reset connection to force reconnect with new credentials
@@ -167,29 +162,24 @@ class ImapTarget:
                     self._authenticate_oauth2()
                 else:
                     if self.password is None:
-                        raise RemoteError(
-                            f"No password available for IMAP target: {self.identifier}"
-                        )
+                        raise RemoteError(f'No password available for IMAP target: {self.identifier}')
                     self.imap.login(self.username, self.password)
             except imaplib.IMAP4.error as e:
-                raise RemoteError(
-                    f"IMAP authentication failed for {self.server}: {e}"
-                ) from e
+                raise RemoteError(f'IMAP authentication failed for {self.server}: {e}') from e
 
             # Verify folder exists (don't auto-create)
             try:
                 status, _ = self.imap.select(self.folder, readonly=True)
                 if status != 'OK':
-                    raise ConfigurationError(
-                        f"Folder '{self.folder}' does not exist on IMAP server {self.server}"
-                    )
+                    raise ConfigurationError(f"Folder '{self.folder}' does not exist on IMAP server {self.server}")
             except imaplib.IMAP4.error as e:
                 raise ConfigurationError(
                     f"Folder '{self.folder}' does not exist on IMAP server {self.server}: {e}"
                 ) from e
 
-            logger.debug('IMAP service initialized: server=%s, folder=%s, auth_type=%s',
-                        self.server, self.folder, self.auth_type)
+            logger.debug(
+                'IMAP service initialized: server=%s, folder=%s, auth_type=%s', self.server, self.folder, self.auth_type
+            )
 
     def _authenticate_oauth2(self) -> None:
         """Authenticate using OAuth2 XOAUTH2 mechanism.
@@ -199,9 +189,7 @@ class ImapTarget:
             AuthenticationError: If OAuth2 token is invalid/expired.
         """
         if self._oauth2_authenticator is None or self.imap is None:
-            raise RemoteError(
-                f"OAuth2 authenticator not configured for IMAP target: {self.identifier}"
-            )
+            raise RemoteError(f'OAuth2 authenticator not configured for IMAP target: {self.identifier}')
 
         from korgalore.oauth2_imap import xoauth2_callback
 
@@ -214,9 +202,7 @@ class ImapTarget:
             error_str = str(e)
             # Check for authentication failure indicators
             if 'AUTHENTICATE' in error_str or 'authentication' in error_str.lower():
-                raise RemoteError(
-                    f"IMAP XOAUTH2 authentication failed for {self.server}: {e}"
-                ) from e
+                raise RemoteError(f'IMAP XOAUTH2 authentication failed for {self.server}: {e}') from e
             raise
 
     def _check_message_exists(self, message_id: str, folder: str) -> bool:
@@ -250,8 +236,7 @@ class ImapTarget:
             # data[0] is a space-separated list of message numbers
             message_nums = data[0].split() if data[0] else []
             if message_nums:
-                logger.debug('Message-ID %s already exists in folder %s',
-                            message_id, folder)
+                logger.debug('Message-ID %s already exists in folder %s', message_id, folder)
                 return True
 
             return False
@@ -266,7 +251,7 @@ class ImapTarget:
         labels: List[str],
         feed_name: Optional[str] = None,
         delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None
+        subfolder: Optional[str] = None,
     ) -> Any:
         """Import raw email message to IMAP server.
 
@@ -288,7 +273,7 @@ class ImapTarget:
             self.connect()
             imap = self.imap
             if imap is None:
-                raise RemoteError("IMAP connection not established.")
+                raise RemoteError('IMAP connection not established.')
 
         # Compute effective folder: base folder + subfolder if specified
         effective_folder = self.folder
@@ -299,8 +284,7 @@ class ImapTarget:
 
         # Check if message already exists in target folder
         if msg.message_id and self._check_message_exists(msg.message_id, effective_folder):
-            logger.debug('Skipping import: message %s already in folder %s',
-                        msg.message_id, effective_folder)
+            logger.debug('Skipping import: message %s already in folder %s', msg.message_id, effective_folder)
             return {'skipped': True}
 
         try:
@@ -315,31 +299,24 @@ class ImapTarget:
                         effective_folder,
                         '',  # No flags (empty string)
                         '',  # Use current time (empty string for default)
-                        msg.as_bytes(feed_name, delivery_name)
-                    )
+                        msg.as_bytes(feed_name, delivery_name),
+                    ),
                 )
 
                 if typ != 'OK':
-                    raise RemoteError(
-                        f"IMAP APPEND failed with status: {typ}, response: {data}"
-                    )
+                    raise RemoteError(f'IMAP APPEND failed with status: {typ}, response: {data}')
 
-                logger.debug('Delivered message to IMAP folder %s: %s',
-                           effective_folder, data)
+                logger.debug('Delivered message to IMAP folder %s: %s', effective_folder, data)
 
             except imaplib.IMAP4.error as e:
-                raise RemoteError(
-                    f"Failed to append message to folder '{effective_folder}': {e}"
-                ) from e
+                raise RemoteError(f"Failed to append message to folder '{effective_folder}': {e}") from e
 
             return data
 
         except (OSError, imaplib.IMAP4.error) as e:
             if isinstance(e, RemoteError):
                 raise
-            raise RemoteError(
-                f"IMAP delivery failed: {e}"
-            ) from e
+            raise RemoteError(f'IMAP delivery failed: {e}') from e
 
     def disconnect(self) -> None:
         """Close the IMAP connection.
@@ -353,7 +330,6 @@ class ImapTarget:
                 self.imap.logout()
                 logger.debug('IMAP connection closed for %s', self.identifier)
             except (OSError, imaplib.IMAP4.error) as e:
-                logger.debug('Error closing IMAP connection for %s: %s',
-                            self.identifier, e)
+                logger.debug('Error closing IMAP connection for %s: %s', self.identifier, e)
             finally:
                 self.imap = None

@@ -29,23 +29,17 @@ class PipeTarget:
         self.identifier = identifier
 
         if not command:
-            raise ConfigurationError(
-                f"Pipe target '{identifier}' requires a command"
-            )
+            raise ConfigurationError(f"Pipe target '{identifier}' requires a command")
 
         self.command = command
         # Parse command for validation
         try:
             self.command_args = shlex.split(command)
         except ValueError as e:
-            raise ConfigurationError(
-                f"Invalid command for pipe target '{identifier}': {e}"
-            ) from e
+            raise ConfigurationError(f"Invalid command for pipe target '{identifier}': {e}") from e
 
         if not self.command_args:
-            raise ConfigurationError(
-                f"Pipe target '{identifier}' requires a non-empty command"
-            )
+            raise ConfigurationError(f"Pipe target '{identifier}' requires a non-empty command")
 
     def connect(self) -> None:
         """Connect to pipe target (no-op for local command)."""
@@ -57,7 +51,7 @@ class PipeTarget:
         labels: List[str],
         feed_name: Optional[str] = None,
         delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None
+        subfolder: Optional[str] = None,
     ) -> Any:
         """Pipe message to the configured command.
 
@@ -80,25 +74,19 @@ class PipeTarget:
 
         try:
             result = subprocess.run(
-                command_with_args,
-                input=msg.as_bytes(feed_name, delivery_name),
-                capture_output=True
+                command_with_args, input=msg.as_bytes(feed_name, delivery_name), capture_output=True
             )
 
             if result.returncode != 0:
                 stderr = result.stderr.decode('utf-8', errors='replace').strip()
-                raise DeliveryError(
-                    f"Pipe command failed with exit code {result.returncode}: {stderr}"
-                )
+                raise DeliveryError(f'Pipe command failed with exit code {result.returncode}: {stderr}')
 
             logger.debug('Piped message to command: %s', self.command_args[0])
             return result.returncode
 
         except FileNotFoundError as e:
-            raise DeliveryError(
-                f"Pipe command not found: {self.command_args[0]}"
-            ) from e
+            raise DeliveryError(f'Pipe command not found: {self.command_args[0]}') from e
         except Exception as e:
             if isinstance(e, DeliveryError):
                 raise
-            raise DeliveryError(f"Failed to pipe message: {e}") from e
+            raise DeliveryError(f'Failed to pipe message: {e}') from e

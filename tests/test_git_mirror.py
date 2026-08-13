@@ -16,9 +16,7 @@ class TestRunGitCommandConfig:
     def test_no_config(self) -> None:
         """Without git_config, no -c flags are added."""
         with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=b'output', stderr=b''
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout=b'output', stderr=b'')
             run_git_command(None, ['status'])
             cmd = mock_run.call_args[0][0]
             assert '-c' not in cmd
@@ -27,27 +25,26 @@ class TestRunGitCommandConfig:
     def test_single_config(self) -> None:
         """-c key=value is inserted before --git-dir and subcommand."""
         with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=b'', stderr=b''
+            mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
+            run_git_command(
+                '/some/dir', ['fetch', 'origin'], git_config={'url.https://mirror/.insteadOf': 'https://canonical/'}
             )
-            run_git_command('/some/dir', ['fetch', 'origin'],
-                           git_config={'url.https://mirror/.insteadOf': 'https://canonical/'})
             cmd = mock_run.call_args[0][0]
             assert cmd == [
                 'git',
-                '-c', 'url.https://mirror/.insteadOf=https://canonical/',
-                '--git-dir', '/some/dir',
-                'fetch', 'origin',
+                '-c',
+                'url.https://mirror/.insteadOf=https://canonical/',
+                '--git-dir',
+                '/some/dir',
+                'fetch',
+                'origin',
             ]
 
     def test_multiple_configs(self) -> None:
         """Multiple config entries produce multiple -c flags."""
         with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=b'', stderr=b''
-            )
-            run_git_command(None, ['clone', 'url'],
-                           git_config={'key1': 'val1', 'key2': 'val2'})
+            mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
+            run_git_command(None, ['clone', 'url'], git_config={'key1': 'val1', 'key2': 'val2'})
             cmd = mock_run.call_args[0][0]
             # Both -c flags should appear before the subcommand
             assert cmd[0] == 'git'
@@ -60,9 +57,7 @@ class TestRunGitCommandConfig:
     def test_empty_config(self) -> None:
         """Empty git_config dict adds no -c flags."""
         with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=b'', stderr=b''
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
             run_git_command(None, ['status'], git_config={})
             cmd = mock_run.call_args[0][0]
             assert '-c' not in cmd
@@ -70,9 +65,7 @@ class TestRunGitCommandConfig:
     def test_none_config(self) -> None:
         """None git_config (default) adds no -c flags."""
         with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout=b'', stderr=b''
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
             run_git_command(None, ['status'], git_config=None)
             cmd = mock_run.call_args[0][0]
             assert '-c' not in cmd
@@ -210,6 +203,7 @@ class TestUpdateFeedMirror:
         }
         state_file = feed_dir / 'korgalore.feed'
         import json
+
         state_file.write_text(json.dumps(feed_state))
 
         # Epochs info matching remote (no new epochs, triggers fetch path)
@@ -218,6 +212,7 @@ class TestUpdateFeedMirror:
 
         # Mock manifest to return same epochs (triggers fetch, not clone)
         import gzip
+
         manifest = {'/lkml/git/0.git': {'fingerprint': 'changed'}}
         manifest_bytes = gzip.compress(json.dumps(manifest).encode())
         mock_response = MagicMock()
@@ -229,14 +224,15 @@ class TestUpdateFeedMirror:
             'url.https://tor.lore.kernel.org/.insteadOf': 'https://lore.kernel.org/',
         }
 
-        with patch('korgalore.lore_feed.run_git_command', return_value=(0, b'', b'')) as mock_git, \
-             patch.object(feed, 'feed_updated', return_value=True), \
-             patch.object(feed, 'save_feed_state'):
+        with (
+            patch('korgalore.lore_feed.run_git_command', return_value=(0, b'', b'')) as mock_git,
+            patch.object(feed, 'feed_updated', return_value=True),
+            patch.object(feed, 'save_feed_state'),
+        ):
             feed.update_feed()
 
             # Find the fetch call (there may be others for local ops)
-            fetch_calls = [c for c in mock_git.call_args_list
-                           if len(c[0]) >= 2 and 'fetch' in c[0][1]]
+            fetch_calls = [c for c in mock_git.call_args_list if len(c[0]) >= 2 and 'fetch' in c[0][1]]
             assert len(fetch_calls) == 1
             _, kwargs = fetch_calls[0]
             assert kwargs['git_config'] == expected_config
@@ -260,12 +256,14 @@ class TestUpdateFeedMirror:
         }
         state_file = feed_dir / 'korgalore.feed'
         import json
+
         state_file.write_text(json.dumps(feed_state))
 
         epochs_info = [{'epoch': 0, 'path': '/lkml/git/0.git', 'fpr': 'abc'}]
         (feed_dir / 'epochs.json').write_text(json.dumps(epochs_info))
 
         import gzip
+
         manifest = {'/lkml/git/0.git': {'fingerprint': 'changed'}}
         manifest_bytes = gzip.compress(json.dumps(manifest).encode())
         mock_response = MagicMock()
@@ -277,9 +275,11 @@ class TestUpdateFeedMirror:
             'url.https://sea.lore.kernel.org/.insteadOf': 'https://lore.kernel.org/',
         }
 
-        with patch('korgalore.lore_feed.run_git_command') as mock_git, \
-             patch.object(feed, 'feed_updated', return_value=True), \
-             patch.object(feed, 'save_feed_state'):
+        with (
+            patch('korgalore.lore_feed.run_git_command') as mock_git,
+            patch.object(feed, 'feed_updated', return_value=True),
+            patch.object(feed, 'save_feed_state'),
+        ):
             # First fetch (--shallow-since) fails, second fetch (--depth=1) succeeds
             mock_git.side_effect = [
                 (128, b'', b'fatal: error processing shallow info: 4'),
@@ -287,8 +287,7 @@ class TestUpdateFeedMirror:
             ]
             feed.update_feed()
 
-            fetch_calls = [c for c in mock_git.call_args_list
-                           if len(c[0]) >= 2 and 'fetch' in c[0][1]]
+            fetch_calls = [c for c in mock_git.call_args_list if len(c[0]) >= 2 and 'fetch' in c[0][1]]
             assert len(fetch_calls) == 2
             # First call uses --shallow-since
             assert '--shallow-since=1.week.ago' in fetch_calls[0][0][1]

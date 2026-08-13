@@ -71,11 +71,7 @@ class RawMessage:
                 pass
         return self._message_id
 
-    def as_bytes(
-        self,
-        feed_name: Optional[str] = None,
-        delivery_name: Optional[str] = None
-    ) -> bytes:
+    def as_bytes(self, feed_name: Optional[str] = None, delivery_name: Optional[str] = None) -> bytes:
         """Return message as binary data suitable for delivery.
 
         Performs any necessary transformations for target delivery:
@@ -114,17 +110,17 @@ class RawMessage:
         """
         first_line_max = max_line - len(name) - 2  # account for ": "
         if len(value) <= first_line_max:
-            return f"{name}: {value}"
+            return f'{name}: {value}'
 
         # Split value into words for wrapping
         words = value.split(' ')
         lines = []
-        current_line = f"{name}:"
+        current_line = f'{name}:'
 
         for word in words:
             # Check if adding this word exceeds max length
             test_line = current_line + ' ' + word if current_line.endswith(':') is False else current_line + ' ' + word
-            if current_line == f"{name}:":
+            if current_line == f'{name}:':
                 test_line = current_line + ' ' + word
             else:
                 test_line = current_line + ' ' + word
@@ -142,12 +138,7 @@ class RawMessage:
         lines.append(current_line)
         return '\n'.join(lines)
 
-    def _inject_trace_header(
-        self,
-        message: bytes,
-        feed_name: str,
-        delivery_name: str
-    ) -> bytes:
+    def _inject_trace_header(self, message: bytes, feed_name: str, delivery_name: str) -> bytes:
         """Inject X-Korgalore-Trace header at the end of headers.
 
         Operates directly on bytes without using the parsed EmailMessage.
@@ -163,10 +154,7 @@ class RawMessage:
         # Build the trace header
         # Format: X-Korgalore-Trace: from feed=[feed] for delivery=[delivery]; v[ver]; [date]
         date_str = formatdate(localtime=True)
-        trace_value = (
-            f"from feed={feed_name} for delivery={delivery_name}; "
-            f"v{__version__}; {date_str}"
-        )
+        trace_value = f'from feed={feed_name} for delivery={delivery_name}; v{__version__}; {date_str}'
         trace_header = self._wrap_header('X-Korgalore-Trace', trace_value) + '\n'
         trace_bytes = trace_header.encode('utf-8')
 
@@ -177,4 +165,4 @@ class RawMessage:
             # No body, append header at the end
             return message + trace_bytes
         # Insert header before the blank line
-        return message[:boundary + 1] + trace_bytes + message[boundary + 1:]
+        return message[: boundary + 1] + trace_bytes + message[boundary + 1 :]

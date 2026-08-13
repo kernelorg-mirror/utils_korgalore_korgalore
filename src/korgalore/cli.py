@@ -109,8 +109,8 @@ def get_maintainers_file(data_dir: Path) -> Path:
             logger.warning('Failed to fetch fresh MAINTAINERS file, using stale cache: %s', e)
             return cache_path
         raise click.ClickException(
-            f"Failed to fetch MAINTAINERS file from {MAINTAINERS_URL}: {e}\n"
-            "Use -m/--maintainers to specify a local copy."
+            f'Failed to fetch MAINTAINERS file from {MAINTAINERS_URL}: {e}\n'
+            'Use -m/--maintainers to specify a local copy.'
         ) from e
 
     # Cache the file
@@ -232,13 +232,10 @@ def get_target(ctx: click.Context, identifier: str) -> Any:
             identifier=identifier,
             credentials_file=details.get('credentials', ''),
             token_file=details.get('token', None),
-            interactive=interactive
+            interactive=interactive,
         )
     elif target_type == 'maildir':
-        service = get_maildir_target(
-            identifier=identifier,
-            maildir_path=details.get('path', '')
-        )
+        service = get_maildir_target(identifier=identifier, maildir_path=details.get('path', ''))
     elif target_type == 'jmap':
         service = get_jmap_target(
             identifier=identifier,
@@ -247,7 +244,7 @@ def get_target(ctx: click.Context, identifier: str) -> Any:
             token=details.get('token', None),
             token_file=details.get('token_file', None),
             timeout=details.get('timeout', 60),
-            reqsession=get_requests_session()
+            reqsession=get_requests_session(),
         )
     elif target_type == 'imap':
         service = get_imap_target(
@@ -262,13 +259,10 @@ def get_target(ctx: click.Context, identifier: str) -> Any:
             client_id=details.get('client_id', None),
             tenant=details.get('tenant', 'common'),
             token=details.get('token', None),
-            interactive=interactive
+            interactive=interactive,
         )
     elif target_type == 'pipe':
-        service = get_pipe_target(
-            identifier=identifier,
-            command=details.get('command', '')
-        )
+        service = get_pipe_target(identifier=identifier, command=details.get('command', ''))
     else:
         logger.critical('Unknown target type "%s" for target "%s".', target_type, identifier)
         logger.critical('Supported types: gmail, maildir, jmap, imap, pipe')
@@ -281,16 +275,15 @@ def get_target(ctx: click.Context, identifier: str) -> Any:
     # allows the 'auth' command to work properly.
     if isinstance(service, GmailTarget) and service.needs_auth:
         raise AuthenticationError(
-            f"Gmail target '{identifier}' requires authentication.",
-            target_id=identifier,
-            target_type='gmail'
+            f"Gmail target '{identifier}' requires authentication.", target_id=identifier, target_type='gmail'
         )
 
     return service
 
 
-def get_gmail_target(identifier: str, credentials_file: str,
-                     token_file: Optional[str], interactive: bool = True) -> GmailTarget:
+def get_gmail_target(
+    identifier: str, credentials_file: str, token_file: Optional[str], interactive: bool = True
+) -> GmailTarget:
     """Create a Gmail target service instance."""
     if not credentials_file:
         logger.critical('No credentials file specified for Gmail target: %s', identifier)
@@ -299,10 +292,9 @@ def get_gmail_target(identifier: str, credentials_file: str,
         cfgdir = get_xdg_config_dir()
         token_file = str(cfgdir / f'gmail-{identifier}-token.json')
     try:
-        gt = GmailTarget(identifier=identifier,
-                         credentials_file=credentials_file,
-                         token_file=token_file,
-                         interactive=interactive)
+        gt = GmailTarget(
+            identifier=identifier, credentials_file=credentials_file, token_file=token_file, interactive=interactive
+        )
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
         raise click.Abort() from fe
@@ -325,10 +317,15 @@ def get_maildir_target(identifier: str, maildir_path: str) -> MaildirTarget:
     return mt
 
 
-def get_jmap_target(identifier: str, server: str, username: str,
-                    token: Optional[str], token_file: Optional[str],
-                    timeout: int,
-                    reqsession: Optional[requests.Session] = None) -> JmapTarget:
+def get_jmap_target(
+    identifier: str,
+    server: str,
+    username: str,
+    token: Optional[str],
+    token_file: Optional[str],
+    timeout: int,
+    reqsession: Optional[requests.Session] = None,
+) -> JmapTarget:
     """Create a JMAP target service instance."""
     if not server:
         logger.critical('No server specified for JMAP target: %s', identifier)
@@ -351,7 +348,7 @@ def get_jmap_target(identifier: str, server: str, username: str,
             token=token,
             token_file=token_file,
             timeout=timeout,
-            reqsession=reqsession
+            reqsession=reqsession,
         )
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
@@ -360,14 +357,20 @@ def get_jmap_target(identifier: str, server: str, username: str,
     return jt
 
 
-def get_imap_target(identifier: str, server: str, username: str,
-                    folder: str, password: Optional[str],
-                    password_file: Optional[str], timeout: int,
-                    auth_type: str = 'password',
-                    client_id: Optional[str] = None,
-                    tenant: str = 'common',
-                    token: Optional[str] = None,
-                    interactive: bool = True) -> ImapTarget:
+def get_imap_target(
+    identifier: str,
+    server: str,
+    username: str,
+    folder: str,
+    password: Optional[str],
+    password_file: Optional[str],
+    timeout: int,
+    auth_type: str = 'password',
+    client_id: Optional[str] = None,
+    tenant: str = 'common',
+    token: Optional[str] = None,
+    interactive: bool = True,
+) -> ImapTarget:
     """Create an IMAP target service instance."""
     if not server:
         logger.critical('No server specified for IMAP target: %s', identifier)
@@ -398,7 +401,7 @@ def get_imap_target(identifier: str, server: str, username: str,
             client_id=client_id,
             tenant=tenant,
             token=token,
-            interactive=interactive
+            interactive=interactive,
         )
     except ConfigurationError as fe:
         logger.critical('Error: %s', str(fe))
@@ -494,16 +497,16 @@ def validate_config_file(cfgpath: Path) -> Tuple[bool, str]:
         A tuple of (is_valid, error_message). If valid, error_message is empty.
     """
     if not cfgpath.exists():
-        return False, f"Configuration file not found: {cfgpath}"
+        return False, f'Configuration file not found: {cfgpath}'
 
     try:
         with open(cfgpath, 'rb') as cf:
             tomllib.load(cf)
-        return True, ""
+        return True, ''
     except tomllib.TOMLDecodeError as e:
-        return False, f"TOML syntax error: {e}"
+        return False, f'TOML syntax error: {e}'
     except Exception as e:
-        return False, f"Error reading config: {e}"
+        return False, f'Error reading config: {e}'
 
 
 def merge_config(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
@@ -550,9 +553,12 @@ def load_config(cfgfile: Path) -> Dict[str, Any]:
                     extra = tomllib.load(cf)
                 merge_config(config, extra)
 
-        logger.debug('Config loaded with %s targets, %s deliveries, and %s feeds',
-                     len(config.get('targets', {})), len(config.get('deliveries', {})),
-                     len(config.get('feeds', {})))
+        logger.debug(
+            'Config loaded with %s targets, %s deliveries, and %s feeds',
+            len(config.get('targets', {})),
+            len(config.get('deliveries', {})),
+            len(config.get('feeds', {})),
+        )
 
         return config
 
@@ -561,9 +567,14 @@ def load_config(cfgfile: Path) -> Dict[str, Any]:
         raise click.Abort() from e
 
 
-def retry_failed_commits(feed_dir: Path, pi_feed: Union[LeiFeed, LoreFeed], target_service: Any,
-                         labels: List[str], delivery_name: str,
-                         subfolder: Optional[str] = None) -> None:
+def retry_failed_commits(
+    feed_dir: Path,
+    pi_feed: Union[LeiFeed, LoreFeed],
+    target_service: Any,
+    labels: List[str],
+    delivery_name: str,
+    subfolder: Optional[str] = None,
+) -> None:
     """Retry previously failed message deliveries for a specific delivery."""
     failed_commits = pi_feed.get_failed_commits_for_delivery(delivery_name)
 
@@ -595,10 +606,17 @@ def retry_failed_commits(feed_dir: Path, pi_feed: Union[LeiFeed, LoreFeed], targ
     pi_feed.feed_unlock()
 
 
-def deliver_commit(delivery_name: str, target: Any, feed: Union[LeiFeed, LoreFeed], epoch: int, commit: str,
-                   labels: List[str], was_failing: bool = False,
-                   bozofilter: Optional[Set[str]] = None,
-                   subfolder: Optional[str] = None) -> Optional[str]:
+def deliver_commit(
+    delivery_name: str,
+    target: Any,
+    feed: Union[LeiFeed, LoreFeed],
+    epoch: int,
+    commit: str,
+    labels: List[str],
+    was_failing: bool = False,
+    bozofilter: Optional[Set[str]] = None,
+    subfolder: Optional[str] = None,
+) -> Optional[str]:
     """Deliver a single message to the target.
 
     Args:
@@ -623,8 +641,7 @@ def deliver_commit(delivery_name: str, target: Any, feed: Union[LeiFeed, LoreFee
     try:
         if feed.is_noop_commit(epoch, commit):
             logger.debug('Skipping no-op commit %s in epoch %d', commit, epoch)
-            feed.mark_successful_delivery(delivery_name, epoch, commit,
-                                              was_failing=was_failing)
+            feed.mark_successful_delivery(delivery_name, epoch, commit, was_failing=was_failing)
             return SKIPPED_NOOP_COMMIT
         raw_message = feed.get_message_at_commit(epoch, commit)
         target.connect()
@@ -637,17 +654,21 @@ def deliver_commit(delivery_name: str, target: Any, feed: Union[LeiFeed, LoreFee
             if is_bozofied(from_header, bozofilter):
                 logger.debug('Skipping bozofied sender: %s', from_header)
                 # Mark as successful to avoid retrying
-                feed.mark_successful_delivery(delivery_name, epoch, commit,
-                                              message=raw_message, was_failing=was_failing)
+                feed.mark_successful_delivery(
+                    delivery_name, epoch, commit, message=raw_message, was_failing=was_failing
+                )
                 return SKIPPED_BOZOFILTER
 
         if logger.isEnabledFor(logging.DEBUG):
             subject = msg.get('Subject', '(no subject)')
             logger.debug(' -> %s', subject)
-        target.import_message(raw_message, labels=labels,
-                              feed_name=format_key_for_display(feed.feed_key),
-                              delivery_name=delivery_name,
-                              subfolder=subfolder)
+        target.import_message(
+            raw_message,
+            labels=labels,
+            feed_name=format_key_for_display(feed.feed_key),
+            delivery_name=delivery_name,
+            subfolder=subfolder,
+        )
         feed.mark_successful_delivery(delivery_name, epoch, commit, message=raw_message, was_failing=was_failing)
         return msgid
     except Exception as e:
@@ -683,9 +704,7 @@ def normalize_feed_key(feed_url: str) -> str:
     return sanitized
 
 
-
-def generate_subscription_config(feed_key: str, url: str,
-                                 target: str, labels: List[str]) -> str:
+def generate_subscription_config(feed_key: str, url: str, target: str, labels: List[str]) -> str:
     """Generate TOML config content for a feed subscription.
 
     Args:
@@ -710,16 +729,16 @@ def generate_subscription_config(feed_key: str, url: str,
 
     lines = [
         f"# Auto-generated by: kgl subscribe add '{url}'",
-        f"# Generated: {timestamp}",
-        "",
-        f"[feeds.{feed_key}]",
+        f'# Generated: {timestamp}',
+        '',
+        f'[feeds.{feed_key}]',
         f"url = '{url_value}'",
-        "",
-        f"[deliveries.{feed_key}]",
+        '',
+        f'[deliveries.{feed_key}]',
         f"feed = '{feed_key}'",
         f"target = '{target}'",
-        f"labels = [{labels_str}]",
-        "",
+        f'labels = [{labels_str}]',
+        '',
     ]
 
     return '\n'.join(lines)
@@ -816,12 +835,10 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
             if isinstance(subfolder, list):
                 raise ConfigurationError(
                     f"subfolder for delivery '{delivery_name}' must be a string, not a list. "
-                    "Use labels for multiple folders (JMAP only)."
+                    'Use labels for multiple folders (JMAP only).'
                 )
             if not isinstance(subfolder, str):
-                raise ConfigurationError(
-                    f"subfolder for delivery '{delivery_name}' must be a string"
-                )
+                raise ConfigurationError(f"subfolder for delivery '{delivery_name}' must be a string")
             # Treat empty string as None
             if not subfolder:
                 subfolder = None
@@ -839,7 +856,7 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
                         ) from e
                 else:
                     raise ConfigurationError(
-                        f"strftime templates in subfolder are only supported for Maildir targets "
+                        f'strftime templates in subfolder are only supported for Maildir targets '
                         f"(delivery '{delivery_name}' uses {type(target).__name__})"
                     )
         # Validate labels don't contain strftime templates
@@ -847,8 +864,7 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
         for label in labels:
             if '%' in label:
                 raise ConfigurationError(
-                    f"strftime templates in labels are not supported "
-                    f"(delivery '{delivery_name}' has label '{label}')"
+                    f"strftime templates in labels are not supported (delivery '{delivery_name}' has label '{label}')"
                 )
         # Lock for the entire duration
         dmap[delivery_name] = (feed, target, labels, subfolder)
@@ -894,25 +910,28 @@ def unlock_all_feeds(ctx: click.Context) -> None:
         feed.feed_unlock()
 
 
-def update_all_feeds(ctx: click.Context,
-                     status_callback: Optional[Callable[[str], None]] = None,
-                     ) -> Tuple[List[str], List[str]]:
+def update_all_feeds(
+    ctx: click.Context,
+    status_callback: Optional[Callable[[str], None]] = None,
+) -> Tuple[List[str], List[str]]:
     """Update all feeds and return (updated_feeds, initialized_feeds)."""
     updated_feeds: List[str] = []
     initialized_feeds: List[str] = []
     feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
 
     if status_callback:
-        status_callback("Querying feeds...")
+        status_callback('Querying feeds...')
 
-    with click.progressbar(feeds.keys(),
-                           label='Updating feeds',
-                           show_pos=True,
-                           item_show_func=lambda x: format_key_for_display(x in feeds and str(feeds[x].feed_url) or x),
-                           hidden=ctx.obj['hide_bar']) as bar:
+    with click.progressbar(
+        feeds.keys(),
+        label='Updating feeds',
+        show_pos=True,
+        item_show_func=lambda x: format_key_for_display(x in feeds and str(feeds[x].feed_url) or x),
+        hidden=ctx.obj['hide_bar'],
+    ) as bar:
         for feed_key in bar:
             if status_callback:
-                status_callback(f"Querying {format_key_for_display(feed_key)}...")
+                status_callback(f'Querying {format_key_for_display(feed_key)}...')
             feed = feeds[feed_key]
             try:
                 status = feed.update_feed()
@@ -949,13 +968,19 @@ def retry_all_failed_deliveries(ctx: click.Context) -> None:
         logger.debug('No failed commits to retry for any delivery.')
         return
 
-    with click.progressbar(retry_list,
-                           label='Reattempting delivery',
-                           show_pos=True,
-                           hidden=ctx.obj['hide_bar']) as bar:
-        for (delivery_name, target, feed, epoch, commit, labels, subfolder) in bar:
-            deliver_commit(delivery_name, target, feed, epoch, commit, labels,
-                           was_failing=True, bozofilter=bozo_set, subfolder=subfolder)
+    with click.progressbar(retry_list, label='Reattempting delivery', show_pos=True, hidden=ctx.obj['hide_bar']) as bar:
+        for delivery_name, target, feed, epoch, commit, labels, subfolder in bar:
+            deliver_commit(
+                delivery_name,
+                target,
+                feed,
+                epoch,
+                commit,
+                labels,
+                was_failing=True,
+                bozofilter=bozo_set,
+                subfolder=subfolder,
+            )
 
 
 @click.group()
@@ -1000,6 +1025,7 @@ def main(ctx: click.Context, cfgfile: str, logfile: Optional[click.Path]) -> Non
 
     # Seed with default lore.kernel.org node and read lore.useragentplus.
     import korgalore
+
     korgalore._user_agent_plus = get_lore_node(ctx).user_agent_plus
 
     # Check git is available and set GIT_HTTP_USER_AGENT
@@ -1069,8 +1095,9 @@ def auth(ctx: click.Context, target: Optional[str]) -> None:
         for identifier, details in targets.items():
             target_type = details.get('type', '')
             if target_type in NO_AUTH_TARGETS:
-                logger.debug('Skipping target that does not require authentication: %s (type: %s)',
-                            identifier, target_type)
+                logger.debug(
+                    'Skipping target that does not require authentication: %s (type: %s)', identifier, target_type
+                )
                 continue
             auth_targets.append((identifier, details))
 
@@ -1166,8 +1193,7 @@ def labels(ctx: click.Context, target: str, ids: bool = False) -> None:
 
     # Check if target supports labels
     if not hasattr(gs, 'list_labels'):
-        logger.warning('Target "%s" does not support labels (maildir targets ignore labels).',
-                      target)
+        logger.warning('Target "%s" does not support labels (maildir targets ignore labels).', target)
         return
 
     try:
@@ -1176,7 +1202,7 @@ def labels(ctx: click.Context, target: str, ids: bool = False) -> None:
         labels_list = gs.list_labels()
 
         if not labels_list:
-            logger.info("No labels found.")
+            logger.info('No labels found.')
             return
 
         logger.debug('Found %d labels', len(labels_list))
@@ -1192,9 +1218,13 @@ def labels(ctx: click.Context, target: str, ids: bool = False) -> None:
         raise click.Abort() from e
 
 
-def perform_pull(ctx: click.Context, no_update: bool, force: bool,
-                 delivery_name: Optional[str],
-                 status_callback: Optional[Callable[[str], None]] = None) -> Tuple[Dict[str, int], Set[str]]:
+def perform_pull(
+    ctx: click.Context,
+    no_update: bool,
+    force: bool,
+    delivery_name: Optional[str],
+    status_callback: Optional[Callable[[str], None]] = None,
+) -> Tuple[Dict[str, int], Set[str]]:
     """Execute the pull logic and return changes.
 
     Returns:
@@ -1289,23 +1319,34 @@ def perform_pull(ctx: click.Context, no_update: bool, force: bool,
             continue
         logger.debug('Delivering %d messages to target: %s', len(run_list), target_name)
 
-        with click.progressbar(run_list,
-                              label='Delivering to ' + target_name,
-                              show_pos=True,
-                              item_show_func=lambda x: x is not None and format_key_for_display(x[0]) or None,
-                              hidden=ctx.obj['hide_bar']) as bar:
+        with click.progressbar(
+            run_list,
+            label='Delivering to ' + target_name,
+            show_pos=True,
+            item_show_func=lambda x: x is not None and format_key_for_display(x[0]) or None,
+            hidden=ctx.obj['hide_bar'],
+        ) as bar:
             # We bail on a target if we have more than 5 consecutive failures
             consecutive_failures = 0
             prev_dname: Optional[str] = None
             for dname, target, feed, epoch, commit, labels, subfolder in bar:
                 if status_callback and dname != prev_dname:
-                    status_callback(f"Delivering {format_key_for_display(dname)}...")
+                    status_callback(f'Delivering {format_key_for_display(dname)}...')
                     prev_dname = dname
                 if consecutive_failures >= 5:
                     logger.error('Aborting deliveries to target "%s" due to repeated failures.', target_name)
                     break
-                msgid = deliver_commit(dname, target, feed, epoch, commit, labels,
-                                       was_failing=False, bozofilter=bozo_set, subfolder=subfolder)
+                msgid = deliver_commit(
+                    dname,
+                    target,
+                    feed,
+                    epoch,
+                    commit,
+                    labels,
+                    was_failing=False,
+                    bozofilter=bozo_set,
+                    subfolder=subfolder,
+                )
                 if msgid is None:
                     consecutive_failures += 1
                     continue
@@ -1351,10 +1392,10 @@ def pull(ctx: click.Context, max_mail: int, no_update: bool, force: bool, delive
         logger.info('Pull complete with updates:')
         tracked_ids = []
         if not delivery_name:
-             # We need to re-fetch tracked IDs to identify them in output
-             # This is a bit inefficient but safe
-             manifest = get_tracking_manifest(ctx)
-             tracked_ids = [t.track_id for t in manifest.get_active_threads()]
+            # We need to re-fetch tracked IDs to identify them in output
+            # This is a bit inefficient but safe
+            manifest = get_tracking_manifest(ctx)
+            tracked_ids = [t.track_id for t in manifest.get_active_threads()]
 
         for dname, count in changes.items():
             if dname in tracked_ids:
@@ -1365,9 +1406,13 @@ def pull(ctx: click.Context, max_mail: int, no_update: bool, force: bool, delive
         logger.info('Pull complete with no updates.')
 
 
-def perform_yank(ctx: click.Context, target_name: str, msgid_or_url: str,
-                 thread: bool = False,
-                 labels_list: Optional[List[str]] = None) -> Tuple[int, int]:
+def perform_yank(
+    ctx: click.Context,
+    target_name: str,
+    msgid_or_url: str,
+    thread: bool = False,
+    labels_list: Optional[List[str]] = None,
+) -> Tuple[int, int]:
     """Perform yank operation (usable from CLI and GUI).
 
     Args:
@@ -1431,12 +1476,10 @@ def perform_yank(ctx: click.Context, target_name: str, msgid_or_url: str,
 @main.command()
 @click.pass_context
 @click.option('--target', '-t', default=None, help='Target to upload the message to (default: first configured)')
-@click.option('--labels', '-l', multiple=True,
-              help='Labels to apply (repeatable or comma-separated)')
+@click.option('--labels', '-l', multiple=True, help='Labels to apply (repeatable or comma-separated)')
 @click.option('--thread', '-T', is_flag=True, help='Fetch and upload the entire thread')
 @click.argument('msgid_or_url', type=str, nargs=1)
-def yank(ctx: click.Context, target: Optional[str],
-         labels: Tuple[str, ...], thread: bool, msgid_or_url: str) -> None:
+def yank(ctx: click.Context, target: Optional[str], labels: Tuple[str, ...], thread: bool, msgid_or_url: str) -> None:
     """Yank a single message or entire thread to a target."""
     # Get the target service
     config = ctx.obj.get('config', {})
@@ -1476,10 +1519,7 @@ def yank(ctx: click.Context, target: Optional[str],
         failed = 0
 
         ts.connect()
-        with click.progressbar(messages,
-                              label='Uploading thread',
-                              show_pos=True,
-                              hidden=ctx.obj['hide_bar']) as bar:
+        with click.progressbar(messages, label='Uploading thread', show_pos=True, hidden=ctx.obj['hide_bar']) as bar:
             for raw_message in bar:
                 try:
                     msg = parse_message(raw_message)
@@ -1563,15 +1603,13 @@ def map_tracked_threads(ctx: click.Context) -> List[str]:
         try:
             lei_feed = LeiFeed(tracked.track_id, lei_url)
         except ConfigurationError as e:
-            logger.warning('Tracked thread %s not recognized by lei: %s',
-                          tracked.track_id, str(e))
+            logger.warning('Tracked thread %s not recognized by lei: %s', tracked.track_id, str(e))
             continue
 
         try:
             target = get_target(ctx, tracked.target)
         except click.Abort:
-            logger.warning('Target "%s" not available for tracked thread %s',
-                          tracked.target, tracked.track_id)
+            logger.warning('Target "%s" not available for tracked thread %s', tracked.target, tracked.track_id)
             continue
 
         # Add to feeds and deliveries
@@ -1603,11 +1641,9 @@ def track(ctx: click.Context) -> None:
 @track.command('add')
 @click.argument('msgid_or_url', type=str)
 @click.option('--target', '-t', default=None, help='Target for deliveries (default: first configured)')
-@click.option('--labels', '-l', multiple=True,
-              help='Labels to apply (repeatable or comma-separated)')
+@click.option('--labels', '-l', multiple=True, help='Labels to apply (repeatable or comma-separated)')
 @click.pass_context
-def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
-              labels: Tuple[str, ...]) -> None:
+def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str], labels: Tuple[str, ...]) -> None:
     """Start tracking a thread by message ID or lore URL."""
     config = ctx.obj.get('config', {})
     targets = config.get('targets', {})
@@ -1626,8 +1662,7 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
             logger.warning('Already tracking this thread as %s', existing.track_id)
             return
         # Offer to resume
-        logger.info('Thread previously tracked as %s (status: %s)',
-                   existing.track_id, existing.status.value)
+        logger.info('Thread previously tracked as %s (status: %s)', existing.track_id, existing.status.value)
         if click.confirm('Resume tracking?'):
             manifest.resume_thread(existing.track_id)
             logger.info('Resumed tracking thread %s', existing.track_id)
@@ -1638,7 +1673,8 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
     # Create lei search directory
     data_dir = ctx.obj.get('data_dir', get_xdg_data_dir())
     import secrets
-    track_id = f"track-{secrets.token_hex(6)}"
+
+    track_id = f'track-{secrets.token_hex(6)}'
     lei_path = data_dir / 'lei' / track_id
 
     logger.info('Creating lei search for thread: %s', msgid)
@@ -1686,12 +1722,7 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
         labels_list = target_service.DEFAULT_LABELS
 
     thread = manifest.add_thread(
-        track_id=track_id,
-        msgid=msgid,
-        subject=subject,
-        target=target,
-        labels=labels_list,
-        lei_path=lei_path
+        track_id=track_id, msgid=msgid, subject=subject, target=target, labels=labels_list, lei_path=lei_path
     )
 
     logger.info('Now tracking thread %s: %s', thread.track_id, subject)
@@ -1717,8 +1748,9 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str],
     bozo_set = ctx.obj.get('bozofilter', set())
     delivered = 0
     for commit in commits:
-        result = deliver_commit(thread.track_id, target_service, lei_feed, 0, commit,
-                                labels_list, was_failing=False, bozofilter=bozo_set)
+        result = deliver_commit(
+            thread.track_id, target_service, lei_feed, 0, commit, labels_list, was_failing=False, bozofilter=bozo_set
+        )
         if result and result not in (SKIPPED_BOZOFILTER, SKIPPED_NOOP_COMMIT):
             delivered += 1
 
@@ -1759,8 +1791,9 @@ def track_list(ctx: click.Context, inactive: bool) -> None:
         logger.info('    Subject: %s', thread.subject)
         logger.info('    Message-ID: %s', thread.msgid)
         logger.info('    Target: %s, Labels: %s', thread.target, ', '.join(thread.labels))
-        logger.info('    Messages: %d, Last activity: %s',
-                   thread.message_count, thread.last_new_message.strftime('%Y-%m-%d'))
+        logger.info(
+            '    Messages: %d, Last activity: %s', thread.message_count, thread.last_new_message.strftime('%Y-%m-%d')
+        )
 
 
 @track.command('stop')
@@ -1847,11 +1880,9 @@ def subscribe(ctx: click.Context) -> None:
 @subscribe.command('add')
 @click.argument('url', type=str)
 @click.option('--target', '-t', default=None, help='Target for deliveries (default: first configured)')
-@click.option('--labels', '-l', multiple=True,
-              help='Labels to apply (repeatable or comma-separated)')
+@click.option('--labels', '-l', multiple=True, help='Labels to apply (repeatable or comma-separated)')
 @click.pass_context
-def subscribe_add(ctx: click.Context, url: str, target: Optional[str],
-                  labels: Tuple[str, ...]) -> None:
+def subscribe_add(ctx: click.Context, url: str, target: Optional[str], labels: Tuple[str, ...]) -> None:
     """Add a new mailing list subscription.
 
     URL can be a lore.kernel.org URL (e.g. https://lore.kernel.org/lkml/)
@@ -1943,9 +1974,9 @@ def subscribe_list(ctx: click.Context, paused: bool) -> None:
         # Extract feed key from filename
         name = filepath.name
         if name.endswith('.toml.paused'):
-            feed_key = name[len('sub-'):-len('.toml.paused')]
+            feed_key = name[len('sub-') : -len('.toml.paused')]
         else:
-            feed_key = name[len('sub-'):-len('.toml')]
+            feed_key = name[len('sub-') : -len('.toml')]
 
         # Parse the TOML to get details
         try:
@@ -1995,6 +2026,7 @@ def subscribe_stop(ctx: click.Context, feed_key: str, delete: bool) -> None:
         feed_dir = data_dir / feed_key
         if feed_dir.is_dir():
             import shutil
+
             shutil.rmtree(feed_dir)
             logger.info('Deleted feed data: %s', feed_dir)
         else:
@@ -2026,8 +2058,7 @@ def subscribe_pause(ctx: click.Context, feed_key: str) -> None:
 
 @subscribe.command('resume')
 @click.argument('feed_key', type=str)
-@click.option('--skip', is_flag=True,
-              help='Skip messages received while paused')
+@click.option('--skip', is_flag=True, help='Skip messages received while paused')
 @click.pass_context
 def subscribe_resume(ctx: click.Context, feed_key: str, skip: bool) -> None:
     """Resume a paused subscription.
@@ -2090,24 +2121,38 @@ def gui(ctx: click.Context) -> None:
 
 @main.command('track-subsystem')
 @click.argument('subsystem_name', type=str, required=False, default=None)
-@click.option('--maintainers', '-m', default=None,
-              type=click.Path(), help='Path to MAINTAINERS file (default: ./MAINTAINERS)')
+@click.option(
+    '--maintainers', '-m', default=None, type=click.Path(), help='Path to MAINTAINERS file (default: ./MAINTAINERS)'
+)
 @click.option('--target', '-t', default=None, help='Target for deliveries (default: first configured)')
-@click.option('--labels', '-l', multiple=True,
-              help='Labels to apply (repeatable or comma-separated; default: target DEFAULT_LABELS)')
-@click.option('--since', default='7.days.ago',
-              help='Start date for query (default: 7.days.ago)')
-@click.option('--threads/--no-threads', default=False,
-              help='Include entire threads when any message matches (can produce many results)')
-@click.option('--forget', is_flag=True, default=False,
-              help='Remove tracking for the subsystem (deletes config and lei queries)')
-@click.option('--list', '-L', 'do_list', is_flag=True, default=False,
-              help='List tracked subsystems')
+@click.option(
+    '--labels',
+    '-l',
+    multiple=True,
+    help='Labels to apply (repeatable or comma-separated; default: target DEFAULT_LABELS)',
+)
+@click.option('--since', default='7.days.ago', help='Start date for query (default: 7.days.ago)')
+@click.option(
+    '--threads/--no-threads',
+    default=False,
+    help='Include entire threads when any message matches (can produce many results)',
+)
+@click.option(
+    '--forget', is_flag=True, default=False, help='Remove tracking for the subsystem (deletes config and lei queries)'
+)
+@click.option('--list', '-L', 'do_list', is_flag=True, default=False, help='List tracked subsystems')
 @click.pass_context
-def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
-                    maintainers: Optional[str], target: Optional[str],
-                    labels: Tuple[str, ...], since: str,
-                    threads: bool, forget: bool, do_list: bool) -> None:
+def track_subsystem(
+    ctx: click.Context,
+    subsystem_name: Optional[str],
+    maintainers: Optional[str],
+    target: Optional[str],
+    labels: Tuple[str, ...],
+    since: str,
+    threads: bool,
+    forget: bool,
+    do_list: bool,
+) -> None:
     """Track a kernel subsystem from MAINTAINERS file.
 
     Creates lei queries for the subsystem:
@@ -2186,8 +2231,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
         conf_d = config_dir / 'conf.d'
         config_file = conf_d / f'{key}.toml'
         if not config_file.exists() and conf_d.is_dir():
-            candidates = sorted(p for p in conf_d.glob('*.toml')
-                                if f'_{key}_' in f'_{p.stem}_')
+            candidates = sorted(p for p in conf_d.glob('*.toml') if f'_{key}_' in f'_{p.stem}_')
             if len(candidates) == 1:
                 config_file = candidates[0]
                 key = config_file.stem
@@ -2222,8 +2266,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
                     if retcode == 0:
                         logger.info('Forgot lei search: %s', lei_path)
                     else:
-                        logger.error('Failed to forget lei search %s: %s',
-                                     lei_path, output.decode())
+                        logger.error('Failed to forget lei search %s: %s', lei_path, output.decode())
                 except PublicInboxError as e:
                     logger.error('Failed to forget lei search %s: %s', lei_path, str(e))
             else:
@@ -2238,7 +2281,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
     if maintainers:
         maintainers_path = Path(maintainers)
         if not maintainers_path.exists():
-            raise click.ClickException(f"MAINTAINERS file not found: {maintainers}")
+            raise click.ClickException(f'MAINTAINERS file not found: {maintainers}')
     else:
         maintainers_path = Path('MAINTAINERS')
         if maintainers_path.exists():
@@ -2302,8 +2345,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
         lei_path = lei_base_path / f'{key}-mailinglist'
         logger.info('Creating mailinglist query: %s', mailinglist_query)
         try:
-            retcode, output = create_lei_query_search(mailinglist_query, lei_path,
-                                                      threads=threads)
+            retcode, output = create_lei_query_search(mailinglist_query, lei_path, threads=threads)
             if retcode != 0:
                 logger.error('Lei query failed for mailinglist: %s', output.decode())
             else:
@@ -2315,8 +2357,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
                     feed.init_feed(from_start=True)
                     # Also initialize delivery state from the same starting point
                     delivery_name = f'{key}-mailinglist'
-                    feed.save_delivery_info(delivery_name, epoch=epoch,
-                                            latest_commit=first_commit)
+                    feed.save_delivery_info(delivery_name, epoch=epoch, latest_commit=first_commit)
                 else:
                     # No messages matched the query; skip init_feed since the
                     # repo is empty and will be populated on the next lei up.
@@ -2337,8 +2378,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
         lei_path = lei_base_path / f'{key}-patches'
         logger.info('Creating patches query: %s', patches_query)
         try:
-            retcode, output = create_lei_query_search(patches_query, lei_path,
-                                                      threads=threads)
+            retcode, output = create_lei_query_search(patches_query, lei_path, threads=threads)
             if retcode != 0:
                 logger.error('Lei query failed for patches: %s', output.decode())
             else:
@@ -2350,8 +2390,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
                     feed.init_feed(from_start=True)
                     # Also initialize delivery state from the same starting point
                     delivery_name = f'{key}-patches'
-                    feed.save_delivery_info(delivery_name, epoch=epoch,
-                                            latest_commit=first_commit)
+                    feed.save_delivery_info(delivery_name, epoch=epoch, latest_commit=first_commit)
                 else:
                     # No messages matched the query; skip init_feed since the
                     # repo is empty and will be populated on the next lei up.
@@ -2386,7 +2425,7 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
         since=since,
         subsystem_name=entry.name,
         include_mailinglist=mailinglist_created,
-        include_patches=patches_created
+        include_patches=patches_created,
     )
 
     config_file = conf_d / f'{key}.toml'
@@ -2398,17 +2437,14 @@ def track_subsystem(ctx: click.Context, subsystem_name: Optional[str],
 
 
 @main.command()
-@click.option('--add', '-a', 'addresses', default=None,
-              help='Add address(es) to the bozofilter (comma-separated)')
-@click.option('--reason', '-r', default=None,
-              help='Reason for adding (included as comment)')
-@click.option('--edit', '-e', 'do_edit', is_flag=True,
-              help='Edit the bozofilter file in $EDITOR')
-@click.option('--list', '-l', 'do_list', is_flag=True,
-              help='List all addresses in the bozofilter')
+@click.option('--add', '-a', 'addresses', default=None, help='Add address(es) to the bozofilter (comma-separated)')
+@click.option('--reason', '-r', default=None, help='Reason for adding (included as comment)')
+@click.option('--edit', '-e', 'do_edit', is_flag=True, help='Edit the bozofilter file in $EDITOR')
+@click.option('--list', '-l', 'do_list', is_flag=True, help='List all addresses in the bozofilter')
 @click.pass_context
-def bozofilter(ctx: click.Context, addresses: Optional[str], reason: Optional[str],
-               do_edit: bool, do_list: bool) -> None:
+def bozofilter(
+    ctx: click.Context, addresses: Optional[str], reason: Optional[str], do_edit: bool, do_list: bool
+) -> None:
     """Manage the bozofilter for blocking unwanted senders.
 
     The bozofilter is a simple list of email addresses that will be

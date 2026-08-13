@@ -39,9 +39,7 @@ class MaildirTarget:
             # Use Python's mailbox.Maildir - creates cur/new/tmp structure
             self.maildir = mailbox.Maildir(str(self.maildir_path), create=True)
         except Exception as e:
-            raise ConfigurationError(
-                f"Failed to initialize maildir at {self.maildir_path}: {e}"
-            ) from e
+            raise ConfigurationError(f'Failed to initialize maildir at {self.maildir_path}: {e}') from e
 
     def _get_maildir(self, subfolder: Optional[str]) -> mailbox.Maildir:
         """Get or create a maildir for the given subfolder.
@@ -69,9 +67,7 @@ class MaildirTarget:
             logger.debug('Created subfolder maildir at %s', subfolder_path)
             return subfolder_maildir
         except Exception as e:
-            raise ConfigurationError(
-                f"Failed to create maildir at {subfolder_path}: {e}"
-            ) from e
+            raise ConfigurationError(f'Failed to create maildir at {subfolder_path}: {e}') from e
 
     def connect(self) -> None:
         """Connect to maildir (no-op for local maildir)."""
@@ -83,7 +79,7 @@ class MaildirTarget:
         labels: List[str],
         feed_name: Optional[str] = None,
         delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None
+        subfolder: Optional[str] = None,
     ) -> Any:
         """Import message to maildir.
 
@@ -109,4 +105,4 @@ class MaildirTarget:
             logger.debug('Delivered message to maildir with key: %s', key)
             return key
         except Exception as e:
-            raise ConfigurationError(f"Failed to deliver to maildir: {e}") from e
+            raise ConfigurationError(f'Failed to deliver to maildir: {e}') from e

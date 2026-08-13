@@ -54,8 +54,7 @@ def load_bozofilter(config_dir: Path) -> Set[str]:
     return addresses
 
 
-def add_to_bozofilter(config_dir: Path, addresses: list[str],
-                      reason: Optional[str] = None) -> int:
+def add_to_bozofilter(config_dir: Path, addresses: list[str], reason: Optional[str] = None) -> int:
     """Add addresses to the bozofilter.
 
     Args:

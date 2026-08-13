@@ -17,10 +17,16 @@ class JmapTarget:
 
     DEFAULT_LABELS: List[str] = ['INBOX']
 
-    def __init__(self, identifier: str, server: str, username: str,
-                 token: Optional[str] = None, token_file: Optional[str] = None,
-                 timeout: int = 60,
-                 reqsession: Optional[requests.Session] = None) -> None:
+    def __init__(
+        self,
+        identifier: str,
+        server: str,
+        username: str,
+        token: Optional[str] = None,
+        token_file: Optional[str] = None,
+        timeout: int = 60,
+        reqsession: Optional[requests.Session] = None,
+    ) -> None:
         """Initialize JMAP service.
 
         Args:
@@ -46,15 +52,11 @@ class JmapTarget:
         elif token_file:
             token_path = Path(token_file).expanduser()
             if not token_path.exists():
-                raise ConfigurationError(
-                    f"Token file not found: {token_file}"
-                )
+                raise ConfigurationError(f'Token file not found: {token_file}')
             with open(token_path, 'r') as f:
                 self.token = f.read().strip()
         else:
-            raise ConfigurationError(
-                f"No token or token_file specified for JMAP target: {identifier}"
-            )
+            raise ConfigurationError(f'No token or token_file specified for JMAP target: {identifier}')
 
         # Request timeout
         self.timeout = timeout
@@ -83,19 +85,15 @@ class JmapTarget:
 
     def _discover_session(self) -> None:
         """Discover JMAP session and API endpoints."""
-        session_url = f"{self.server}/jmap/session"
+        session_url = f'{self.server}/jmap/session'
 
         try:
             response = self._get_session().get(
-                session_url,
-                headers={'Authorization': f'Bearer {self.token}'},
-                timeout=self.timeout
+                session_url, headers={'Authorization': f'Bearer {self.token}'}, timeout=self.timeout
             )
             response.raise_for_status()
         except requests.RequestException as e:
-            raise RemoteError(
-                f"Failed to discover JMAP session at {session_url}: {e}"
-            ) from e
+            raise RemoteError(f'Failed to discover JMAP session at {session_url}: {e}') from e
 
         # Bound to a local of known type as well as to the attribute, so the
         # lookups below do not have to defeat the attribute's Optional.
@@ -107,9 +105,7 @@ class JmapTarget:
         upload_url_template = session.get('uploadUrl')
 
         if not self.api_url or not upload_url_template:
-            raise RemoteError(
-                "Invalid JMAP session response: missing apiUrl or uploadUrl"
-            )
+            raise RemoteError('Invalid JMAP session response: missing apiUrl or uploadUrl')
 
         # Find account by username
         accounts = session.get('accounts', {})
@@ -119,9 +115,7 @@ class JmapTarget:
                 break
 
         if not self.account_id:
-            raise ConfigurationError(
-                f"Account not found for username: {self.username}"
-            )
+            raise ConfigurationError(f'Account not found for username: {self.username}')
 
         # Set upload URL with account ID
         self.upload_url = upload_url_template.replace('{accountId}', self.account_id)
@@ -137,28 +131,25 @@ class JmapTarget:
         Returns:
             Blob ID string
         """
-        assert self.upload_url is not None, "Must call connect() first"
+        assert self.upload_url is not None, 'Must call connect() first'
         try:
             response = self._get_session().post(
                 self.upload_url,
                 data=raw_message,
-                headers={
-                    'Authorization': f'Bearer {self.token}',
-                    'Content-Type': 'message/rfc822'
-                },
-                timeout=self.timeout
+                headers={'Authorization': f'Bearer {self.token}', 'Content-Type': 'message/rfc822'},
+                timeout=self.timeout,
             )
             response.raise_for_status()
             result = response.json()
             blob_id = result.get('blobId')
 
             if not blob_id or not isinstance(blob_id, str):
-                raise RemoteError(f"No blobId in upload response: {result}")
+                raise RemoteError(f'No blobId in upload response: {result}')
 
             logger.debug('Uploaded blob: %s (%d bytes)', blob_id, len(raw_message))
             return blob_id
         except requests.RequestException as e:
-            raise RemoteError(f"Failed to upload message blob: {e}") from e
+            raise RemoteError(f'Failed to upload message blob: {e}') from e
 
     def list_mailboxes(self) -> List[Dict[str, str]]:
         """List all mailboxes/folders.
@@ -166,29 +157,26 @@ class JmapTarget:
         Returns:
             List of dicts with 'id', 'name', 'role' keys
         """
-        assert self.api_url is not None, "Must call connect() first"
+        assert self.api_url is not None, 'Must call connect() first'
         try:
             # Query all mailboxes
             request_body = {
-                "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
-                "methodCalls": [
-                    ["Mailbox/query", {"accountId": self.account_id}, "call-0"],
-                    ["Mailbox/get", {
-                        "accountId": self.account_id,
-                        "#ids": {
-                            "resultOf": "call-0",
-                            "name": "Mailbox/query",
-                            "path": "/ids"
-                        }
-                    }, "call-1"]
-                ]
+                'using': ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+                'methodCalls': [
+                    ['Mailbox/query', {'accountId': self.account_id}, 'call-0'],
+                    [
+                        'Mailbox/get',
+                        {
+                            'accountId': self.account_id,
+                            '#ids': {'resultOf': 'call-0', 'name': 'Mailbox/query', 'path': '/ids'},
+                        },
+                        'call-1',
+                    ],
+                ],
             }
 
             response = self._get_session().post(
-                self.api_url,
-                json=request_body,
-                headers={'Authorization': f'Bearer {self.token}'},
-                timeout=self.timeout
+                self.api_url, json=request_body, headers={'Authorization': f'Bearer {self.token}'}, timeout=self.timeout
             )
             response.raise_for_status()
             result = response.json()
@@ -199,16 +187,14 @@ class JmapTarget:
                 method_name, method_result, _ = method_response
                 if method_name == 'Mailbox/get':
                     for mailbox in method_result.get('list', []):
-                        mailboxes.append({
-                            'id': mailbox['id'],
-                            'name': mailbox['name'],
-                            'role': mailbox.get('role', '')
-                        })
+                        mailboxes.append(
+                            {'id': mailbox['id'], 'name': mailbox['name'], 'role': mailbox.get('role', '')}
+                        )
 
             logger.debug('Found %d mailboxes', len(mailboxes))
             return mailboxes
         except requests.RequestException as e:
-            raise RemoteError(f"Failed to list mailboxes: {e}") from e
+            raise RemoteError(f'Failed to list mailboxes: {e}') from e
 
     def translate_folders(self, folder_names: List[str]) -> List[str]:
         """Translate folder names to mailbox IDs.
@@ -238,9 +224,7 @@ class JmapTarget:
             mailbox_id = self._mailbox_map.get(folder_key)
 
             if mailbox_id is None:
-                raise ConfigurationError(
-                    f"Folder '{folder_name}' not found in JMAP account '{self.identifier}'"
-                )
+                raise ConfigurationError(f"Folder '{folder_name}' not found in JMAP account '{self.identifier}'")
 
             mailbox_ids.append(mailbox_id)
 
@@ -256,42 +240,37 @@ class JmapTarget:
         Returns:
             True if message exists in at least one of the mailboxes
         """
-        assert self.api_url is not None, "Must call connect() first"
+        assert self.api_url is not None, 'Must call connect() first'
 
         # Build filter: check for Message-ID in any of the target mailboxes
         if len(mailbox_ids) == 1:
             # Simple case: single mailbox
-            query_filter: Dict[str, Any] = {
-                "header": ["Message-ID", message_id],
-                "inMailbox": mailbox_ids[0]
-            }
+            query_filter: Dict[str, Any] = {'header': ['Message-ID', message_id], 'inMailbox': mailbox_ids[0]}
         else:
             # Multiple mailboxes: use OR filter
             query_filter = {
-                "operator": "OR",
-                "conditions": [
-                    {"header": ["Message-ID", message_id], "inMailbox": mb_id}
-                    for mb_id in mailbox_ids
-                ]
+                'operator': 'OR',
+                'conditions': [{'header': ['Message-ID', message_id], 'inMailbox': mb_id} for mb_id in mailbox_ids],
             }
 
         try:
             request_body = {
-                "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
-                "methodCalls": [
-                    ["Email/query", {
-                        "accountId": self.account_id,
-                        "filter": query_filter,
-                        "limit": 1  # We only need to know if any exist
-                    }, "call-0"]
-                ]
+                'using': ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+                'methodCalls': [
+                    [
+                        'Email/query',
+                        {
+                            'accountId': self.account_id,
+                            'filter': query_filter,
+                            'limit': 1,  # We only need to know if any exist
+                        },
+                        'call-0',
+                    ]
+                ],
             }
 
             response = self._get_session().post(
-                self.api_url,
-                json=request_body,
-                headers={'Authorization': f'Bearer {self.token}'},
-                timeout=self.timeout
+                self.api_url, json=request_body, headers={'Authorization': f'Bearer {self.token}'}, timeout=self.timeout
             )
             response.raise_for_status()
             result = response.json()
@@ -317,7 +296,7 @@ class JmapTarget:
         labels: List[str],
         feed_name: Optional[str] = None,
         delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None
+        subfolder: Optional[str] = None,
     ) -> Any:
         """Import raw email message to JMAP server.
 
@@ -331,7 +310,7 @@ class JmapTarget:
         Returns:
             JMAP import result dict
         """
-        assert self.api_url is not None, "Must call connect() first"
+        assert self.api_url is not None, 'Must call connect() first'
 
         msg = RawMessage(raw_message)
 
@@ -356,26 +335,27 @@ class JmapTarget:
         # Step 5: Import email
         try:
             request_body = {
-                "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
-                "methodCalls": [
-                    ["Email/import", {
-                        "accountId": self.account_id,
-                        "emails": {
-                            "msg1": {
-                                "blobId": blob_id,
-                                "mailboxIds": mailbox_ids,
-                                "keywords": {}  # Can add $seen, $flagged, etc.
-                            }
-                        }
-                    }, "call-0"]
-                ]
+                'using': ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+                'methodCalls': [
+                    [
+                        'Email/import',
+                        {
+                            'accountId': self.account_id,
+                            'emails': {
+                                'msg1': {
+                                    'blobId': blob_id,
+                                    'mailboxIds': mailbox_ids,
+                                    'keywords': {},  # Can add $seen, $flagged, etc.
+                                }
+                            },
+                        },
+                        'call-0',
+                    ]
+                ],
             }
 
             response = self._get_session().post(
-                self.api_url,
-                json=request_body,
-                headers={'Authorization': f'Bearer {self.token}'},
-                timeout=self.timeout
+                self.api_url, json=request_body, headers={'Authorization': f'Bearer {self.token}'}, timeout=self.timeout
             )
             response.raise_for_status()
             result = response.json()
@@ -399,11 +379,11 @@ class JmapTarget:
                             logger.debug('Message already exists with id: %s', existing_id)
                             return {'id': existing_id}
                         # Any other error is a real failure
-                        raise RemoteError(f"JMAP Email/import failed: {not_created}")
+                        raise RemoteError(f'JMAP Email/import failed: {not_created}')
 
-            raise RemoteError(f"Unexpected JMAP response: {result}")
+            raise RemoteError(f'Unexpected JMAP response: {result}')
         except requests.RequestException as e:
-            raise RemoteError(f"Failed to import message: {e}") from e
+            raise RemoteError(f'Failed to import message: {e}') from e
 
     def list_labels(self) -> List[Dict[str, str]]:
         """List all available folders/mailboxes.
@@ -412,7 +392,4 @@ class JmapTarget:
             List of dicts with 'name' and 'id' keys (for CLI labels command)
         """
         mailboxes = self.list_mailboxes()
-        return [
-            {'name': mb['name'], 'id': mb['id']}
-            for mb in mailboxes
-        ]
+        return [{'name': mb['name'], 'id': mb['id']} for mb in mailboxes]

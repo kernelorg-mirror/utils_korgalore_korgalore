@@ -54,10 +54,10 @@ def create_mock_deliveries(num_deliveries: int, num_feeds: int) -> Dict[str, Tup
     deliveries = {}
     for i in range(num_deliveries):
         feed = MagicMock()
-        feed.feed_key = f"feed-{i % num_feeds}"
+        feed.feed_key = f'feed-{i % num_feeds}'
         target = MagicMock()
-        target.identifier = f"target-{i}"
-        deliveries[f"delivery-{i}"] = (feed, target, [f"label-{i}"])
+        target.identifier = f'target-{i}'
+        deliveries[f'delivery-{i}'] = (feed, target, [f'label-{i}'])
     return deliveries
 
 
@@ -67,7 +67,7 @@ class TestDeliveryLookup:
     def test_empty_deliveries(self) -> None:
         """Both return empty list for empty deliveries."""
         deliveries: Dict[str, Tuple[Any, Any, List[str]]] = {}
-        updated_feeds = ["feed-0", "feed-1"]
+        updated_feeds = ['feed-0', 'feed-1']
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
@@ -89,44 +89,44 @@ class TestDeliveryLookup:
     def test_single_feed_single_delivery(self) -> None:
         """Single feed with single delivery."""
         deliveries = create_mock_deliveries(1, 1)
-        updated_feeds = ["feed-0"]
+        updated_feeds = ['feed-0']
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
 
-        assert original == ["delivery-0"]
-        assert optimized == ["delivery-0"]
+        assert original == ['delivery-0']
+        assert optimized == ['delivery-0']
 
     def test_multiple_deliveries_per_feed(self) -> None:
         """Multiple deliveries for same feed."""
         deliveries = create_mock_deliveries(6, 2)  # 3 deliveries per feed
-        updated_feeds = ["feed-0"]
+        updated_feeds = ['feed-0']
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
 
         # feed-0 has delivery-0, delivery-2, delivery-4
-        assert sorted(original) == ["delivery-0", "delivery-2", "delivery-4"]
-        assert sorted(optimized) == ["delivery-0", "delivery-2", "delivery-4"]
+        assert sorted(original) == ['delivery-0', 'delivery-2', 'delivery-4']
+        assert sorted(optimized) == ['delivery-0', 'delivery-2', 'delivery-4']
 
     def test_multiple_feeds_updated(self) -> None:
         """Multiple feeds updated at once."""
         deliveries = create_mock_deliveries(9, 3)  # 3 deliveries per feed
-        updated_feeds = ["feed-0", "feed-2"]
+        updated_feeds = ['feed-0', 'feed-2']
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
 
         # feed-0: delivery-0, delivery-3, delivery-6
         # feed-2: delivery-2, delivery-5, delivery-8
-        expected = ["delivery-0", "delivery-2", "delivery-3", "delivery-5", "delivery-6", "delivery-8"]
+        expected = ['delivery-0', 'delivery-2', 'delivery-3', 'delivery-5', 'delivery-6', 'delivery-8']
         assert sorted(original) == expected
         assert sorted(optimized) == expected
 
     def test_nonexistent_feed_updated(self) -> None:
         """Updated feed that has no deliveries."""
         deliveries = create_mock_deliveries(3, 3)
-        updated_feeds = ["feed-nonexistent"]
+        updated_feeds = ['feed-nonexistent']
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
@@ -137,43 +137,43 @@ class TestDeliveryLookup:
     def test_mixed_existing_and_nonexistent(self) -> None:
         """Mix of existing and nonexistent feeds."""
         deliveries = create_mock_deliveries(6, 3)
-        updated_feeds = ["feed-0", "feed-nonexistent", "feed-2"]
+        updated_feeds = ['feed-0', 'feed-nonexistent', 'feed-2']
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
 
-        expected = ["delivery-0", "delivery-2", "delivery-3", "delivery-5"]
+        expected = ['delivery-0', 'delivery-2', 'delivery-3', 'delivery-5']
         assert sorted(original) == expected
         assert sorted(optimized) == expected
 
     def test_all_feeds_updated(self) -> None:
         """All feeds updated returns all deliveries."""
         deliveries = create_mock_deliveries(10, 5)
-        updated_feeds = [f"feed-{i}" for i in range(5)]
+        updated_feeds = [f'feed-{i}' for i in range(5)]
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
 
-        expected = [f"delivery-{i}" for i in range(10)]
+        expected = [f'delivery-{i}' for i in range(10)]
         assert sorted(original) == expected
         assert sorted(optimized) == expected
 
     def test_duplicate_feed_in_updated(self) -> None:
         """Duplicate feed keys in updated_feeds list."""
         deliveries = create_mock_deliveries(3, 3)
-        updated_feeds = ["feed-0", "feed-0", "feed-1"]
+        updated_feeds = ['feed-0', 'feed-0', 'feed-1']
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
 
         # Original adds delivery-0 twice, optimized does too (same behavior)
-        assert original == ["delivery-0", "delivery-0", "delivery-1"]
-        assert optimized == ["delivery-0", "delivery-0", "delivery-1"]
+        assert original == ['delivery-0', 'delivery-0', 'delivery-1']
+        assert optimized == ['delivery-0', 'delivery-0', 'delivery-1']
 
     def test_large_scale(self) -> None:
         """Verify correctness with larger dataset."""
         deliveries = create_mock_deliveries(1000, 50)
-        updated_feeds = [f"feed-{i}" for i in range(0, 50, 2)]  # Every other feed
+        updated_feeds = [f'feed-{i}' for i in range(0, 50, 2)]  # Every other feed
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
@@ -188,7 +188,7 @@ class TestDeliveryLookupPreservesOrder:
     def test_order_by_feed_update_sequence(self) -> None:
         """Results are grouped by the order feeds appear in updated_feeds."""
         deliveries = create_mock_deliveries(6, 3)
-        updated_feeds = ["feed-2", "feed-0"]  # Reverse order
+        updated_feeds = ['feed-2', 'feed-0']  # Reverse order
 
         original = find_deliveries_for_updated_feeds_original(deliveries, updated_feeds)
         optimized = find_deliveries_for_updated_feeds_optimized(deliveries, updated_feeds)
@@ -198,10 +198,10 @@ class TestDeliveryLookupPreservesOrder:
         # feed-0: delivery-0, delivery-3
         # Check that all feed-2 deliveries come before feed-0 deliveries
         def get_feed_indices(results: List[str]) -> Dict[str, List[int]]:
-            indices: Dict[str, List[int]] = {"feed-0": [], "feed-2": []}
+            indices: Dict[str, List[int]] = {'feed-0': [], 'feed-2': []}
             for i, d in enumerate(results):
-                num = int(d.split("-")[1])
-                feed_key = f"feed-{num % 3}"
+                num = int(d.split('-')[1])
+                feed_key = f'feed-{num % 3}'
                 if feed_key in indices:
                     indices[feed_key].append(i)
             return indices
@@ -210,5 +210,5 @@ class TestDeliveryLookupPreservesOrder:
         opt_indices = get_feed_indices(optimized)
 
         # All feed-2 indices should be less than all feed-0 indices
-        assert max(orig_indices["feed-2"]) < min(orig_indices["feed-0"])
-        assert max(opt_indices["feed-2"]) < min(opt_indices["feed-0"])
+        assert max(orig_indices['feed-2']) < min(orig_indices['feed-0'])
+        assert max(opt_indices['feed-2']) < min(opt_indices['feed-0'])

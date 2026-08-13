@@ -3,6 +3,7 @@
 This module provides functionality to track email threads via lei queries,
 storing metadata in a separate manifest file from the main configuration.
 """
+
 import json
 import logging
 import shutil
@@ -23,14 +24,16 @@ EXPIRE_DAYS = 30
 
 class TrackStatus(Enum):
     """Status of a tracked thread."""
-    ACTIVE = "active"      # Updated during pull
-    INACTIVE = "inactive"  # Auto-expired, skipped during pull
-    PAUSED = "paused"      # User-requested pause, skipped during pull
+
+    ACTIVE = 'active'  # Updated during pull
+    INACTIVE = 'inactive'  # Auto-expired, skipped during pull
+    PAUSED = 'paused'  # User-requested pause, skipped during pull
 
 
 @dataclass
 class TrackedThread:
     """Represents a tracked email thread."""
+
     track_id: str
     msgid: str
     subject: str
@@ -82,6 +85,7 @@ class TrackingManifest:
     The manifest is stored as a JSON file separate from the main korgalore
     configuration, since tracked threads are ephemeral and user-driven.
     """
+
     MANIFEST_VERSION = 1
 
     def __init__(self, data_dir: Path) -> None:
@@ -111,8 +115,7 @@ class TrackingManifest:
 
         version = data.get('version', 1)
         if version != self.MANIFEST_VERSION:
-            logger.warning('Tracking manifest version mismatch (got %d, expected %d)',
-                          version, self.MANIFEST_VERSION)
+            logger.warning('Tracking manifest version mismatch (got %d, expected %d)', version, self.MANIFEST_VERSION)
 
         threads_data = data.get('threads', {})
         for track_id, thread_data in threads_data.items():
@@ -127,10 +130,7 @@ class TrackingManifest:
         """Save the manifest to disk."""
         data = {
             'version': self.MANIFEST_VERSION,
-            'threads': {
-                track_id: thread.to_dict()
-                for track_id, thread in self._threads.items()
-            }
+            'threads': {track_id: thread.to_dict() for track_id, thread in self._threads.items()},
         }
 
         # Ensure parent directory exists
@@ -144,8 +144,9 @@ class TrackingManifest:
 
         logger.debug('Saved tracking manifest with %d threads', len(self._threads))
 
-    def add_thread(self, track_id: str, msgid: str, subject: str, target: str,
-                   labels: List[str], lei_path: Path) -> TrackedThread:
+    def add_thread(
+        self, track_id: str, msgid: str, subject: str, target: str, labels: List[str], lei_path: Path
+    ) -> TrackedThread:
         """Add a new thread to track.
 
         Args:
@@ -293,8 +294,7 @@ class TrackingManifest:
         Returns:
             List of TrackedThread objects with INACTIVE or PAUSED status.
         """
-        return [t for t in self._threads.values()
-                if t.status in (TrackStatus.INACTIVE, TrackStatus.PAUSED)]
+        return [t for t in self._threads.values() if t.status in (TrackStatus.INACTIVE, TrackStatus.PAUSED)]
 
     def check_and_expire_threads(self) -> List[str]:
         """Check for threads that should be auto-expired.
@@ -311,8 +311,7 @@ class TrackingManifest:
             if thread.status == TrackStatus.ACTIVE and thread.last_new_message < cutoff:
                 thread.status = TrackStatus.INACTIVE
                 expired.append(track_id)
-                logger.info('Auto-expired thread %s (no activity since %s)',
-                           track_id, thread.last_new_message.date())
+                logger.info('Auto-expired thread %s (no activity since %s)', track_id, thread.last_new_message.date())
 
         if expired:
             self._save()
@@ -364,16 +363,13 @@ def create_lei_thread_search(msgid: str, output_path: Path) -> Tuple[int, bytes]
     # We use the dt:19700101000000.. query to mean "search for all", it's the Message-ID in the url that
     # returns the full thread of that message.
     qmsgid = urllib.parse.quote_plus(msgid)
-    args = ['q', 'dt:19700101000000..',
-            '--only', f'https://lore.kernel.org/all/{qmsgid}',
-            '-o', f'v2:{output_path}']
+    args = ['q', 'dt:19700101000000..', '--only', f'https://lore.kernel.org/all/{qmsgid}', '-o', f'v2:{output_path}']
     logger.debug('Creating lei thread search: lei %s', ' '.join(args))
 
     return run_lei_command(args)
 
 
-def create_lei_query_search(query: str, output_path: Path,
-                            threads: bool = False) -> Tuple[int, bytes]:
+def create_lei_query_search(query: str, output_path: Path, threads: bool = False) -> Tuple[int, bytes]:
     """Create a new lei search with an arbitrary query string.
 
     Uses: lei q '<query>' [--threads] --only https://lore.kernel.org/all -o v2:<output_path>
@@ -397,8 +393,7 @@ def create_lei_query_search(query: str, output_path: Path,
     args = ['q', query]
     if threads:
         args.append('--threads')
-    args.extend(['--only', 'https://lore.kernel.org/all',
-                 '-o', f'v2:{output_path}'])
+    args.extend(['--only', 'https://lore.kernel.org/all', '-o', f'v2:{output_path}'])
     logger.debug('Creating lei query search: lei %s', ' '.join(args))
 
     return run_lei_command(args)

@@ -34,17 +34,16 @@ from korgalore.imap_target import ImapTarget
 
 logger = logging.getLogger('korgalore.gui')
 
+
 class KorgaloreApp:
     """Korgalore Taskbar Application."""
 
     def __init__(self, ctx: click.Context):
         self.ctx = ctx
         self.ind = AppIndicator3.Indicator.new(
-            "korgalore-indicator",
-            "mail-read-symbolic",
-            AppIndicator3.IndicatorCategory.APPLICATION_STATUS
+            'korgalore-indicator', 'mail-read-symbolic', AppIndicator3.IndicatorCategory.APPLICATION_STATUS
         )
-        self.ind.set_title("Korgalore")
+        self.ind.set_title('Korgalore')
         self.ind.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
 
         # Config path and mtime tracking for change detection
@@ -97,7 +96,7 @@ class KorgaloreApp:
         current_mtime = self._get_config_mtime()
         if current_mtime <= self._config_mtime:
             return
-        logger.info("Configuration files changed on disk, reloading...")
+        logger.info('Configuration files changed on disk, reloading...')
         is_valid, error_msg = validate_config_file(self.cfgpath)
         if is_valid:
             self.ctx.obj['config'] = load_config(self.cfgpath)
@@ -107,9 +106,9 @@ class KorgaloreApp:
             gui_config = self.ctx.obj['config'].get('gui', {})
             self.sync_interval = gui_config.get('sync_interval', 300)
             self._config_mtime = current_mtime
-            logger.info("Configuration reloaded successfully.")
+            logger.info('Configuration reloaded successfully.')
         else:
-            logger.error("Changed config has errors, keeping previous: %s", error_msg)
+            logger.error('Changed config has errors, keeping previous: %s', error_msg)
             # Update mtime so we don't retry every sync cycle
             self._config_mtime = current_mtime
 
@@ -117,25 +116,25 @@ class KorgaloreApp:
         menu = Gtk.Menu()
 
         # Header
-        item_header = Gtk.MenuItem(label="Korgalore")
+        item_header = Gtk.MenuItem(label='Korgalore')
         item_header.set_sensitive(False)
         menu.append(item_header)
 
         menu.append(Gtk.SeparatorMenuItem())
 
         # Sync Now
-        self.item_sync = Gtk.MenuItem(label="Sync Now")
-        self.item_sync.connect("activate", self.on_sync_now)
+        self.item_sync = Gtk.MenuItem(label='Sync Now')
+        self.item_sync.connect('activate', self.on_sync_now)
         menu.append(self.item_sync)
 
         # Yank
-        item_yank = Gtk.MenuItem(label="Yank...")
-        item_yank.connect("activate", self.on_yank)
+        item_yank = Gtk.MenuItem(label='Yank...')
+        item_yank.connect('activate', self.on_yank)
         menu.append(item_yank)
 
         # Authenticate (hidden by default, shown when auth is needed)
-        self.item_auth = Gtk.MenuItem(label="Authenticate...")
-        self.item_auth.connect("activate", self.on_authenticate)
+        self.item_auth = Gtk.MenuItem(label='Authenticate...')
+        self.item_auth.connect('activate', self.on_authenticate)
         self.item_auth.set_no_show_all(True)  # Don't show in show_all()
         menu.append(self.item_auth)
 
@@ -143,12 +142,12 @@ class KorgaloreApp:
         menu.append(Gtk.SeparatorMenuItem())
 
         # Status Label (Disabled item acting as status)
-        self.item_status = Gtk.MenuItem(label="Idle")
+        self.item_status = Gtk.MenuItem(label='Idle')
         self.item_status.set_sensitive(False)
         menu.append(self.item_status)
 
         # Next Sync Info
-        self.item_next_sync = Gtk.MenuItem(label="Next sync: --:--")
+        self.item_next_sync = Gtk.MenuItem(label='Next sync: --:--')
         self.item_next_sync.set_sensitive(False)
         menu.append(self.item_next_sync)
 
@@ -156,26 +155,26 @@ class KorgaloreApp:
         menu.append(Gtk.SeparatorMenuItem())
 
         # Edit Config
-        item_edit_config = Gtk.MenuItem(label="Edit Config...")
-        item_edit_config.connect("activate", self.on_edit_config)
+        item_edit_config = Gtk.MenuItem(label='Edit Config...')
+        item_edit_config.connect('activate', self.on_edit_config)
         menu.append(item_edit_config)
 
         # Edit Bozofilter
-        item_edit_bozofilter = Gtk.MenuItem(label="Edit Bozofilter...")
-        item_edit_bozofilter.connect("activate", self.on_edit_bozofilter)
+        item_edit_bozofilter = Gtk.MenuItem(label='Edit Bozofilter...')
+        item_edit_bozofilter.connect('activate', self.on_edit_bozofilter)
         menu.append(item_edit_bozofilter)
 
         # Separator
         menu.append(Gtk.SeparatorMenuItem())
 
         # About
-        item_about = Gtk.MenuItem(label="About")
-        item_about.connect("activate", self.on_about)
+        item_about = Gtk.MenuItem(label='About')
+        item_about.connect('activate', self.on_about)
         menu.append(item_about)
 
         # Quit
-        item_quit = Gtk.MenuItem(label="Quit")
-        item_quit.connect("activate", self.quit)
+        item_quit = Gtk.MenuItem(label='Quit')
+        item_quit.connect('activate', self.quit)
         menu.append(item_quit)
 
         menu.show_all()
@@ -197,7 +196,7 @@ class KorgaloreApp:
         Gtk.main()
 
     def quit(self, source: Any = None) -> None:
-        logger.info("Quitting Korgalore GUI...")
+        logger.info('Quitting Korgalore GUI...')
         self.stop_event.set()
         self._shutdown_lore_nodes()
         Gtk.main_quit()
@@ -217,15 +216,17 @@ class KorgaloreApp:
                 node.shutdown()
             except Exception as e:
                 # Never let teardown block the exit path.
-                logger.debug("Error shutting down LoreNode: %s", str(e))
+                logger.debug('Error shutting down LoreNode: %s', str(e))
 
     def update_status(self, text: str, icon_name: Optional[str] = None) -> None:
         """Update UI status (thread-safe)."""
+
         def _update() -> bool:
             self.item_status.set_label(text)
             if icon_name:
                 self.ind.set_icon(icon_name)
             return False
+
         GLib.idle_add(_update)
 
     def _on_network_changed(self, monitor: Any, network_available: bool) -> None:
@@ -240,10 +241,10 @@ class KorgaloreApp:
             logger.info('Network restored, scheduling sync in 10 seconds')
             self.next_sync_time = time.time() + 10
             self.error_state = False
-            self.update_status("Network restored, syncing soon...", "network-idle-symbolic")
+            self.update_status('Network restored, syncing soon...', 'network-idle-symbolic')
         elif not network_available:
             # Network went down
-            self.update_status("Network unavailable", "network-offline-symbolic")
+            self.update_status('Network unavailable', 'network-offline-symbolic')
 
     def update_timers(self) -> bool:
         """Update last/next sync timers in menu."""
@@ -251,23 +252,23 @@ class KorgaloreApp:
 
         # Next Sync
         if not self.network_available:
-            self.item_next_sync.set_label("Next sync: Waiting for network")
+            self.item_next_sync.set_label('Next sync: Waiting for network')
         elif self.is_syncing:
-            self.item_next_sync.set_label("Next sync: In progress...")
+            self.item_next_sync.set_label('Next sync: In progress...')
         elif self.next_sync_time > now:
             diff = int(self.next_sync_time - now)
             if diff > 60:
                 mins = round(diff / 60)
-                text = f"Next sync: ~{mins} min"
+                text = f'Next sync: ~{mins} min'
             elif diff >= 10:
                 secs = math.ceil(diff / 10) * 10
-                text = f"Next sync: ~{secs} sec"
+                text = f'Next sync: ~{secs} sec'
             else:
-                text = f"Next sync: in {diff}s"
+                text = f'Next sync: in {diff}s'
             self.item_next_sync.set_label(text)
         else:
             # Should be syncing soon or now
-            self.item_next_sync.set_label("Next sync: Soon...")
+            self.item_next_sync.set_label('Next sync: Soon...')
 
         return True  # Keep calling this
 
@@ -294,23 +295,16 @@ class KorgaloreApp:
                 flags=0,
                 message_type=Gtk.MessageType.ERROR,
                 buttons=Gtk.ButtonsType.OK,
-                text="No targets configured"
+                text='No targets configured',
             )
-            dialog.format_secondary_text("Please configure at least one target in your configuration file.")
+            dialog.format_secondary_text('Please configure at least one target in your configuration file.')
             dialog.run()
             dialog.destroy()
             return False
 
         # Create dialog
-        dialog = Gtk.Dialog(
-            title="Yank Message",
-            transient_for=None,
-            flags=0
-        )
-        dialog.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_OK, Gtk.ResponseType.OK
-        )
+        dialog = Gtk.Dialog(title='Yank Message', transient_for=None, flags=0)
+        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK)
         dialog.set_default_size(450, -1)
 
         content_area = dialog.get_content_area()
@@ -321,18 +315,18 @@ class KorgaloreApp:
         content_area.set_margin_bottom(15)
 
         # Message-ID or URL entry
-        label_msgid = Gtk.Label(label="Message-ID or lore.kernel.org URL:")
+        label_msgid = Gtk.Label(label='Message-ID or lore.kernel.org URL:')
         label_msgid.set_halign(Gtk.Align.START)
         content_area.pack_start(label_msgid, False, False, 0)
 
         entry_msgid = Gtk.Entry()
-        entry_msgid.set_placeholder_text("e.g., <msgid@example.com> or https://lore.kernel.org/...")
+        entry_msgid.set_placeholder_text('e.g., <msgid@example.com> or https://lore.kernel.org/...')
         content_area.pack_start(entry_msgid, False, False, 0)
 
         # Target dropdown (only show if multiple targets)
         combo_target: Any = None
         if len(target_names) > 1:
-            label_target = Gtk.Label(label="Target:")
+            label_target = Gtk.Label(label='Target:')
             label_target.set_halign(Gtk.Align.START)
             content_area.pack_start(label_target, False, False, 5)
 
@@ -343,7 +337,7 @@ class KorgaloreApp:
             content_area.pack_start(combo_target, False, False, 0)
 
         # Thread checkbox
-        check_thread = Gtk.CheckButton(label="Yank entire thread")
+        check_thread = Gtk.CheckButton(label='Yank entire thread')
         content_area.pack_start(check_thread, False, False, 10)
 
         dialog.show_all()
@@ -362,9 +356,7 @@ class KorgaloreApp:
             if msgid_or_url and target_name:
                 # Run yank in background thread
                 threading.Thread(
-                    target=self._run_yank,
-                    args=(target_name, msgid_or_url, fetch_thread),
-                    daemon=True
+                    target=self._run_yank, args=(target_name, msgid_or_url, fetch_thread), daemon=True
                 ).start()
         else:
             dialog.destroy()
@@ -373,26 +365,24 @@ class KorgaloreApp:
 
     def _run_yank(self, target_name: str, msgid_or_url: str, fetch_thread: bool) -> None:
         """Execute the yank operation in background."""
-        self.update_status("Yanking...", "system-run-symbolic")
+        self.update_status('Yanking...', 'system-run-symbolic')
 
         try:
-            uploaded, failed = perform_yank(
-                self.ctx, target_name, msgid_or_url, thread=fetch_thread
-            )
+            uploaded, failed = perform_yank(self.ctx, target_name, msgid_or_url, thread=fetch_thread)
 
             if failed > 0:
-                self.update_status(f"Yanked {uploaded}, {failed} failed", "dialog-warning-symbolic")
-                logger.warning("Yank completed: %d uploaded, %d failed", uploaded, failed)
+                self.update_status(f'Yanked {uploaded}, {failed} failed', 'dialog-warning-symbolic')
+                logger.warning('Yank completed: %d uploaded, %d failed', uploaded, failed)
             else:
-                self.update_status(f"Yanked {uploaded} message(s)", "mail-unread-symbolic")
-                logger.info("Yank completed: %d message(s) uploaded", uploaded)
+                self.update_status(f'Yanked {uploaded} message(s)', 'mail-unread-symbolic')
+                logger.info('Yank completed: %d message(s) uploaded', uploaded)
 
         except liblore.RemoteError as e:
-            logger.error("Yank failed: %s", str(e))
-            self.update_status(f"Yank failed: {e}", "dialog-error-symbolic")
+            logger.error('Yank failed: %s', str(e))
+            self.update_status(f'Yank failed: {e}', 'dialog-error-symbolic')
         except Exception as e:
-            logger.error("Yank failed: %s", str(e))
-            self.update_status(f"Yank failed: {e}", "dialog-error-symbolic")
+            logger.error('Yank failed: %s', str(e))
+            self.update_status(f'Yank failed: {e}', 'dialog-error-symbolic')
 
     def on_edit_config(self, source: Any) -> None:
         """Open the configuration file in the user's preferred editor."""
@@ -402,7 +392,7 @@ class KorgaloreApp:
     def _run_edit_config(self) -> None:
         """Execute config editing and validate after editor closes."""
         cfgpath = get_xdg_config_dir() / 'korgalore.toml'
-        logger.info("Opening configuration file: %s", cfgpath)
+        logger.info('Opening configuration file: %s', cfgpath)
         try:
             proc = subprocess.Popen(['xdg-open', str(cfgpath)])
             proc.wait()
@@ -410,7 +400,7 @@ class KorgaloreApp:
             # Validate after editor closes
             is_valid, error_msg = validate_config_file(cfgpath)
             if is_valid:
-                logger.info("Configuration file is valid, reloading...")
+                logger.info('Configuration file is valid, reloading...')
                 # Reload config and clear cached instances
                 self.ctx.obj['config'] = load_config(cfgpath)
                 self.ctx.obj['targets'] = dict()
@@ -421,12 +411,12 @@ class KorgaloreApp:
                 self.sync_interval = gui_config.get('sync_interval', 300)
                 # Update mtime to avoid redundant reload on next sync
                 self._config_mtime = self._get_config_mtime()
-                logger.info("Configuration reloaded successfully.")
+                logger.info('Configuration reloaded successfully.')
             else:
-                logger.error("Configuration file has errors: %s", error_msg)
-                self.update_status(f"Config error: {error_msg}", "dialog-warning-symbolic")
+                logger.error('Configuration file has errors: %s', error_msg)
+                self.update_status(f'Config error: {error_msg}', 'dialog-warning-symbolic')
         except Exception as e:
-            logger.error("Failed to open config file: %s", str(e))
+            logger.error('Failed to open config file: %s', str(e))
 
     def on_edit_bozofilter(self, source: Any) -> None:
         """Open the bozofilter file in the user's preferred editor."""
@@ -437,15 +427,15 @@ class KorgaloreApp:
         config_dir = get_xdg_config_dir()
         bozofilter_path = ensure_bozofilter_exists(config_dir)
 
-        logger.info("Opening bozofilter file: %s", bozofilter_path)
+        logger.info('Opening bozofilter file: %s', bozofilter_path)
         try:
             proc = subprocess.Popen(['xdg-open', str(bozofilter_path)])
             proc.wait()
             # Reload bozofilter after editor closes
             self.ctx.obj['bozofilter'] = load_bozofilter(config_dir)
-            logger.info("Bozofilter reloaded successfully.")
+            logger.info('Bozofilter reloaded successfully.')
         except Exception as e:
-            logger.error("Failed to edit bozofilter: %s", str(e))
+            logger.error('Failed to edit bozofilter: %s', str(e))
 
     def on_about(self, source: Any) -> None:
         """Show the About dialog."""
@@ -454,12 +444,12 @@ class KorgaloreApp:
     def _show_about_dialog(self) -> bool:
         """Display the About dialog (called from GLib.idle_add)."""
         dialog = Gtk.AboutDialog()
-        dialog.set_program_name("Korgalore")
+        dialog.set_program_name('Korgalore')
         dialog.set_version(__version__)
-        dialog.set_logo_icon_name("mail-read")
-        dialog.set_comments("Deliver public-inbox mail to your preferred email client")
-        dialog.set_website("https://korgalore.docs.kernel.org")
-        dialog.set_website_label("korgalore.docs.kernel.org")
+        dialog.set_logo_icon_name('mail-read')
+        dialog.set_comments('Deliver public-inbox mail to your preferred email client')
+        dialog.set_website('https://korgalore.docs.kernel.org')
+        dialog.set_website_label('korgalore.docs.kernel.org')
         dialog.set_license_type(Gtk.License.GPL_2_0)
         dialog.run()
         dialog.destroy()
@@ -467,7 +457,7 @@ class KorgaloreApp:
 
     def background_worker(self) -> None:
         """Periodically run sync."""
-        logger.info("Background worker started")
+        logger.info('Background worker started')
         # Initial sync after a short delay
         time.sleep(2)
         if not self.stop_event.is_set():
@@ -489,8 +479,8 @@ class KorgaloreApp:
 
         # Check network availability before attempting sync
         if not self.network_available:
-            logger.info("Skipping sync: network unavailable")
-            self.update_status("Network unavailable", "network-offline-symbolic")
+            logger.info('Skipping sync: network unavailable')
+            self.update_status('Network unavailable', 'network-offline-symbolic')
             # Schedule next check at normal interval; network-changed callback
             # will trigger sooner if network comes back
             self.next_sync_time = time.time() + self.sync_interval
@@ -501,12 +491,12 @@ class KorgaloreApp:
 
         self.is_syncing = True
         GLib.idle_add(lambda: self.item_sync.set_sensitive(False))
-        self.update_status("Syncing...", "system-run-symbolic")
+        self.update_status('Syncing...', 'system-run-symbolic')
         # Ensure next sync shows as processing
         self.next_sync_time = 0
 
         try:
-            logger.info("Starting sync...")
+            logger.info('Starting sync...')
 
             # Refresh strftime templates for date-based subfolders
             refresh_subfolder_templates(self.ctx)
@@ -518,7 +508,7 @@ class KorgaloreApp:
                 no_update=False,
                 force=False,
                 delivery_name=None,
-                status_callback=lambda s: self.update_status(s, "system-run-symbolic")
+                status_callback=lambda s: self.update_status(s, 'system-run-symbolic'),
             )
 
             self.last_sync_time = time.time()
@@ -527,26 +517,26 @@ class KorgaloreApp:
             count = len(unique_msgids)
 
             if count > 0:
-                logger.info("Sync complete: %d new messages", count)
-                self.update_status(f"Idle ({count} new)", "mail-unread-symbolic")
+                logger.info('Sync complete: %d new messages', count)
+                self.update_status(f'Idle ({count} new)', 'mail-unread-symbolic')
             else:
-                logger.info("Sync complete: no new messages")
-                self.update_status("Idle", "mail-read-symbolic")
+                logger.info('Sync complete: no new messages')
+                self.update_status('Idle', 'mail-read-symbolic')
 
         except AuthenticationError as e:
-            logger.error("Authentication required for %s: %s", e.target_id, str(e))
+            logger.error('Authentication required for %s: %s', e.target_id, str(e))
             self.error_state = True
             self.auth_needed_target = e.target_id
-            self.update_status(f"Auth required: {e.target_id}", "dialog-password-symbolic")
+            self.update_status(f'Auth required: {e.target_id}', 'dialog-password-symbolic')
             GLib.idle_add(self._show_auth_button)
         except liblore.OperationCancelledError:
             # Raised when quit() shuts the nodes down mid-sync. Expected,
             # not an error state -- the UI is going away regardless.
-            logger.info("Sync cancelled by shutdown")
+            logger.info('Sync cancelled by shutdown')
         except Exception as e:
-            logger.error("Sync failed: %s", str(e))
+            logger.error('Sync failed: %s', str(e))
             self.error_state = True
-            self.update_status(f"Error: {e}", "dialog-error-symbolic")
+            self.update_status(f'Error: {e}', 'dialog-error-symbolic')
         finally:
             self.is_syncing = False
             # Reset countdown timer after sync completes
@@ -576,7 +566,7 @@ class KorgaloreApp:
         if not target_id:
             return
 
-        self.update_status(f"Authenticating {target_id}...", "system-run-symbolic")
+        self.update_status(f'Authenticating {target_id}...', 'system-run-symbolic')
         GLib.idle_add(lambda: self.item_auth.set_sensitive(False))
 
         try:
@@ -585,8 +575,8 @@ class KorgaloreApp:
             target = targets.get(target_id)
 
             if target is None:
-                logger.error("Target %s not found in context", target_id)
-                self.update_status("Error: Target not found", "dialog-error-symbolic")
+                logger.error('Target %s not found in context', target_id)
+                self.update_status('Error: Target not found', 'dialog-error-symbolic')
                 return
 
             # Check if target supports re-authentication
@@ -597,15 +587,15 @@ class KorgaloreApp:
                 # Run the IMAP OAuth2 re-authentication flow (this opens a browser)
                 target.reauthenticate()
             else:
-                logger.error("Target %s does not support re-authentication", target_id)
-                self.update_status("Error: Auth not supported", "dialog-error-symbolic")
+                logger.error('Target %s does not support re-authentication', target_id)
+                self.update_status('Error: Auth not supported', 'dialog-error-symbolic')
                 return
 
             # Success - clear the auth needed state
             self.auth_needed_target = None
             self.error_state = False
             GLib.idle_add(self._hide_auth_button)
-            logger.info("Re-authentication successful for %s", target_id)
+            logger.info('Re-authentication successful for %s', target_id)
 
             # Automatically start sync after successful authentication
             GLib.idle_add(lambda: self.item_auth.set_sensitive(True))
@@ -613,8 +603,8 @@ class KorgaloreApp:
             return
 
         except Exception as e:
-            logger.error("Re-authentication failed: %s", str(e))
-            self.update_status(f"Auth failed: {target_id}", "dialog-error-symbolic")
+            logger.error('Re-authentication failed: %s', str(e))
+            self.update_status(f'Auth failed: {target_id}', 'dialog-error-symbolic')
         finally:
             GLib.idle_add(lambda: self.item_auth.set_sensitive(True))
 
@@ -654,6 +644,7 @@ def start_gui(ctx: click.Context) -> None:
 
     try:
         from systemd.journal import JournalHandler  # type: ignore
+
         handler = JournalHandler(SYSLOG_IDENTIFIER='korgalore')
         handler.setLevel(logging.DEBUG if debug_mode else logging.CRITICAL)
         root_logger.addHandler(handler)
