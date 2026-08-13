@@ -66,6 +66,17 @@ Refactoring
   - The old bound was never exercised, since dependency resolution always
     picked a much newer release
 
+* Runs on stock Debian stable and EL10 again: ``click >= 8.1.7`` (was
+  >= 8.3.0) and ``click-log >= 0.3.2`` (was >= 0.4.0)
+
+  - Progress bars are hidden by handing click a throwaway output stream
+    rather than by passing ``progressbar(hidden=...)``, which only exists
+    in click 8.3.0 and later. Every earlier release already suppresses the
+    bar when its output is not a terminal, so this needs no version check
+  - The new floors are what Debian trixie (click 8.1.8, click-log 0.3.2)
+    and AlmaLinux 10 (click 8.1.7) package, so korgalore now installs on
+    both without pulling click from PyPI
+
 Bug Fixes
 ~~~~~~~~~
 
@@ -110,9 +121,7 @@ Development
 
   - Covers versions that sit *below* our declared floors, which no
     uv-resolved lane can see
-  - Known gap it revealed: korgalore does not yet run on stock Debian
-    stable or EL10, whose click predates the ``progressbar(hidden=...)``
-    keyword used by ``kgl pull``
+  - Finding the click floor described below is what it was built for
 
 * Move the optional GTK imports into ``gtk_compat``, so the GUI code no
   longer reads as attribute access on ``None`` to type checkers

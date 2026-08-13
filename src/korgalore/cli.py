@@ -1,6 +1,7 @@
 """Command-line interface for korgalore."""
 
 import hashlib
+import io
 import logging
 import os
 import re
@@ -8,7 +9,7 @@ import tomllib
 import urllib.parse
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import click
 import click_log  # type: ignore[import-untyped]
@@ -68,6 +69,24 @@ MAINTAINERS_URL = 'https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linu
 
 # Maximum age of cached MAINTAINERS file in seconds (24 hours)
 MAINTAINERS_CACHE_MAX_AGE = 24 * 60 * 60
+
+
+def progress_file(hide_bar: bool) -> Optional[TextIO]:
+    """Pick the stream a progress bar should render to.
+
+    Click grew a ``progressbar(hidden=...)`` argument in 8.3.0, but every
+    release before that already suppresses the bar when its output stream is
+    not a terminal -- it emits the label once and nothing else. Handing it a
+    throwaway in-memory stream therefore hides the bar on every Click we
+    support, old and new, with no version sniffing.
+
+    Args:
+        hide_bar: Whether the progress bar should be suppressed.
+
+    Returns:
+        A discard stream when hiding, or None to let Click use stdout.
+    """
+    return io.StringIO() if hide_bar else None
 
 
 def get_maintainers_file(data_dir: Path) -> Path:
@@ -927,7 +946,7 @@ def update_all_feeds(
         label='Updating feeds',
         show_pos=True,
         item_show_func=lambda x: format_key_for_display(x in feeds and str(feeds[x].feed_url) or x),
-        hidden=ctx.obj['hide_bar'],
+        file=progress_file(ctx.obj['hide_bar']),
     ) as bar:
         for feed_key in bar:
             if status_callback:
@@ -968,7 +987,9 @@ def retry_all_failed_deliveries(ctx: click.Context) -> None:
         logger.debug('No failed commits to retry for any delivery.')
         return
 
-    with click.progressbar(retry_list, label='Reattempting delivery', show_pos=True, hidden=ctx.obj['hide_bar']) as bar:
+    with click.progressbar(
+        retry_list, label='Reattempting delivery', show_pos=True, file=progress_file(ctx.obj['hide_bar'])
+    ) as bar:
         for delivery_name, target, feed, epoch, commit, labels, subfolder in bar:
             deliver_commit(
                 delivery_name,
@@ -1324,7 +1345,7 @@ def perform_pull(
             label='Delivering to ' + target_name,
             show_pos=True,
             item_show_func=lambda x: x is not None and format_key_for_display(x[0]) or None,
-            hidden=ctx.obj['hide_bar'],
+            file=progress_file(ctx.obj['hide_bar']),
         ) as bar:
             # We bail on a target if we have more than 5 consecutive failures
             consecutive_failures = 0
@@ -1519,7 +1540,9 @@ def yank(ctx: click.Context, target: Optional[str], labels: Tuple[str, ...], thr
         failed = 0
 
         ts.connect()
-        with click.progressbar(messages, label='Uploading thread', show_pos=True, hidden=ctx.obj['hide_bar']) as bar:
+        with click.progressbar(
+            messages, label='Uploading thread', show_pos=True, file=progress_file(ctx.obj['hide_bar'])
+        ) as bar:
             for raw_message in bar:
                 try:
                     msg = parse_message(raw_message)

@@ -5,7 +5,8 @@
 # google-api-python-client anywhere -- not base, AppStream, EPEL or CRB -- and
 # korgalore imports googleapiclient unconditionally from gmail_target, so it
 # is filled in from PyPI via PIP_FILL. Everything else comes from the distro,
-# including click 8.1.7, which is below our declared floor.
+# including click 8.1.7, which is exactly our declared floor -- EL10 and
+# Debian trixie together are what that floor is pinned to.
 #
 # It also ships pytest 7.4.3, the oldest runner in the matrix, so this lane
 # doubles as the check that the suite does not depend on newer pytest
@@ -31,14 +32,10 @@ dnf -q -y install \
     >/dev/null
 
 # google-api-python-client is not packaged for EL10 at all; see the header.
-# click is packaged, but at 8.1.7, which lacks the progressbar(hidden=...)
-# keyword cli.py depends on -- the same blocker the debian-stable lane hits,
-# so a fix there buys EL10 as well.
-#
-# These resolve their own dependencies normally, but the venv sees the distro
+# It resolves its own dependencies normally, but the venv sees the distro
 # site-packages, so pip keeps the distro google-auth rather than pulling a
 # newer one.
-PIP_FILL='google-api-python-client click>=8.3.0'
+PIP_FILL='google-api-python-client'
 export PIP_FILL
 
 # shellcheck disable=SC1091

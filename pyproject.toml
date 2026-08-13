@@ -32,8 +32,13 @@ dependencies = [
     # setuptools is not installed by default. Found by ci-matrix.sh's
     # floor lane; do not lower this without re-running it.
     "google-api-python-client>=2.34.0",
-    "click>=8.3.0",
-    "click-log>=0.4.0",
+    # These two floors are set by what current distro stables package, so that
+    # korgalore installs on a stock Debian or EL10 without pulling anything
+    # from PyPI: click 8.1.7 is EL10's, click-log 0.3.2 is trixie's. Both are
+    # exercised by misc/distro/ and by ci-matrix.sh's floor lane -- see
+    # progress_file() in cli.py for the one API difference that mattered.
+    "click>=8.1.7",
+    "click-log>=0.3.2",
     "liblore>=0.9.0",
 ]
 
