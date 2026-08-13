@@ -75,7 +75,11 @@ where = ["src"]
 generate-hashes = true
 
 [tool.pytest.ini_options]
-asyncio_default_fixture_loop_scope = "function"
+# Turn an unrecognised setting in this section into an error. Without it
+# pytest only warns, which is how asyncio_default_fixture_loop_scope sat here
+# unnoticed: it configures pytest-asyncio, a plugin we do not depend on, for
+# async tests we do not have.
+addopts = ["--strict-config"]
 # Keep collection out of the liblore submodule, which ships its own test
 # suite with dependencies we do not carry.
 testpaths = ["tests"]
