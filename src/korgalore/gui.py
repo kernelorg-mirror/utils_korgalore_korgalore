@@ -210,7 +210,25 @@ class KorgaloreApp:
     def quit(self, source: Any = None) -> None:
         logger.info("Quitting Korgalore GUI...")
         self.stop_event.set()
+        self._shutdown_lore_nodes()
         Gtk.main_quit()
+
+    def _shutdown_lore_nodes(self) -> None:
+        """Terminally shut down all LoreNodes so worker threads stop.
+
+        The sync worker and the yank/auth helpers are daemon threads that
+        only check ``stop_event`` between operations, so a thread blocked
+        in a socket read would otherwise linger until the read timeout
+        expires. ``shutdown()`` closes the node-owned session to interrupt
+        the read immediately and makes every operation started afterwards
+        raise, which also covers a worker that races past ``stop_event``.
+        """
+        for node in self.ctx.obj.get('lore_nodes', {}).values():
+            try:
+                node.shutdown()
+            except Exception as e:
+                # Never let teardown block the exit path.
+                logger.debug("Error shutting down LoreNode: %s", str(e))
 
     def update_status(self, text: str, icon_name: Optional[str] = None) -> None:
         """Update UI status (thread-safe)."""
@@ -532,6 +550,10 @@ class KorgaloreApp:
             self.auth_needed_target = e.target_id
             self.update_status(f"Auth required: {e.target_id}", "dialog-password-symbolic")
             GLib.idle_add(self._show_auth_button)
+        except liblore.OperationCancelledError:
+            # Raised when quit() shuts the nodes down mid-sync. Expected,
+            # not an error state -- the UI is going away regardless.
+            logger.info("Sync cancelled by shutdown")
         except Exception as e:
             logger.error("Sync failed: %s", str(e))
             self.error_state = True
