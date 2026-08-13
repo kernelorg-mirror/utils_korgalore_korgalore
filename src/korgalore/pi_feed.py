@@ -312,7 +312,7 @@ class PIFeed:
             return list()
 
         # Grab the highest epoch we know about
-        known_epochs = [int(e) for e in dinfo.get('epochs', {}).keys()]
+        known_epochs = [int(e) for e in dinfo.get('epochs', {})]
         highest_known_epoch = max(known_epochs)
         logger.debug(f"Highest known epoch for delivery {delivery_name}: {highest_known_epoch}")
         since_commit = dinfo['epochs'][str(highest_known_epoch)]['last']
@@ -616,7 +616,7 @@ class PIFeed:
         if epoch is None:
             # This is different than self.get_highest_epoch() because we want the highest
             # epoch known to this delivery, not the feed as a whole.
-            known_epochs = [int(e) for e in info.get('epochs', {}).keys()]
+            known_epochs = [int(e) for e in info.get('epochs', {})]
             epoch = max(known_epochs)
         elif str(epoch) not in info.get('epochs', {}):
             # Is it a valid epoch?
@@ -655,12 +655,10 @@ class PIFeed:
             known_top_commit = epochs[str(epoch)].get('latest_commit')
             current_top_commit = self.get_top_commit(epoch)
 
-            if known_top_commit != current_top_commit:
-                return True
-            return False
+            return known_top_commit != current_top_commit
 
         # We go by epoch and return True whenever we find a changed epoch
-        for epoch in epochs.keys():
+        for epoch in epochs:
             known_top_commit = epochs[epoch].get('latest_commit')
             try:
                 current_top_commit = self.get_top_commit(epoch)

@@ -147,7 +147,7 @@ class LeiFeed(PIFeed):
             self.init_feed()
             return self.STATUS_INITIALIZED
 
-        known_epochs = [int(e) for e in finfo['epochs'].keys()]
+        known_epochs = [int(e) for e in finfo['epochs']]
         highest_known_epoch = max(known_epochs)
 
         updated = self.feed_updated(highest_known_epoch)

@@ -398,7 +398,7 @@ def get_pipe_target(identifier: str, command: str) -> PipeTarget:
 def resolve_feed_url(feed_value: str, config: Dict[str, Any]) -> str:
     """Resolve a feed name or URL to its full URL."""
     # If it's already a URL, return as-is
-    if feed_value.startswith('https:') or feed_value.startswith('lei:'):
+    if feed_value.startswith(('https:', 'lei:')):
         return feed_value
 
     # Otherwise, look it up in the feeds section
@@ -430,7 +430,7 @@ def get_feed_identifier(feed_value: str, config: Dict[str, Any]) -> Optional[str
         Directory name to use for this feed, or None for LEI feeds (handled separately)
     """
     # Named feed: use the feed name as directory
-    if not (feed_value.startswith('https:') or feed_value.startswith('http:') or feed_value.startswith('lei:')):
+    if not feed_value.startswith(('https:', 'http:', 'lei:')):
         return feed_value
 
     # LEI path: handled separately in process_lei_delivery
@@ -676,7 +676,7 @@ def generate_subscription_config(feed_key: str, url: str,
     timestamp = datetime.now().isoformat(timespec='seconds')
 
     # Determine the URL value to write
-    if url.startswith('https:') or url.startswith('http:'):
+    if url.startswith(('https:', 'http:')):
         url_value = url
     else:
         url_value = f'lei:{url}'
@@ -854,7 +854,7 @@ def refresh_subfolder_templates(ctx: click.Context) -> None:
 def lock_all_feeds(ctx: click.Context) -> None:
     """Acquire exclusive locks on all feeds in the context."""
     feeds = ctx.obj.get('feeds', {})  # type: Dict[str, Union[LeiFeed, LoreFeed]]
-    for feed_key in feeds.keys():
+    for feed_key in feeds:
         feed = feeds[feed_key]
         feed.feed_lock()
 
@@ -862,7 +862,7 @@ def lock_all_feeds(ctx: click.Context) -> None:
 def unlock_all_feeds(ctx: click.Context) -> None:
     """Release exclusive locks on all feeds in the context."""
     feeds = ctx.obj.get('feeds', {})  # type: Dict[str, Union[LeiFeed, LoreFeed]]
-    for feed_key in feeds.keys():
+    for feed_key in feeds:
         feed = feeds[feed_key]
         feed.feed_unlock()
 
@@ -1852,7 +1852,7 @@ def subscribe_add(ctx: click.Context, url: str, target: Optional[str],
 
     # Determine feed type and validate
     try:
-        if url.startswith('https://') or url.startswith('http://'):
+        if url.startswith(('https://', 'http://')):
             LoreFeed.validate_public_inbox_url(url)
             feed_key = normalize_feed_key(url)
         else:
@@ -1944,9 +1944,9 @@ def subscribe_list(ctx: click.Context, paused: bool) -> None:
             feed_url = ''
             sub_target = ''
             sub_labels: List[str] = []
-            for fkey, fval in feeds.items():
+            for fval in feeds.values():
                 feed_url = fval.get('url', '')
-            for dkey, dval in deliveries.items():
+            for dval in deliveries.values():
                 sub_target = dval.get('target', '')
                 sub_labels = dval.get('labels', [])
         except Exception:

@@ -185,7 +185,4 @@ def is_bozofied(from_header: str, bozofilter: Set[str]) -> bool:
         return False
 
     addr = extract_email_address(from_header)
-    if addr and addr in bozofilter:
-        return True
-
-    return False
+    return bool(addr and addr in bozofilter)

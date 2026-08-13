@@ -82,7 +82,7 @@ class LoreFeed(PIFeed):
 
         # Extract list name prefixes (e.g. /lkml/git/0.git -> lkml)
         prefixes: set[str] = set()
-        for key in manifest.keys():
+        for key in manifest:
             parts = key.strip('/').split('/')
             if parts:
                 prefixes.add(parts[0])
@@ -161,7 +161,7 @@ class LoreFeed(PIFeed):
         # The keys are epoch paths, so we extract epoch numbers and paths
         epochs: List[Tuple[int, str, str]] = []
         # The key ends in #.git, so grab the final path component and remove .git
-        for epoch_path in manifest.keys():
+        for epoch_path in manifest:
             epoch_str = epoch_path.split('/')[-1].replace('.git', '')
             try:
                 epoch_num = int(epoch_str)
@@ -226,7 +226,7 @@ class LoreFeed(PIFeed):
             return self.STATUS_NOCHANGE
 
         # What is our highest epoch?
-        highest_local_epoch = max(int(e) for e in feed_state['epochs'].keys())
+        highest_local_epoch = max(int(e) for e in feed_state['epochs'])
         logger.debug(f"Highest local epoch: {highest_local_epoch}")
         gitdir = self.get_gitdir(highest_local_epoch)
         # Pull the latest changes
