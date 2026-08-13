@@ -602,7 +602,7 @@ def deliver_commit(delivery_name: str, target: Any, feed: Union[LeiFeed, LoreFee
         raw_message = feed.get_message_at_commit(epoch, commit)
         target.connect()
         msg = parse_message(raw_message)
-        msgid = msg.get('Message-ID', '')
+        msgid: str = msg.get('Message-ID', '')
 
         # Check bozofilter before delivering
         if bozofilter:
@@ -744,7 +744,7 @@ def get_feed_for_delivery(delivery_details: Dict[str, Any], ctx: click.Context) 
         raise ConfigurationError('No feed specified for delivery.')
     feed_url = resolve_feed_url(feed_value, config)
     feed_key = normalize_feed_key(feed_url)
-    feeds = ctx.obj.get('feeds', {})  # type: Dict[str, Union[LeiFeed, LoreFeed]]
+    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
     if feed_key in feeds:
         return feeds[feed_key]
 
@@ -853,7 +853,7 @@ def refresh_subfolder_templates(ctx: click.Context) -> None:
 
 def lock_all_feeds(ctx: click.Context) -> None:
     """Acquire exclusive locks on all feeds in the context."""
-    feeds = ctx.obj.get('feeds', {})  # type: Dict[str, Union[LeiFeed, LoreFeed]]
+    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
     for feed_key in feeds:
         feed = feeds[feed_key]
         feed.feed_lock()
@@ -861,7 +861,7 @@ def lock_all_feeds(ctx: click.Context) -> None:
 
 def unlock_all_feeds(ctx: click.Context) -> None:
     """Release exclusive locks on all feeds in the context."""
-    feeds = ctx.obj.get('feeds', {})  # type: Dict[str, Union[LeiFeed, LoreFeed]]
+    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
     for feed_key in feeds:
         feed = feeds[feed_key]
         feed.feed_unlock()
@@ -873,7 +873,7 @@ def update_all_feeds(ctx: click.Context,
     """Update all feeds and return (updated_feeds, initialized_feeds)."""
     updated_feeds: List[str] = []
     initialized_feeds: List[str] = []
-    feeds = ctx.obj.get('feeds', {})  # type: Dict[str, Union[LeiFeed, LoreFeed]]
+    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
 
     if status_callback:
         status_callback("Querying feeds...")

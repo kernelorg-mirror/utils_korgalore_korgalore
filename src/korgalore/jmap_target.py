@@ -192,7 +192,7 @@ class JmapTarget:
             result = response.json()
 
             # Extract mailboxes from Mailbox/get response
-            mailboxes = []
+            mailboxes: List[Dict[str, str]] = []
             for method_response in result.get('methodResponses', []):
                 method_name, method_result, _ = method_response
                 if method_name == 'Mailbox/get':

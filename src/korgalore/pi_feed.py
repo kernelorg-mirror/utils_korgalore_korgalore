@@ -400,7 +400,7 @@ class PIFeed:
         except KeyError:
             raw_msg = self.get_message_at_commit(epoch, commitish)
             msg = parse_message(raw_msg)
-            subject = msg.get('Subject', '(no subject)')
+            subject: str = msg.get('Subject', '(no subject)')
             COMMIT_SUBJECT_CACHE[commitish] = subject
             return subject
 
@@ -635,7 +635,7 @@ class PIFeed:
             if not gitdir.exists():
                 raise StateError(f"Epoch {epoch} does not exist in feed {self.feed_dir}.")
             raise StateError(f"No delivery info found for epoch {epoch} in delivery {delivery_name}.")
-        epoch_info = info['epochs'][str(epoch)] # type: Dict[str, Any]
+        epoch_info: Dict[str, Any] = info['epochs'][str(epoch)]
         return epoch_info
 
     def load_delivery_info(self, delivery_name: str) -> Dict[str, Any]:
@@ -646,7 +646,7 @@ class PIFeed:
             self.save_delivery_info(delivery_name)
 
         with open(state_file, 'r') as gf:
-            info = json.load(gf)  # type: Dict[str, Any]
+            info: Dict[str, Any] = json.load(gf)
 
         return info
 
@@ -663,7 +663,7 @@ class PIFeed:
             if str(epoch) not in epochs:
                 # No state for this epoch, so treat as updated
                 return True
-            known_top_commit = epochs[str(epoch)].get('latest_commit')
+            known_top_commit: Optional[str] = epochs[str(epoch)].get('latest_commit')
             current_top_commit = self.get_top_commit(epoch)
 
             return known_top_commit != current_top_commit

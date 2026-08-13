@@ -63,7 +63,7 @@ class RawMessage:
         if not self._message_id_extracted:
             self._message_id_extracted = True
             try:
-                msgid = self.parsed.get('Message-ID')
+                msgid: object = self.parsed.get('Message-ID')
                 if msgid and isinstance(msgid, str):
                     self._message_id = msgid.strip()
             except Exception:

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 import click
@@ -47,7 +48,7 @@ class KorgaloreApp:
         self.ind.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
 
         # Config path and mtime tracking for change detection
-        self.cfgpath = ctx.obj.get('cfgpath', get_xdg_config_dir() / 'korgalore.toml')
+        self.cfgpath: Path = ctx.obj.get('cfgpath', get_xdg_config_dir() / 'korgalore.toml')
         self._config_mtime = self._get_config_mtime()
 
         # Load config
