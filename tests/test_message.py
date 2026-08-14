@@ -35,6 +35,41 @@ class TestRawMessage:
         msg = RawMessage(raw)
         assert msg.message_id == '<spaced@example.com>'
 
+    def test_message_id_ignores_trailing_comment(self) -> None:
+        """A comment after the ID is dropped, not returned as part of it.
+
+        Gnus writes these. The whole header value used to come back, which
+        made the IMAP and JMAP duplicate lookups search for a string no
+        stored message has, so every run delivered the message again.
+        """
+        raw = b'From: test@example.com\r\nMessage-ID: <abc123@example.com> (raw)\r\n\r\nBody'
+        msg = RawMessage(raw)
+        assert msg.message_id == '<abc123@example.com>'
+
+    def test_message_id_folded_across_lines(self) -> None:
+        """A Message-ID folded onto its own line is unfolded."""
+        raw = b'From: test@example.com\r\nMessage-ID:\r\n <folded@example.com>\r\n\r\nBody'
+        msg = RawMessage(raw)
+        assert msg.message_id == '<folded@example.com>'
+
+    def test_message_id_without_brackets_is_kept(self) -> None:
+        """A bracketless Message-ID still identifies the message.
+
+        The header is malformed, but returning None here would skip the
+        duplicate check entirely and redeliver the message on every run.
+        The bare value is returned as-is: the IMAP and JMAP lookups match
+        on the header as written, so invented brackets would not match.
+        """
+        raw = b'From: test@example.com\r\nMessage-ID: bare@example.com\r\n\r\nBody'
+        msg = RawMessage(raw)
+        assert msg.message_id == 'bare@example.com'
+
+    def test_message_id_empty_header_is_none(self) -> None:
+        """A present but empty Message-ID header yields None, not ''."""
+        raw = b'From: test@example.com\r\nMessage-ID: \r\n\r\nBody'
+        msg = RawMessage(raw)
+        assert msg.message_id is None
+
     def test_raw_property(self) -> None:
         """Raw property returns original bytes."""
         raw = b'From: test@example.com\r\n\r\nBody'

@@ -4,7 +4,7 @@ from email.message import EmailMessage
 from email.utils import formatdate
 from typing import Optional
 
-from liblore.utils import parse_message, wrap_header
+from liblore.utils import get_clean_msgid, parse_message, wrap_header
 
 from korgalore import __version__
 
@@ -60,9 +60,25 @@ class RawMessage:
         if not self._message_id_extracted:
             self._message_id_extracted = True
             try:
-                msgid: object = self.parsed.get('Message-ID')
-                if msgid and isinstance(msgid, str):
-                    self._message_id = msgid.strip()
+                # get_clean_msgid() pulls the ID out of the angle brackets,
+                # so a header carrying a trailing comment (Gnus writes
+                # those) yields the ID alone instead of the whole header
+                # value. Our callers search on the bracketed form, so put
+                # the brackets back.
+                msgid = get_clean_msgid(self.parsed)
+                if msgid:
+                    self._message_id = f'<{msgid}>'
+                else:
+                    # No brackets to extract from. The header is malformed,
+                    # but it still identifies the message, so fall back to
+                    # the bare value rather than giving up and letting the
+                    # duplicate check be skipped. Deliberately not wrapped
+                    # in brackets: the IMAP and JMAP lookups match on the
+                    # header as written, so invented brackets would stop
+                    # matching the very message we are looking for.
+                    raw: object = self.parsed.get('Message-ID')
+                    if raw and isinstance(raw, str) and raw.strip():
+                        self._message_id = raw.strip()
             except Exception:
                 # If parsing fails, leave message_id as None
                 pass

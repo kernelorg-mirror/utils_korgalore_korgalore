@@ -99,6 +99,19 @@ Refactoring
 Bug Fixes
 ~~~~~~~~~
 
+* A Message-ID with a trailing comment no longer defeats duplicate
+  detection
+
+  - ``RawMessage.message_id`` returned the whole header value, so a
+    Message-ID written as ``<id@host> (raw)`` -- Gnus does this -- made
+    the IMAP and JMAP duplicate lookups search for a string no stored
+    message carries, redelivering the message on every run
+  - Extraction now goes through ``liblore.utils.get_clean_msgid``, which
+    takes the ID from between the angle brackets. The brackets are put
+    back, so the property's contract is unchanged
+  - A Message-ID with no angle brackets at all is still returned as
+    written, since the duplicate lookups match the header as stored
+
 * GUI: losing the network mid-sync no longer leaves the sync grinding
 
   - ``run_sync()`` checks network availability before it starts, but
