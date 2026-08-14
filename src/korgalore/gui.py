@@ -60,7 +60,6 @@ class KorgaloreApp:
         self.is_syncing = False
         self.last_sync_time = 0.0
         self.next_sync_time = 0.0
-        self.error_state = False
         self.auth_needed_target: Optional[str] = None  # Target ID needing re-auth
 
         # Network monitoring
@@ -257,7 +256,6 @@ class KorgaloreApp:
             # to allow network stack to fully stabilize
             logger.info('Network restored, scheduling sync in 10 seconds')
             self.next_sync_time = time.time() + 10
-            self.error_state = False
             self.update_status('Network restored, syncing soon...', 'network-idle-symbolic')
         elif not network_available:
             # Network went down. run_sync() only checks availability before
@@ -535,7 +533,6 @@ class KorgaloreApp:
             )
 
             self.last_sync_time = time.time()
-            self.error_state = False
 
             count = len(unique_msgids)
 
@@ -548,7 +545,6 @@ class KorgaloreApp:
 
         except AuthenticationError as e:
             logger.error('Authentication required for %s: %s', e.target_id, str(e))
-            self.error_state = True
             self.auth_needed_target = e.target_id
             self.update_status(f'Auth required: {e.target_id}', 'dialog-password-symbolic')
             GLib.idle_add(self._show_auth_button)
@@ -560,7 +556,6 @@ class KorgaloreApp:
             logger.info('Sync cancelled')
         except Exception as e:
             logger.error('Sync failed: %s', str(e))
-            self.error_state = True
             self.update_status(f'Error: {e}', 'dialog-error-symbolic')
         finally:
             self.is_syncing = False
@@ -626,7 +621,6 @@ class KorgaloreApp:
 
             # Success - clear the auth needed state
             self.auth_needed_target = None
-            self.error_state = False
             GLib.idle_add(self._hide_auth_button)
             logger.info('Re-authentication successful for %s', target_id)
 

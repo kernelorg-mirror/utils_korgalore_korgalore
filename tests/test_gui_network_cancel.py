@@ -51,7 +51,6 @@ def _make_app(ctx: click.Context, sync_interval: int = 300) -> 'KorgaloreApp':
     app.is_syncing = False
     app.network_available = True
     app.next_sync_time = 0.0
-    app.error_state = False
     app.auth_needed_target = None
     app.ind = MagicMock()
     app.item_status = MagicMock()
