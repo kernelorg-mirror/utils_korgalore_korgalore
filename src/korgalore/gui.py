@@ -218,6 +218,23 @@ class KorgaloreApp:
                 # Never let teardown block the exit path.
                 logger.debug('Error shutting down LoreNode: %s', str(e))
 
+    def _cancel_lore_nodes(self) -> None:
+        """Cancel in-flight LoreNode requests, leaving the nodes usable.
+
+        Unlike ``shutdown()``, ``cancel_active()`` only affects operations
+        already in progress: it closes each node-owned session so a thread
+        blocked in a socket read raises at once, but operations started
+        afterwards proceed normally and open a fresh session. That is what
+        we want when the network drops, since the node has to keep working
+        once it comes back.
+        """
+        for node in self.ctx.obj.get('lore_nodes', {}).values():
+            try:
+                node.cancel_active()
+            except Exception as e:
+                # A node we cannot cancel is no reason to skip the rest.
+                logger.debug('Error cancelling LoreNode requests: %s', str(e))
+
     def update_status(self, text: str, icon_name: Optional[str] = None) -> None:
         """Update UI status (thread-safe)."""
 
@@ -243,7 +260,13 @@ class KorgaloreApp:
             self.error_state = False
             self.update_status('Network restored, syncing soon...', 'network-idle-symbolic')
         elif not network_available:
-            # Network went down
+            # Network went down. run_sync() only checks availability before
+            # it starts, so a sync already in flight would keep retrying
+            # every configured origin against a network that is gone,
+            # waiting out the read timeout each time. Cancel it instead.
+            if self.is_syncing:
+                logger.info('Network lost during sync, cancelling in-flight requests')
+                self._cancel_lore_nodes()
             self.update_status('Network unavailable', 'network-offline-symbolic')
 
     def update_timers(self) -> bool:
@@ -530,17 +553,27 @@ class KorgaloreApp:
             self.update_status(f'Auth required: {e.target_id}', 'dialog-password-symbolic')
             GLib.idle_add(self._show_auth_button)
         except liblore.OperationCancelledError:
-            # Raised when quit() shuts the nodes down mid-sync. Expected,
-            # not an error state -- the UI is going away regardless.
-            logger.info('Sync cancelled by shutdown')
+            # Raised when the nodes are cancelled mid-sync, either by quit()
+            # shutting them down or by the network dropping. Neither is an
+            # error state: the UI is going away, or it is already showing
+            # the offline status and waiting for the network to return.
+            logger.info('Sync cancelled')
         except Exception as e:
             logger.error('Sync failed: %s', str(e))
             self.error_state = True
             self.update_status(f'Error: {e}', 'dialog-error-symbolic')
         finally:
             self.is_syncing = False
-            # Reset countdown timer after sync completes
-            self.next_sync_time = time.time() + self.sync_interval
+            # Reset countdown timer after sync completes, unless something
+            # scheduled a sooner sync while we were finishing. A network
+            # flap does exactly that: the down callback cancels this sync,
+            # and the up callback asks for a sync in 10 seconds, which we
+            # must not push back to the full interval. run_sync() zeroes
+            # next_sync_time on entry, so anything positive was set by a
+            # callback rather than left over from before.
+            resume_at = time.time() + self.sync_interval
+            if not 0 < self.next_sync_time < resume_at:
+                self.next_sync_time = resume_at
             GLib.idle_add(lambda: self.item_sync.set_sensitive(True))
 
     def _show_auth_button(self) -> bool:

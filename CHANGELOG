@@ -99,6 +99,25 @@ Refactoring
 Bug Fixes
 ~~~~~~~~~
 
+* GUI: losing the network mid-sync no longer leaves the sync grinding
+
+  - ``run_sync()`` checks network availability before it starts, but
+    nothing interrupted a sync already in flight, so it kept retrying
+    every configured mirror origin against a network that was gone,
+    waiting out the read timeout on each one while the tray already
+    read "Network unavailable"
+  - The network-changed callback now calls ``LoreNode.cancel_active()``
+    on the cached nodes, which closes each node-owned session so a
+    thread blocked in a socket read raises at once. Unlike the
+    ``shutdown()`` used on quit, this is not terminal: operations
+    started after the network returns open a fresh session
+  - A down/up network flap during the cancellation no longer discards
+    the 10-second resync that the network-restored path schedules,
+    which used to strand the user for a full sync interval right after
+    reconnecting
+  - Note that ``git clone``/``git fetch`` run as subprocesses and are
+    unaffected; this cancels the HTTP side only
+
 * ``yank --thread`` no longer delivers one copy per archived list
 
   - A thread cross-posted to several lists is archived once per list, so
