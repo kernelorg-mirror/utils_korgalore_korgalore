@@ -12,6 +12,47 @@ from liblore import LoreNode
 logger = logging.getLogger('korgalore')
 
 
+def _fetch_manifest(node: LoreNode, base_url: str) -> Dict[str, Any]:
+    """Fetch and parse a public-inbox manifest.
+
+    Manifests describe the epochs a public-inbox archive is split into,
+    which is what drives epoch mirroring. They are fetched gzipped from
+    ``{base_url}/manifest.js.gz``.
+
+    Args:
+        node: LoreNode to make the request with, giving mirror failover.
+        base_url: Base URL of the public-inbox archive.
+
+    Returns:
+        The parsed manifest, mapping epoch paths to their metadata.
+
+    Raises:
+        RemoteError: If the manifest cannot be fetched, is not valid
+            gzipped JSON, or is empty.
+    """
+    manifest_url = f'{base_url.rstrip("/")}/manifest.js.gz'
+    logger.debug('Fetching manifest from %s', manifest_url)
+
+    try:
+        response = node.request('GET', manifest_url)
+        response.raise_for_status()
+    except Exception as e:
+        raise RemoteError(f'Failed to fetch manifest from {manifest_url}: {e}') from e
+
+    try:
+        with GzipFile(fileobj=io.BytesIO(response.content)) as f:
+            manifest: Dict[str, Any] = json.load(f)
+    except Exception as e:
+        raise RemoteError(f'Failed to parse manifest from {manifest_url}: {e}') from e
+
+    # A server that answers at all but has nothing to mirror is a remote
+    # problem, not an archive with zero epochs.
+    if not manifest:
+        raise RemoteError(f'Empty manifest from {manifest_url}')
+
+    return manifest
+
+
 class LoreFeed(PIFeed):
     """Service for interacting with lore.kernel.org public-inbox archives."""
 
@@ -56,26 +97,11 @@ class LoreFeed(PIFeed):
         """
         from korgalore import make_lore_node
 
-        manifest_url = f'{url.rstrip("/")}/manifest.js.gz'
-        logger.debug('Fetching manifest from %s', manifest_url)
-
         node = make_lore_node(url=url)
         try:
-            response = node.request('GET', manifest_url)
-            response.raise_for_status()
-        except Exception as e:
-            raise RemoteError(f'Failed to fetch manifest from {manifest_url}: {e}') from e
+            manifest = _fetch_manifest(node, url)
         finally:
             node.close()
-
-        try:
-            raw = GzipFile(fileobj=io.BytesIO(response.content)).read()
-            manifest = json.loads(raw)
-        except Exception as e:
-            raise RemoteError(f'Failed to parse manifest from {manifest_url}: {e}') from e
-
-        if not manifest:
-            raise RemoteError(f'Empty manifest from {manifest_url}')
 
         # Extract list name prefixes (e.g. /lkml/git/0.git -> lkml)
         prefixes: set[str] = set()
@@ -91,20 +117,7 @@ class LoreFeed(PIFeed):
 
     def get_manifest(self) -> Dict[str, Any]:
         """Fetch and parse the gzipped manifest from the Lore server."""
-        manifest_url = f'{self.feed_url.rstrip("/")}/manifest.js.gz'
-        try:
-            response = self._node.request('GET', manifest_url)
-            response.raise_for_status()
-        except Exception as e:
-            raise RemoteError(f'Failed to fetch manifest from {self.feed_url}: {e}') from e
-        # ungzip and parse the manifest
-        manifest: Dict[str, Any] = dict()
-        with GzipFile(fileobj=io.BytesIO(response.content)) as f:
-            mf = json.load(f)
-            for key, vals in mf.items():
-                manifest[key] = vals
-
-        return manifest
+        return _fetch_manifest(self._node, self.feed_url)
 
     def _git_mirror_config(self) -> Dict[str, str]:
         """Return git config dict to redirect operations to the preferred mirror.

@@ -63,6 +63,18 @@ Refactoring
     Rebase recovery cleans the stored subject as well, so state written
     by earlier versions still matches exactly
 
+* Manifest fetching lives in a single helper
+
+  - ``LoreFeed.get_manifest()`` and ``LoreFeed.validate_public_inbox_url()``
+    each had their own copy of the fetch, gunzip, and parse logic
+  - Both now call one ``_fetch_manifest()`` helper, so error reporting is
+    the same whichever way the manifest is fetched
+  - ``get_manifest()`` now raises ``RemoteError`` when the response is not
+    valid gzipped JSON (it used to let ``gzip.BadGzipFile`` escape, which
+    nothing caught) and when the manifest is empty (it used to return an
+    empty dict, leaving callers to fail further along). ``RemoteError``
+    also feeds the existing retry logic
+
 * Requires liblore >= 0.9.0 (was >= 0.4.0)
 
 * Requires google-api-python-client >= 2.34.0 (was >= 2.0.0)
