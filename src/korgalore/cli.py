@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple, Unio
 import click
 import click_log  # type: ignore[import-untyped]
 import requests
-from liblore.utils import get_msgid_from_url, msg_get_subject, parse_message, split_mbox_as_bytes
+from liblore.utils import get_msgid_from_url, msg_get_subject, parse_message, split_and_dedupe_as_bytes
 
 import liblore
 from korgalore import (
@@ -1462,8 +1462,8 @@ def perform_yank(
         if thread:
             msgid = get_msgid_from_url(msgid_or_url)
             mbox = node.get_mbox_by_msgid(msgid)
-            messages = split_mbox_as_bytes(mbox)
-            logger.info('Found %d messages in thread', len(messages))
+            messages = split_and_dedupe_as_bytes(mbox)
+            logger.info('Found %d unique messages in thread', len(messages))
 
             uploaded = 0
             failed = 0
@@ -1528,12 +1528,12 @@ def yank(ctx: click.Context, target: Optional[str], labels: Tuple[str, ...], thr
         logger.debug('Fetching thread: %s', msgid)
         try:
             mbox = node.get_mbox_by_msgid(msgid)
-            messages = split_mbox_as_bytes(mbox)
+            messages = split_and_dedupe_as_bytes(mbox)
         except liblore.RemoteError as e:
             logger.critical('Failed to fetch thread: %s', str(e))
             raise click.Abort() from e
 
-        logger.info('Found %d messages in thread', len(messages))
+        logger.info('Found %d unique messages in thread', len(messages))
 
         # Upload each message in the thread
         uploaded = 0

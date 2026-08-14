@@ -424,6 +424,13 @@ Options:
    If no labels are specified, target-specific defaults are used (e.g.,
    ``INBOX, UNREAD`` for Gmail, ``INBOX`` for JMAP).
 
+.. note::
+   With ``-T``, each message is delivered only once even when the thread was
+   cross-posted to several archived lists. Where copies differ, the one from
+   the source least likely to have modified the message is kept, preferring
+   ``feeds.kernel.org``, then ``linux.dev``, then ``kernel.org``, then
+   anything else.
+
 Examples:
 
 .. code-block:: bash

@@ -87,6 +87,16 @@ Refactoring
 Bug Fixes
 ~~~~~~~~~
 
+* ``yank --thread`` no longer delivers one copy per archived list
+
+  - A thread cross-posted to several lists is archived once per list, so
+    yanking it delivered the same message repeatedly
+  - Messages are now deduplicated by Message-ID via
+    ``liblore.utils.split_and_dedupe_as_bytes``. Where copies differ, the
+    one from the source least likely to have modified the message is kept,
+    using liblore's default List-Id preference order
+  - Thread order is preserved
+
 * Fix ``UnboundLocalError`` when a public-inbox commit has an empty message
   blob
 

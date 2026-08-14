@@ -205,7 +205,10 @@ target is used.
 Labels to apply (repeatable or comma-separated).
 .TP
 .BR \-T ", " \-\-thread
-Fetch and upload the entire thread.
+Fetch and upload the entire thread. Each message is delivered only once
+even when the thread was cross-posted to several archived lists; where
+copies differ, the one from the source least likely to have modified the
+message is kept.
 .PP
 Accepts either a message-id or a lore.kernel.org URL.
 .SH FILES
