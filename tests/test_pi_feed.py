@@ -7,6 +7,7 @@ These tests cover the delivery tracking functionality including:
 """
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -977,3 +978,168 @@ class TestSaveDeliveryInfoEmptyMessage:
         assert entry['last'] == commit
         assert entry['subject'] == '(no subject)'
         assert entry['msgid'] == '(no message-id)'
+
+
+class TestSubjectNormalization:
+    """Subjects flow through liblore's msg_get_subject().
+
+    ``emlpolicy`` already decodes RFC 2047 and unfolds continuation lines,
+    so the shared helper is not about decoding. What it adds on top is
+    whitespace-run collapsing, which matters because these subjects are
+    written into single-line state files and log messages.
+    """
+
+    def _make_feed(self, feed_dir: Path) -> PIFeed:
+        class TestPIFeed(PIFeed):
+            def __init__(self, fd: Path) -> None:
+                super().__init__(feed_key='test-feed', feed_dir=fd)
+                self.feed_type = 'test'
+
+            def get_highest_epoch(self) -> int:
+                return 0
+
+        return TestPIFeed(feed_dir)
+
+    def _repo_with_message(self, gitdir: Path, raw: bytes) -> str:
+        """Create a bare repo whose HEAD commit carries *raw* as its 'm' file."""
+        import subprocess
+        import tempfile
+
+        subprocess.run(['git', 'init', '--bare', str(gitdir)], check=True, capture_output=True)
+        with tempfile.TemporaryDirectory() as work:
+            subprocess.run(['git', 'clone', str(gitdir), work], check=True, capture_output=True)
+            (Path(work) / 'm').write_bytes(raw)
+            subprocess.run(['git', '-C', work, 'add', '-A'], check=True, capture_output=True)
+            subprocess.run(
+                [
+                    'git',
+                    '-C',
+                    work,
+                    '-c',
+                    'user.name=Test',
+                    '-c',
+                    'user.email=test@test',
+                    'commit',
+                    '-m',
+                    'add message',
+                ],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(['git', '-C', work, 'push'], check=True, capture_output=True)
+            result = subprocess.run(
+                ['git', '-C', work, 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True
+            )
+            return result.stdout.strip()
+
+    def _setup(self, tmp_path: Path, raw: bytes) -> tuple[PIFeed, str]:
+        feed_dir = tmp_path / 'test-feed'
+        feed_dir.mkdir()
+        gitdir = feed_dir / 'git' / '0.git'
+        gitdir.mkdir(parents=True)
+        commit = self._repo_with_message(gitdir, raw)
+        return self._make_feed(feed_dir), commit
+
+    def test_whitespace_runs_collapse_in_state_file(self, tmp_path: Path) -> None:
+        """Tabs and repeated spaces become single spaces in the state file."""
+        raw = b'Subject: [PATCH]\tcrypto:\t  fix   the   thing\nMessage-ID: <ws@example.com>\n\nbody\n'
+        feed, commit = self._setup(tmp_path, raw)
+
+        feed.save_delivery_info('test-delivery', 0, latest_commit=commit)
+
+        entry = json.loads((feed.feed_dir / 'korgalore.test-delivery.info').read_text())['epochs']['0']
+        assert entry['subject'] == '[PATCH] crypto: fix the thing'
+
+    def test_encoded_and_folded_subject_is_readable(self, tmp_path: Path) -> None:
+        """A folded, RFC 2047 encoded subject lands decoded and on one line."""
+        raw = b'Subject: =?utf-8?q?R=C3=A9paration_du?=\n =?utf-8?q?_pilote?=\nMessage-ID: <enc@example.com>\n\nbody\n'
+        feed, commit = self._setup(tmp_path, raw)
+
+        assert feed.get_subject_at_commit(0, commit) == 'Réparation du pilote'
+
+    def test_empty_subject_header_gets_placeholder(self, tmp_path: Path) -> None:
+        """A present but empty Subject falls back to the placeholder."""
+        raw = b'Subject:\nMessage-ID: <empty@example.com>\n\nbody\n'
+        feed, commit = self._setup(tmp_path, raw)
+
+        feed.save_delivery_info('test-delivery', 0, latest_commit=commit)
+
+        entry = json.loads((feed.feed_dir / 'korgalore.test-delivery.info').read_text())['epochs']['0']
+        assert entry['subject'] == '(no subject)'
+
+    def _repo_with_two_messages(self, gitdir: Path, first: bytes, second: bytes) -> tuple[str, str]:
+        """Create a bare repo with two commits sharing one committer date.
+
+        A shared date matters: recover_after_rebase() filters candidates
+        with ``--since-as-filter``, which has one-second granularity, so
+        both commits are candidates and the *second* one is not the
+        fallback. That is what makes an exact-match failure observable.
+        """
+        import subprocess
+        import tempfile
+
+        fixed_date = '2026-01-15 12:00:00 +0000'
+        env = {'GIT_COMMITTER_DATE': fixed_date, 'GIT_AUTHOR_DATE': fixed_date}
+        subprocess.run(['git', 'init', '--bare', str(gitdir)], check=True, capture_output=True)
+        hashes: list[str] = []
+        with tempfile.TemporaryDirectory() as work:
+            subprocess.run(['git', 'clone', str(gitdir), work], check=True, capture_output=True)
+            for raw in (first, second):
+                (Path(work) / 'm').write_bytes(raw)
+                subprocess.run(['git', '-C', work, 'add', '-A'], check=True, capture_output=True)
+                subprocess.run(
+                    [
+                        'git',
+                        '-C',
+                        work,
+                        '-c',
+                        'user.name=Test',
+                        '-c',
+                        'user.email=test@test',
+                        'commit',
+                        '-m',
+                        'add message',
+                    ],
+                    check=True,
+                    capture_output=True,
+                    env={**os.environ, **env},
+                )
+                result = subprocess.run(
+                    ['git', '-C', work, 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True
+                )
+                hashes.append(result.stdout.strip())
+            subprocess.run(['git', '-C', work, 'push'], check=True, capture_output=True)
+        return hashes[0], hashes[1]
+
+    def test_rebase_recovery_matches_legacy_unnormalized_subject(self, tmp_path: Path) -> None:
+        """State written before normalization still matches during recovery.
+
+        Pre-upgrade state files hold the un-collapsed subject. Recovery
+        cleans the stored side too, so the newer commit is still identified
+        exactly instead of falling back to the first candidate commit.
+        """
+        feed_dir = tmp_path / 'test-feed'
+        feed_dir.mkdir()
+        gitdir = feed_dir / 'git' / '0.git'
+        gitdir.mkdir(parents=True)
+        older, newer = self._repo_with_two_messages(
+            gitdir,
+            b'Subject: an earlier message\nMessage-ID: <older@example.com>\n\nbody\n',
+            b'Subject: crypto:\tfix   the   thing\nMessage-ID: <legacy@example.com>\n\nbody\n',
+        )
+        feed = self._make_feed(feed_dir)
+
+        # Write state the way an older korgalore would have: subject straight
+        # off the parsed header, with its whitespace runs intact.
+        feed.save_delivery_info('test-delivery', 0, latest_commit=newer)
+        state_file = feed_dir / 'korgalore.test-delivery.info'
+        state = json.loads(state_file.read_text())
+        state['epochs']['0']['subject'] = 'crypto:\tfix   the   thing'
+        state_file.write_text(json.dumps(state))
+
+        recovered = feed.recover_after_rebase('test-delivery', 0)
+
+        # Without cleaning the stored subject this returns *older*, the
+        # first candidate after the recorded date.
+        assert recovered == newer
+        assert recovered != older

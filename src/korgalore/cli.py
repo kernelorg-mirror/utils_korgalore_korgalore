@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple, Unio
 import click
 import click_log  # type: ignore[import-untyped]
 import requests
-from liblore.utils import get_msgid_from_url, parse_message, split_mbox_as_bytes
+from liblore.utils import get_msgid_from_url, msg_get_subject, parse_message, split_mbox_as_bytes
 
 import liblore
 from korgalore import (
@@ -679,7 +679,7 @@ def deliver_commit(
                 return SKIPPED_BOZOFILTER
 
         if logger.isEnabledFor(logging.DEBUG):
-            subject = msg.get('Subject', '(no subject)')
+            subject = msg_get_subject(msg) or '(no subject)'
             logger.debug(' -> %s', subject)
         target.import_message(
             raw_message,
@@ -1471,7 +1471,7 @@ def perform_yank(
             for raw_message in messages:
                 try:
                     msg = parse_message(raw_message)
-                    subject = msg.get('Subject', '(no subject)')
+                    subject = msg_get_subject(msg) or '(no subject)'
                     logger.debug('Uploading: %s', subject)
                     ts.import_message(raw_message, labels=labels_list)
                     uploaded += 1
@@ -1483,7 +1483,7 @@ def perform_yank(
         msgid = get_msgid_from_url(msgid_or_url)
         raw_message = node.get_message_by_msgid(msgid)
         msg = parse_message(raw_message)
-        subject = msg.get('Subject', '(no subject)')
+        subject = msg_get_subject(msg) or '(no subject)'
         logger.debug('Uploading: %s', subject)
         ts.import_message(raw_message, labels=labels_list)
         return 1, 0
@@ -1546,7 +1546,7 @@ def yank(ctx: click.Context, target: Optional[str], labels: Tuple[str, ...], thr
             for raw_message in bar:
                 try:
                     msg = parse_message(raw_message)
-                    subject = msg.get('Subject', '(no subject)')
+                    subject = msg_get_subject(msg) or '(no subject)'
                     logger.debug('Uploading: %s', subject)
                     ts.import_message(raw_message, labels=labels_list)
                     uploaded += 1
@@ -1570,7 +1570,7 @@ def yank(ctx: click.Context, target: Optional[str], labels: Tuple[str, ...], thr
 
         # Parse to get the subject for logging
         msg = parse_message(raw_message)
-        subject = msg.get('Subject', '(no subject)')
+        subject = msg_get_subject(msg) or '(no subject)'
         logger.debug('Message subject: %s', subject)
 
         # Upload the message
@@ -1731,7 +1731,7 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str], labe
         node = get_lore_node(ctx)
         raw_message = node.get_message_by_msgid(msgid)
         msg = parse_message(raw_message)
-        subject = msg.get('Subject', '(no subject)')
+        subject = msg_get_subject(msg) or '(no subject)'
     except liblore.RemoteError:
         logger.warning('Could not fetch message to get subject')
 

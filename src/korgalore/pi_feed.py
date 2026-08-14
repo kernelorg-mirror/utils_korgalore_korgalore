@@ -8,7 +8,7 @@ from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, lockf
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from liblore.utils import parse_message
+from liblore.utils import clean_header, msg_get_subject, parse_message
 
 from korgalore import GitError, PublicInboxError, StateError, run_git_command
 
@@ -282,9 +282,14 @@ class PIFeed:
         for commit in possible_commits:
             raw_message = self.get_message_at_commit(epoch, commit)
             msg = parse_message(raw_message)
-            subject = msg.get('Subject', '(no subject)')
+            subject = msg_get_subject(msg) or '(no subject)'
             msgid = msg.get('Message-ID', '(no message-id)')
-            if subject == info.get('subject') and msgid == info.get('msgid'):
+            # msg_get_subject() collapses internal whitespace runs, which
+            # state files written before it holding a tab- or double-space
+            # subject would no longer match. Clean the stored side too;
+            # clean_header() is idempotent, so this is a no-op for state
+            # written by the current code.
+            if subject == clean_header(info.get('subject')) and msgid == info.get('msgid'):
                 logger.debug('Found matching commit: %s', commit)
                 last_commit = commit
                 matched_msg = msg
@@ -396,7 +401,7 @@ class PIFeed:
         except KeyError:
             raw_msg = self.get_message_at_commit(epoch, commitish)
             msg = parse_message(raw_msg)
-            subject: str = msg.get('Subject', '(no subject)')
+            subject: str = msg_get_subject(msg) or '(no subject)'
             COMMIT_SUBJECT_CACHE[commitish] = subject
             return subject
 
@@ -612,7 +617,7 @@ class PIFeed:
                 msg = parse_message(message)
             else:
                 msg = message
-            subject = msg.get('Subject', '(no subject)')
+            subject = msg_get_subject(msg) or '(no subject)'
             msgid = msg.get('Message-ID', '(no message-id)')
 
         state_file = self._get_state_file_path(delivery_name, 'info')

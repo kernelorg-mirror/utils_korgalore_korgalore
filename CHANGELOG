@@ -55,6 +55,13 @@ Refactoring
     ``liblore.RemoteError`` catches errors from both libraries
   - Removed ``set_user_agent_id()`` in favor of reading
     ``lore.useragentplus`` via ``LoreNode.user_agent_plus`` property
+  - Trace header folding uses ``liblore.utils.wrap_header`` instead of a
+    local 40-line word-wrapper
+  - Subject extraction goes through ``liblore.utils.msg_get_subject`` at
+    all nine call sites, which returns a plain ``str`` and collapses
+    whitespace runs so state files and log lines stay on one line.
+    Rebase recovery cleans the stored subject as well, so state written
+    by earlier versions still matches exactly
 
 * Requires liblore >= 0.9.0 (was >= 0.4.0)
 
