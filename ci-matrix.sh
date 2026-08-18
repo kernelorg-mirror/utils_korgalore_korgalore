@@ -147,15 +147,25 @@ fi
 # is advisory: it never fails the run, only reports what broke, so it does
 # not block CI while giving a heads-up for when to move the interpreter
 # into PYTHONS for real.
+#
+# `uv python install` alone leaves an already-installed interpreter in place
+# even if a newer patch (e.g. a later beta) has since shipped, which is the
+# opposite of what a prerelease lane is for -- pass --upgrade so it always
+# fetches the newest patch uv knows about. That "knows about" is doing real
+# work: uv's download catalog ships with the uv binary itself, so a stale uv
+# install can still resolve a stale prerelease even with --upgrade. Print
+# `uv --version` alongside the resolved interpreter so that is visible
+# without having to dig through a failure traceback.
 # Override or skip: PRERELEASE_PY=3.16 ./ci-matrix.sh (or PRERELEASE_PY= to skip)
 PRERELEASE_PY="${PRERELEASE_PY-3.15}"
 if [ -n "$PRERELEASE_PY" ]; then
     printf '\n=== Prerelease (advisory) on Python %s ===\n' "$PRERELEASE_PY"
+    uv --version
     unset UV_PROJECT_ENVIRONMENT
     prereleaseenv=".venv-prerelease"
     rm -rf "$prereleaseenv"
     prerelease_failed=""
-    if ! uv python install "$PRERELEASE_PY"; then
+    if ! uv python install "$PRERELEASE_PY" --upgrade; then
         prerelease_failed="install"
     elif ! uv venv "$prereleaseenv" --python "$PRERELEASE_PY"; then
         prerelease_failed="venv"
@@ -171,10 +181,12 @@ if [ -n "$PRERELEASE_PY" ]; then
         prerelease_failed="pytest"
     fi
 
+    prerelease_resolved=$("$prereleaseenv/bin/python" --version 2>&1 || echo "$PRERELEASE_PY (unresolved)")
     if [ -n "$prerelease_failed" ]; then
-        printf '\nPrerelease lane failed (advisory, not fatal): %s\n' "$prerelease_failed"
+        printf '\nPrerelease lane failed on %s (advisory, not fatal): %s\n' \
+            "$prerelease_resolved" "$prerelease_failed"
     else
-        printf '\nPrerelease lane passed on Python %s\n' "$PRERELEASE_PY"
+        printf '\nPrerelease lane passed on %s\n' "$prerelease_resolved"
     fi
 fi
 
