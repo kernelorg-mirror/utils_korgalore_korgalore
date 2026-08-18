@@ -27,6 +27,13 @@ set -eu
 # It runs on the lowest supported interpreter, where the old dependency
 # releases are likeliest to still publish wheels. Override or skip it:
 # FLOOR_PY=3.12 ./ci-matrix.sh  (or FLOOR_PY= ./ci-matrix.sh to skip)
+#
+# After the floor lane it runs one advisory "prerelease" lane, on the newest
+# CPython not yet in PYTHONS (a beta ahead of its final release, say), so we
+# get an early signal without waiting on a relock. It resolves fresh against
+# PyPI instead of uv.lock, and never fails the run -- see the lane itself for
+# why. Override or skip it: PRERELEASE_PY=3.16 ./ci-matrix.sh (or
+# PRERELEASE_PY= ./ci-matrix.sh to skip)
 
 # ${VAR-default} rather than ${VAR:-default}: the latter also substitutes for
 # an explicitly empty value, which would make "PYTHONS= ./ci-matrix.sh" run
@@ -110,6 +117,48 @@ if [ -n "$FLOOR_PY" ]; then
     printf '\n--- resolved floors ---\n'
     uv pip list --python "$floorenv" 2>/dev/null | grep -Ei \
         'click|google|liblore|requests' || true
+fi
+
+# Prerelease lane: try the newest CPython not yet in PYTHONS, such as a beta
+# ahead of its final release. This resolves fresh against PyPI instead of
+# the committed uv.lock, which only targets our declared requires-python
+# range and would otherwise need relocking (and could fail to resolve at
+# all) just to humor an interpreter we don't support yet.
+#
+# Ecosystem wheels (cffi, cryptography, ...) typically lag a new CPython
+# release by weeks to months, so failures here are expected and this lane
+# is advisory: it never fails the run, only reports what broke, so it does
+# not block CI while giving a heads-up for when to move the interpreter
+# into PYTHONS for real.
+# Override or skip: PRERELEASE_PY=3.16 ./ci-matrix.sh (or PRERELEASE_PY= to skip)
+PRERELEASE_PY="${PRERELEASE_PY-3.15}"
+if [ -n "$PRERELEASE_PY" ]; then
+    printf '\n=== Prerelease (advisory) on Python %s ===\n' "$PRERELEASE_PY"
+    unset UV_PROJECT_ENVIRONMENT
+    prereleaseenv=".venv-prerelease"
+    rm -rf "$prereleaseenv"
+    prerelease_failed=""
+    if ! uv python install "$PRERELEASE_PY"; then
+        prerelease_failed="install"
+    elif ! uv venv "$prereleaseenv" --python "$PRERELEASE_PY"; then
+        prerelease_failed="venv"
+    elif ! uv pip install --python "$prereleaseenv" .; then
+        prerelease_failed="install-project"
+    elif ! uv pip install --python "$prereleaseenv" pytest; then
+        prerelease_failed="pytest-install"
+    elif ! "$prereleaseenv/bin/python" -c 'import korgalore.cli, sys; print("import korgalore.cli OK on", sys.version.split()[0])'; then
+        prerelease_failed="import"
+    elif ! "$prereleaseenv/bin/kgl" --version; then
+        prerelease_failed="cli"
+    elif ! "$prereleaseenv/bin/python" -m pytest --durations=20; then
+        prerelease_failed="pytest"
+    fi
+
+    if [ -n "$prerelease_failed" ]; then
+        printf '\nPrerelease lane failed (advisory, not fatal): %s\n' "$prerelease_failed"
+    else
+        printf '\nPrerelease lane passed on Python %s\n' "$PRERELEASE_PY"
+    fi
 fi
 
 if [ -n "$failed" ]; then
