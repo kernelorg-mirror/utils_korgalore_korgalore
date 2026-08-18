@@ -802,6 +802,8 @@ The tray icon and menu show current status:
 * **Idle** - waiting for next sync
 * **Idle (N new)** - last sync delivered N unique messages
 * **Syncing...** - sync in progress with current feed/delivery shown
+* **Network unavailable** - no network connection; sync resumes automatically
+  once connectivity returns
 * **Auth required: target** - Gmail authentication needed
 * **Error: See logs** - sync failed, check logs for details
 
