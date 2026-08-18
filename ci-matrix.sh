@@ -87,7 +87,10 @@ done
 # bounds, so `uv sync --resolution lowest-direct` would drag them to
 # unbuildable ancient releases; installing just the project with
 # `uv pip install` keeps the flooring to korgalore's own runtime dependencies,
-# and a current test runner is layered on afterwards.
+# and a current test runner is layered on afterwards. This does not cover the
+# `gui` extra's `PyGObject>=3.42.0` floor -- it needs cairo/girepository
+# headers, per the `uv sync` comment above -- so that one is untested here;
+# misc/distro/ is what actually covers it.
 FLOOR_PY="${FLOOR_PY-3.11}"
 if [ -n "$FLOOR_PY" ]; then
     printf '\n=== Floors (lowest-direct) on Python %s ===\n' "$FLOOR_PY"
@@ -114,9 +117,23 @@ if [ -n "$FLOOR_PY" ]; then
     # Report what the floors actually resolved to. A green lane says the
     # declared minimums install and pass; this says which versions that was,
     # so a bound that has drifted above what PyPI still offers is visible.
+    #
+    # The names to report are exactly the runtime deps that declare a lower
+    # bound, so derive them from pyproject.toml rather than keeping a second
+    # copy here that drifts out of sync (a plain 'google' prefix, e.g., would
+    # also absorb transitive google-api-core and googleapis-common-protos,
+    # which declare no floor of ours). Anchored at both ends to match whole
+    # package names in the `uv pip list` table.
+    bounded=$(sed -n '/^dependencies = \[/,/^]/p' pyproject.toml \
+        | sed -n 's/^[[:space:]]*"\([A-Za-z0-9._-]*\)[[:space:]]*>=.*/\1/p' \
+        | paste -sd'|' -)
     printf '\n--- resolved floors ---\n'
-    uv pip list --python "$floorenv" 2>/dev/null | grep -Ei \
-        'click|google|liblore|requests' || true
+    if [ -n "$bounded" ]; then
+        uv pip list --python "$floorenv" 2>/dev/null \
+            | grep -Ei "^($bounded)[[:space:]]" || true
+    else
+        printf 'could not derive bounded deps from pyproject.toml\n'
+    fi
 fi
 
 # Prerelease lane: try the newest CPython not yet in PYTHONS, such as a beta
