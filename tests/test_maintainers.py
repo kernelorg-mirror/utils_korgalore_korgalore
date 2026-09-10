@@ -6,6 +6,7 @@ import pytest
 
 from korgalore.maintainers import (
     SubsystemEntry,
+    Tree,
     build_mailinglist_query,
     build_maintainers_query,
     build_patches_query,
@@ -18,6 +19,7 @@ from korgalore.maintainers import (
     is_subsystem_title,
     normalize_subsystem_name,
     parse_maintainers,
+    parse_tree,
 )
 
 
@@ -110,6 +112,10 @@ class TestIsFieldLine:
         """X: field line is recognized."""
         assert is_field_line('X:\tdrivers/staging/') is True
 
+    def test_tree_field(self) -> None:
+        """T: field line is recognized."""
+        assert is_field_line('T:\tgit git://git.kernel.org/pub/scm/linux/kernel/git/test.git') is True
+
     def test_not_field_lowercase_prefix(self) -> None:
         """Lowercase prefix is not a field line."""
         assert is_field_line('m:\tvalue') is False
@@ -131,6 +137,59 @@ class TestIsFieldLine:
         """Line shorter than 3 chars is not a field line."""
         assert is_field_line('M:') is False
         assert is_field_line('M') is False
+
+
+class TestParseTree:
+    """Tests for parse_tree function."""
+
+    def test_plain_git_tree(self) -> None:
+        """Simple 'git <url>' with no branch."""
+        tree = parse_tree('git git://git.kernel.org/pub/scm/linux/kernel/git/test.git')
+        assert tree == Tree(vcs='git', url='git://git.kernel.org/pub/scm/linux/kernel/git/test.git')
+
+    def test_git_tree_with_branch(self) -> None:
+        """A third field is parsed as the branch name."""
+        tree = parse_tree('git git://git.kernel.org/pub/scm/linux/kernel/git/test.git for-next')
+        assert tree == Tree(
+            vcs='git',
+            url='git://git.kernel.org/pub/scm/linux/kernel/git/test.git',
+            branch='for-next',
+        )
+
+    def test_non_git_vcs(self) -> None:
+        """Other recognized SCM types (hg, quilt, ...) are parsed the same way."""
+        tree = parse_tree('quilt https://example.com/quilt-tree/')
+        assert tree == Tree(vcs='quilt', url='https://example.com/quilt-tree/')
+
+    def test_parenthetical_note_is_not_a_branch(self) -> None:
+        """A descriptive parenthetical note is not mistaken for a branch.
+
+        Real MAINTAINERS entries do this, e.g.:
+        'T:\\tgit git://.../pm.git (For ARM Updates)'
+        """
+        tree = parse_tree('git git://git.kernel.org/pub/scm/linux/kernel/git/pm.git (For ARM Updates)')
+        assert tree == Tree(vcs='git', url='git://git.kernel.org/pub/scm/linux/kernel/git/pm.git')
+
+    def test_missing_vcs_keyword(self) -> None:
+        """A handful of real entries omit the vcs keyword by mistake.
+
+        The URL must not be misread as the vcs type in that case.
+        """
+        tree = parse_tree('https://git.kernel.org/pub/scm/linux/kernel/git/leitao/linux.git configfs-next')
+        assert tree == Tree(
+            vcs='',
+            url='https://git.kernel.org/pub/scm/linux/kernel/git/leitao/linux.git',
+            branch='configfs-next',
+        )
+
+    def test_url_only(self) -> None:
+        """A bare URL with no vcs keyword and no branch."""
+        tree = parse_tree('git://git.kernel.org/pub/scm/linux/kernel/git/sched_ext.git')
+        assert tree == Tree(vcs='', url='git://git.kernel.org/pub/scm/linux/kernel/git/sched_ext.git')
+
+    def test_empty_value(self) -> None:
+        """An empty T: value doesn't blow up."""
+        assert parse_tree('') == Tree(vcs='', url='')
 
 
 class TestIsSubsystemTitle:
@@ -534,6 +593,7 @@ F:\tsecond/
             'X:\tpath/to/excluded/\n'
             'N:\tsimple_pattern\n'
             'K:\tCONFIG_TEST\n'
+            'T:\tgit git://git.kernel.org/pub/scm/linux/kernel/git/test/test.git\n'
         )
         entries = parse_maintainers(maintainers)
         entry = entries['TEST SUBSYSTEM']
@@ -545,6 +605,29 @@ F:\tsecond/
         assert entry.excluded == ['path/to/excluded/']
         assert entry.file_regex == ['simple_pattern']
         assert entry.content_regex == ['CONFIG_TEST']
+        assert entry.trees == [
+            Tree(vcs='git', url='git://git.kernel.org/pub/scm/linux/kernel/git/test/test.git')
+        ]
+
+    def test_parse_multiple_trees(self, tmp_path: Path) -> None:
+        """Parse subsystem with multiple T: tree entries, one with a branch."""
+        maintainers = tmp_path / 'MAINTAINERS'
+        maintainers.write_text(
+            'MULTI TREE\n'
+            'M:\ttest@example.com\n'
+            'T:\tgit git://git.kernel.org/pub/scm/linux/kernel/git/test/test.git\n'
+            'T:\tgit https://git.kernel.org/pub/scm/linux/kernel/git/test/test-next.git for-next\n'
+        )
+        entries = parse_maintainers(maintainers)
+        entry = entries['MULTI TREE']
+        assert entry.trees == [
+            Tree(vcs='git', url='git://git.kernel.org/pub/scm/linux/kernel/git/test/test.git'),
+            Tree(
+                vcs='git',
+                url='https://git.kernel.org/pub/scm/linux/kernel/git/test/test-next.git',
+                branch='for-next',
+            ),
+        ]
 
     def test_parse_multiple_maintainers(self, tmp_path: Path) -> None:
         """Parse subsystem with multiple maintainers."""

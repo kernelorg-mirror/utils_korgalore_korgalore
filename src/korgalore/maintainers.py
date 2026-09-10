@@ -21,6 +21,45 @@ DEFAULT_CATCHALL_LISTS: List[str] = [
 # Regex metacharacters that indicate a pattern is not a simple word
 REGEX_METACHARACTERS = r'\[](){}|^$?+*'
 
+# Recognized SCM types for T: lines, per the MAINTAINERS file format.
+KNOWN_VCS_TYPES = {'git', 'hg', 'quilt', 'stgit', 'topgit'}
+
+
+@dataclass
+class Tree:
+    """A parsed T: line: SCM type, repo URL, and optional branch.
+
+    The branch is the third whitespace-separated field and is only
+    sometimes present (e.g. 'git <url> for-next'); a handful of entries
+    put a parenthetical note there instead of a real branch name, which
+    is treated as no branch rather than misparsed as one.
+    """
+
+    vcs: str
+    url: str
+    branch: Optional[str] = None
+
+
+def parse_tree(value: str) -> Tree:
+    """Parse a T: line's value into vcs/url/branch.
+
+    A few real MAINTAINERS entries omit the vcs keyword by mistake and
+    just start with the URL; treat that as an empty vcs rather than
+    misreading the URL as the vcs type.
+    """
+    parts = value.split()
+    if not parts:
+        return Tree(vcs='', url='')
+
+    if parts[0] in KNOWN_VCS_TYPES:
+        vcs, rest = parts[0], parts[1:]
+    else:
+        vcs, rest = '', parts
+
+    url = rest[0] if rest else ''
+    branch = rest[1] if len(rest) > 1 and not rest[1].startswith('(') else None
+    return Tree(vcs=vcs, url=url, branch=branch)
+
 
 @dataclass
 class SubsystemEntry:
@@ -35,6 +74,7 @@ class SubsystemEntry:
     file_regex: List[str] = field(default_factory=list)  # N: patterns
     content_regex: List[str] = field(default_factory=list)  # K: patterns
     status: Optional[str] = None  # S: value
+    trees: List[Tree] = field(default_factory=list)  # T: entries
 
 
 def normalize_subsystem_name(name: str) -> str:
@@ -112,6 +152,7 @@ def has_fields(entry: SubsystemEntry) -> bool:
         or entry.file_regex
         or entry.content_regex
         or entry.status
+        or entry.trees
     )
 
 
@@ -164,6 +205,8 @@ def parse_maintainers(path: Path) -> Dict[str, SubsystemEntry]:
                         current_entry.content_regex.append(value)
                     elif prefix == 'S':
                         current_entry.status = value
+                    elif prefix == 'T':
+                        current_entry.trees.append(parse_tree(value))
                 prev_line_empty = False
                 continue
 
