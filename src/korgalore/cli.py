@@ -32,6 +32,7 @@ from korgalore import (
     make_lore_node,
 )
 from korgalore.bozofilter import add_to_bozofilter, edit_bozofilter, is_bozofied, load_bozofilter
+from korgalore.dummy_target import DummyTarget
 from korgalore.gmail_target import GmailTarget
 from korgalore.imap_target import ImapTarget
 from korgalore.jmap_target import JmapTarget
@@ -282,9 +283,11 @@ def get_target(ctx: click.Context, identifier: str) -> Any:
         )
     elif target_type == 'pipe':
         service = get_pipe_target(identifier=identifier, command=details.get('command', ''))
+    elif target_type == 'dummy':
+        service = get_dummy_target(identifier=identifier)
     else:
         logger.critical('Unknown target type "%s" for target "%s".', target_type, identifier)
-        logger.critical('Supported types: gmail, maildir, jmap, imap, pipe')
+        logger.critical('Supported types: gmail, maildir, jmap, imap, pipe, dummy')
         raise click.Abort()
 
     ctx.obj['targets'][identifier] = service
@@ -334,6 +337,11 @@ def get_maildir_target(identifier: str, maildir_path: str) -> MaildirTarget:
         raise click.Abort() from fe
 
     return mt
+
+
+def get_dummy_target(identifier: str) -> DummyTarget:
+    """Create a Dummy target service instance."""
+    return DummyTarget(identifier=identifier)
 
 
 def get_jmap_target(
@@ -1090,7 +1098,7 @@ def auth(ctx: click.Context, target: Optional[str]) -> None:
     If TARGET is omitted, authenticate all targets that require authentication.
     """
     # Target types that don't require authentication
-    NO_AUTH_TARGETS = {'maildir', 'pipe'}
+    NO_AUTH_TARGETS = {'maildir', 'pipe', 'dummy'}
 
     config = ctx.obj.get('config', {})
     targets = config.get('targets', {})

@@ -5,7 +5,7 @@ Configuration
 Korgalore uses a TOML file for its configuration. It defines the
 following main sections:
 
-* targets: can be Gmail accounts, local maildirs, JMAP servers, IMAP servers, pipe commands
+* targets: can be Gmail accounts, local maildirs, JMAP servers, IMAP servers, pipe commands, or a no-op dummy target
 * feeds: public-inbox locations or lei searches
 * deliveries: mapping of which feed goes to which target
 
@@ -364,6 +364,22 @@ This would execute: ``/usr/local/bin/process-mail.sh --list=lkml --priority=high
    Ensure the command is trusted and handles email data safely. The raw message
    bytes are piped directly to the command's stdin.
 
+Dummy Setup
+===========
+
+Dummy targets discard every message delivered to them. They exist because
+korgalore refuses to run any command until at least one target is configured,
+even for setups that don't need a delivery copy of messages at all -- for
+example, when the lei v2 archive underlying your feeds is already the only
+mail storage you need.
+
+.. code-block:: toml
+
+   [targets.discard]
+   type = 'dummy'
+
+No other configuration is required or accepted for a dummy target.
+
 Configuration File Format
 =========================
 
@@ -505,6 +521,11 @@ Pipe Target Parameters
 
 * ``type``: Must be ``'pipe'``
 * ``command``: Command to pipe messages to (can include arguments)
+
+Dummy Target Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``type``: Must be ``'dummy'``
 
 Feeds
 -----
