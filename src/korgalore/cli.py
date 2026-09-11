@@ -55,6 +55,7 @@ from korgalore.tracking import (
     create_lei_thread_search,
     forget_lei_search,
     update_lei_search,
+    write_archive_description,
 )
 
 logger = logging.getLogger('korgalore')
@@ -1743,6 +1744,10 @@ def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str], labe
     except liblore.RemoteError:
         logger.warning('Could not fetch message to get subject')
 
+    # Thread archives are named after a random track id, so the subject is
+    # the only thing that identifies them in a public-inbox listing.
+    write_archive_description(lei_path, subject)
+
     # Get target instance for delivery and default labels
     target_service = get_target(ctx, target)
 
@@ -2380,6 +2385,7 @@ def track_subsystem(
             if retcode != 0:
                 logger.error('Lei query failed for mailinglist: %s', output.decode())
             else:
+                write_archive_description(lei_path, f'{entry.name} mailing list traffic')
                 # Initialize feed from start so all existing messages are delivered
                 feed = LeiFeed(f'{key}-mailinglist', f'lei:{lei_path}')
                 epoch = feed.get_highest_epoch()
@@ -2413,6 +2419,7 @@ def track_subsystem(
             if retcode != 0:
                 logger.error('Lei query failed for patches: %s', output.decode())
             else:
+                write_archive_description(lei_path, f'{entry.name} patches')
                 # Initialize feed from start so all existing messages are delivered
                 feed = LeiFeed(f'{key}-patches', f'lei:{lei_path}')
                 epoch = feed.get_highest_epoch()

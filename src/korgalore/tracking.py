@@ -342,6 +342,34 @@ class TrackingManifest:
         self._save()
 
 
+def write_archive_description(archive_path: Path, description: str) -> None:
+    """Name a lei-created v2 archive for public-inbox's benefit.
+
+    lei's `-o v2:' writer never creates the `description' file public-inbox
+    looks for, so archives served over the web are labelled
+    "($INBOX_DIR/description missing)" instead of anything meaningful. Write
+    one ourselves, the same way `lei mirror' does for the inboxes it clones.
+
+    public-inbox reads this as a single line, collapsing runs of whitespace,
+    so anything longer is flattened rather than wrapped.
+
+    A description is cosmetic, so failing to write one is logged and
+    otherwise ignored -- it must never take an archive down with it.
+
+    Args:
+        archive_path: The v2 archive directory (lei's -o v2: target).
+        description: Free text; whitespace is collapsed and blanks skipped.
+    """
+    text = ' '.join(description.split())
+    if not text:
+        return
+
+    try:
+        (archive_path / 'description').write_text(f'{text}\n', encoding='utf-8')
+    except OSError as e:
+        logger.warning('Could not describe archive %s: %s', archive_path, e)
+
+
 def create_lei_thread_search(msgid: str, output_path: Path) -> Tuple[int, bytes]:
     """Create a new lei search for a thread by message ID.
 
