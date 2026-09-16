@@ -3,6 +3,8 @@
 import logging
 import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -18,6 +20,17 @@ __user_agent__ = f'korgalore/{__version__}'
 
 GITCMD: str = 'git'
 LEICMD: str = 'lei'
+
+# How often to report that a lei command is still going, in seconds.
+#
+# A single query can run for many minutes -- importing six months of a busy
+# list is the ordinary worst case, not an edge case -- and lei says nothing
+# in the meantime, because its output is captured here rather than written
+# straight to the terminal. To anything watching this process (a log being
+# tailed, a progress view, a proxy with a read timeout) that silence is
+# indistinguishable from a hang, so say periodically that work is still in
+# progress.
+LEI_HEARTBEAT_INTERVAL: float = 30.0
 
 logger = logging.getLogger('korgalore')
 
@@ -158,8 +171,27 @@ def run_git_command(
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
+def _report_still_running(what: str, finished: threading.Event, interval: float) -> None:
+    """Log that *what* is still going, every *interval* seconds until *finished*.
+
+    Meant to run in a daemon thread for the length of a subprocess call.
+    Waiting on the event rather than sleeping means this stops as soon as
+    the command returns, so a quick command logs nothing at all.
+
+    *interval* is passed in rather than defaulting to LEI_HEARTBEAT_INTERVAL:
+    a default is bound once at import, so the module value could be adjusted
+    afterwards and silently make no difference.
+    """
+    started = time.monotonic()
+    while not finished.wait(interval):
+        logger.info('Still running lei %s (%d seconds so far)...', what, round(time.monotonic() - started))
+
+
 def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
     """Run a lei command and return (returncode, stdout).
+
+    Reports progress every LEI_HEARTBEAT_INTERVAL seconds while the command
+    runs, so a long query is distinguishable from a stuck one.
 
     Args:
         args: Arguments to pass to lei command (first element is the subcommand).
@@ -178,10 +210,22 @@ def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
     cmd += args[1:]
     logger.debug('Running lei command: %s', ' '.join(cmd))
 
+    # A daemon thread reports progress rather than a loop around
+    # proc.communicate(timeout=...), which would mean giving up
+    # subprocess.run() and hand-rolling the output draining it does for us.
+    finished = threading.Event()
+    threading.Thread(
+        target=_report_still_running,
+        args=(args[0], finished, LEI_HEARTBEAT_INTERVAL),
+        daemon=True,
+        name='lei-heartbeat',
+    ).start()
     try:
         result = subprocess.run(cmd, capture_output=True)
     except FileNotFoundError as e:
         raise PublicInboxError(f"LEI command '{LEICMD}' not found. Is it installed?") from e
+    finally:
+        finished.set()
     return result.returncode, result.stdout.strip()
 
 
