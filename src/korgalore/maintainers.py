@@ -24,6 +24,14 @@ REGEX_METACHARACTERS = r'\[](){}|^$?+*'
 # Recognized SCM types for T: lines, per the MAINTAINERS file format.
 KNOWN_VCS_TYPES = {'git', 'hg', 'quilt', 'stgit', 'topgit'}
 
+# Fields whose value is an address, wrapped in a display name (M:, R:) or
+# followed by a comment (L:), mapped to the SubsystemEntry list it fills.
+EMAIL_FIELDS: Dict[str, str] = {
+    'M': 'maintainers',
+    'R': 'reviewers',
+    'L': 'mailing_lists',
+}
+
 
 @dataclass
 class Tree:
@@ -186,18 +194,13 @@ def parse_maintainers(path: Path) -> Dict[str, SubsystemEntry]:
                     prefix = line[0]
                     value = line[3:].strip()
 
-                    if prefix == 'M':
+                    if prefix in EMAIL_FIELDS:
                         email = extract_email(value)
                         if email:
-                            current_entry.maintainers.append(email)
-                    elif prefix == 'R':
-                        email = extract_email(value)
-                        if email:
-                            current_entry.reviewers.append(email)
-                    elif prefix == 'L':
-                        email = extract_email(value)
-                        if email:
-                            current_entry.mailing_lists.append(email)
+                            emails: List[str] = getattr(current_entry, EMAIL_FIELDS[prefix])
+                            emails.append(email)
+                        else:
+                            logger.warning('Ignoring unparsable %s: line in %s: %s', prefix, current_entry.name, value)
                     elif prefix == 'F':
                         current_entry.files.append(value)
                     elif prefix == 'X':

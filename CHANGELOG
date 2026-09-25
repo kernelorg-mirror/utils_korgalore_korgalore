@@ -7,6 +7,9 @@ v0.7 (unreleased)
 Enhancements
 ~~~~~~~~~~~~
 
+* An ``M:``, ``R:`` or ``L:`` line in MAINTAINERS that cannot be parsed is
+  now reported in the log instead of being skipped silently
+
 * GUI: Add "About" dialog showing version, description, website, and license
 
 * HTTP failover and auto-probe for all lore.kernel.org requests

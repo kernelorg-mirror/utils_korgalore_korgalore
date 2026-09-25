@@ -1,5 +1,6 @@
 """Tests for MAINTAINERS file parser and query builders."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -584,6 +585,38 @@ F:\tarch/arm/mach-*/
         ]
         query, _ = build_mailinglist_query(entry, '30.days.ago')
         assert query == '(l:linux-arm-kernel.lists.infradead.org OR l:pvrusb2.isely.net) AND d:30.days.ago..'
+
+    def test_parse_unparsable_list_is_dropped(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        """An L: line with no usable address is dropped, with a warning saying so."""
+        maintainers = tmp_path / 'MAINTAINERS'
+        maintainers.write_text("""
+BROKEN ENTRY
+M:\tSome One <someone@example.com>
+L:\tfoo@lists.example.org (moderated for non-subscribers
+L:\tbar@lists.example.org
+S:\tMaintained
+F:\tdrivers/broken/
+""")
+        with caplog.at_level(logging.WARNING, logger='korgalore'):
+            entry = parse_maintainers(maintainers)['BROKEN ENTRY']
+        assert entry.mailing_lists == ['bar@lists.example.org']
+        assert 'Ignoring unparsable L: line in BROKEN ENTRY' in caplog.text
+
+    def test_parse_unparsable_maintainer_warns(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        """M: and R: lines get the same treatment as L: when they cannot be parsed."""
+        maintainers = tmp_path / 'MAINTAINERS'
+        maintainers.write_text("""
+BROKEN ENTRY
+M:\tone@example.com, two@example.com
+R:\tReviewer <reviewer@example.com>
+S:\tMaintained
+F:\tdrivers/broken/
+""")
+        with caplog.at_level(logging.WARNING, logger='korgalore'):
+            entry = parse_maintainers(maintainers)['BROKEN ENTRY']
+        assert entry.maintainers == []
+        assert entry.reviewers == ['reviewer@example.com']
+        assert 'Ignoring unparsable M: line in BROKEN ENTRY' in caplog.text
 
     def test_parse_multiple_subsystems(self, tmp_path: Path) -> None:
         """Parse multiple subsystem entries."""
