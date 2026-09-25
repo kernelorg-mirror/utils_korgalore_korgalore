@@ -99,6 +99,13 @@ Refactoring
 Bug Fixes
 ~~~~~~~~~
 
+* A comment on a MAINTAINERS ``L:`` line, such as ``(moderated for
+  non-subscribers)``, is no longer passed to lei as search terms. Every
+  list carrying one was reduced to the few threads that happened to
+  contain those words instead of the whole list. ``main.catchall_lists``
+  is now matched against the bare address too, so an entry written with
+  the comment no longer matches.
+
 * A Message-ID with a trailing comment no longer defeats duplicate
   detection
 

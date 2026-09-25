@@ -97,12 +97,13 @@ def normalize_subsystem_name(name: str) -> str:
 
 
 def extract_email(line: str) -> Optional[str]:
-    """Extract email address from a maintainer/reviewer line.
+    """Extract email address from a maintainer, reviewer or list line.
 
     Handles formats like:
         'Full Name <email@domain.com>'
         '"Full Name" <email@domain.com>'
         'email@domain.com'
+        'list@domain.org (moderated for non-subscribers)'
     """
     _, email = parseaddr(line)
     return email if email else None
@@ -194,7 +195,9 @@ def parse_maintainers(path: Path) -> Dict[str, SubsystemEntry]:
                         if email:
                             current_entry.reviewers.append(email)
                     elif prefix == 'L':
-                        current_entry.mailing_lists.append(value)
+                        email = extract_email(value)
+                        if email:
+                            current_entry.mailing_lists.append(email)
                     elif prefix == 'F':
                         current_entry.files.append(value)
                     elif prefix == 'X':

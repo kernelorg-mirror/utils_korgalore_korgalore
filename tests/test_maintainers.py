@@ -63,6 +63,10 @@ class TestExtractEmail:
         """Extracts email when name is quoted."""
         assert extract_email('"John Doe" <john@example.com>') == 'john@example.com'
 
+    def test_list_with_comment(self) -> None:
+        """Drops the comment MAINTAINERS puts after a list address."""
+        assert extract_email('list@domain.org (moderated for non-subscribers)') == 'list@domain.org'
+
     def test_bare_email(self) -> None:
         """Handles bare email addresses without angle brackets."""
         assert extract_email('john@example.com') == 'john@example.com'
@@ -561,6 +565,25 @@ F:\tnet/9p/
         assert entry.status == 'Maintained'
         assert 'fs/9p/' in entry.files
         assert 'net/9p/' in entry.files
+
+    def test_parse_list_with_comment(self, tmp_path: Path) -> None:
+        """A comment after an L: address is dropped, not searched for."""
+        maintainers = tmp_path / 'MAINTAINERS'
+        maintainers.write_text("""
+ARM SUB-ARCHITECTURES
+M:\tArnd Bergmann <arnd@arndb.de>
+L:\tlinux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
+L:\tpvrusb2@isely.net\t(subscribers-only)
+S:\tMaintained
+F:\tarch/arm/mach-*/
+""")
+        entry = parse_maintainers(maintainers)['ARM SUB-ARCHITECTURES']
+        assert entry.mailing_lists == [
+            'linux-arm-kernel@lists.infradead.org',
+            'pvrusb2@isely.net',
+        ]
+        query, _ = build_mailinglist_query(entry, '30.days.ago')
+        assert query == '(l:linux-arm-kernel.lists.infradead.org OR l:pvrusb2.isely.net) AND d:30.days.ago..'
 
     def test_parse_multiple_subsystems(self, tmp_path: Path) -> None:
         """Parse multiple subsystem entries."""
