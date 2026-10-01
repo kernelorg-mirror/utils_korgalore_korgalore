@@ -10,6 +10,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
@@ -1143,3 +1144,107 @@ class TestSubjectNormalization:
         # first candidate after the recorded date.
         assert recovered == newer
         assert recovered != older
+
+
+class TestSaveDeliveryInfoEpochZero:
+    """save_delivery_info() must honour an explicit epoch 0.
+
+    Epoch 0 is falsy, so a truthiness check mistakes it for "no epoch
+    given" and swaps in the highest epoch. After a rollover from 0.git to
+    1.git, saving a commit that lives in 0.git then looks it up in 1.git
+    and fails. These tests use two real epoch repositories so that the
+    lookup actually happens.
+    """
+
+    def _make_feed(self, feed_dir: Path) -> PIFeed:
+        """Create a PIFeed that finds its epochs on disk."""
+
+        class TestPIFeed(PIFeed):
+            def __init__(self, fd: Path) -> None:
+                super().__init__(feed_key='test-feed', feed_dir=fd)
+                self.feed_type = 'test'
+
+        return TestPIFeed(feed_dir)
+
+    def _make_epoch(self, gitdir: Path, raw: bytes, date: str) -> str:
+        """Create a bare epoch repo holding one message, return the commit."""
+        import subprocess
+
+        def git(*args: str, data: bytes = b'') -> str:
+            env = {
+                **os.environ,
+                'GIT_AUTHOR_NAME': 'Test',
+                'GIT_AUTHOR_EMAIL': 'test@test',
+                'GIT_COMMITTER_NAME': 'Test',
+                'GIT_COMMITTER_EMAIL': 'test@test',
+                'GIT_AUTHOR_DATE': date,
+                'GIT_COMMITTER_DATE': date,
+            }
+            result = subprocess.run(
+                ['git', '--git-dir', str(gitdir), *args],
+                input=data,
+                check=True,
+                capture_output=True,
+                env=env,
+            )
+            return result.stdout.decode().strip()
+
+        subprocess.run(['git', 'init', '--bare', str(gitdir)], check=True, capture_output=True)
+        blob = git('hash-object', '-w', '--stdin', data=raw)
+        tree = git('mktree', data=f'100644 blob {blob}\tm\n'.encode())
+        commit = git('commit-tree', tree, '-m', 'add message')
+        git('update-ref', 'HEAD', commit)
+        return commit
+
+    def _setup(self, tmp_path: Path) -> tuple[PIFeed, str, str]:
+        """Build a feed that has rolled over from epoch 0 to epoch 1."""
+        feed_dir = tmp_path / 'test-feed'
+        (feed_dir / 'git').mkdir(parents=True)
+        old = self._make_epoch(
+            feed_dir / 'git' / '0.git',
+            b'Subject: old epoch\nMessage-ID: <old@example.com>\n\nbody\n',
+            '2026-01-15 12:00:00 +0000',
+        )
+        new = self._make_epoch(
+            feed_dir / 'git' / '1.git',
+            b'Subject: new epoch\nMessage-ID: <new@example.com>\n\nbody\n',
+            '2026-02-20 08:30:00 +0000',
+        )
+        return self._make_feed(feed_dir), old, new
+
+    def _read_epochs(self, feed: PIFeed) -> Dict[str, Any]:
+        state_file = feed.feed_dir / 'korgalore.test-delivery.info'
+        epochs: Dict[str, Any] = json.loads(state_file.read_text())['epochs']
+        return epochs
+
+    def test_explicit_epoch_zero_is_kept(self, tmp_path: Path) -> None:
+        """A commit from 0.git is saved under epoch 0, not the highest epoch."""
+        feed, old, _new = self._setup(tmp_path)
+        assert feed.get_highest_epoch() == 1
+
+        feed.save_delivery_info('test-delivery', 0, latest_commit=old)
+
+        epochs = self._read_epochs(feed)
+        assert list(epochs) == ['0']
+        assert epochs['0']['last'] == old
+        assert epochs['0']['msgid'] == '<old@example.com>'
+        assert epochs['0']['commit_date'].startswith('2026-01-15 12:00:00')
+
+    def test_epoch_zero_without_commit_uses_epoch_zero_top(self, tmp_path: Path) -> None:
+        """Epoch 0 with no commit picks the top of 0.git, not of 1.git."""
+        feed, old, _new = self._setup(tmp_path)
+
+        feed.save_delivery_info('test-delivery', 0)
+
+        assert self._read_epochs(feed)['0']['last'] == old
+
+    def test_no_epoch_defaults_to_highest(self, tmp_path: Path) -> None:
+        """Leaving the epoch out still means the highest epoch."""
+        feed, _old, new = self._setup(tmp_path)
+
+        feed.save_delivery_info('test-delivery')
+
+        epochs = self._read_epochs(feed)
+        assert list(epochs) == ['1']
+        assert epochs['1']['last'] == new
+        assert epochs['1']['msgid'] == '<new@example.com>'
