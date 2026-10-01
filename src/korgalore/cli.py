@@ -942,9 +942,15 @@ def update_all_feeds(
     ctx: click.Context,
     status_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[List[str], List[str]]:
-    """Update all feeds and return (updated_feeds, initialized_feeds)."""
+    """Update all feeds and return (updated_feeds, initialized_feeds).
+
+    Feeds that failed to update are recorded in ctx.obj['failed_feeds'],
+    which is replaced on every call.
+    """
     updated_feeds: List[str] = []
     initialized_feeds: List[str] = []
+    failed_feeds: List[str] = []
+    ctx.obj['failed_feeds'] = failed_feeds
     feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
 
     if status_callback:
@@ -965,6 +971,7 @@ def update_all_feeds(
                 status = feed.update_feed()
             except (RemoteError, PublicInboxError, GitError) as e:
                 logger.warning('Failed to update %s: %s', feed_key, e)
+                failed_feeds.append(feed_key)
                 continue
             if status & feed.STATUS_UPDATED:
                 updated_feeds.append(feed_key)
@@ -1259,7 +1266,10 @@ def perform_pull(
 
     Returns:
         A tuple of (per-delivery counts dict, set of unique message-ids delivered).
+        Feeds that failed to update are left in ctx.obj['failed_feeds'].
     """
+    # Reset on every pull: the GUI calls us repeatedly with the same ctx
+    ctx.obj['failed_feeds'] = []
     cfg = ctx.obj.get('config', {})
     bozo_set = ctx.obj.get('bozofilter', set())
 
@@ -1413,9 +1423,25 @@ def perform_pull(
 @click.option('--max-mail', '-m', default=0, help='maximum number of messages to pull (0 for all)')
 @click.option('--no-update', '-n', is_flag=True, help='skip feed updates (useful with --force)')
 @click.option('--force', '-f', is_flag=True, help='run deliveries even if no apparent updates')
+@click.option(
+    '--fail-on-feed-error',
+    is_flag=True,
+    help='exit with status 3 if any feed failed to update (all feeds and deliveries still run)',
+)
 @click.argument('delivery_name', type=str, nargs=1, default=None)
-def pull(ctx: click.Context, max_mail: int, no_update: bool, force: bool, delivery_name: Optional[str]) -> None:
-    """Pull messages from configured lore and LEI deliveries."""
+def pull(
+    ctx: click.Context,
+    max_mail: int,
+    no_update: bool,
+    force: bool,
+    fail_on_feed_error: bool,
+    delivery_name: Optional[str],
+) -> None:
+    """Pull messages from configured lore and LEI deliveries.
+
+    With DELIVERY_NAME, only the feeds of that delivery are updated, so
+    --fail-on-feed-error only covers those feeds.
+    """
     changes, _ = perform_pull(ctx, no_update, force, delivery_name)
 
     if changes:
@@ -1434,6 +1460,13 @@ def pull(ctx: click.Context, max_mail: int, no_update: bool, force: bool, delive
                 logger.info('  %s: %d', dname, count)
     else:
         logger.info('Pull complete with no updates.')
+
+    failed_feeds: List[str] = ctx.obj.get('failed_feeds', [])
+    if fail_on_feed_error and failed_feeds:
+        logger.error('Feeds that failed to update:')
+        for feed_key in failed_feeds:
+            logger.error('  %s', feed_key)
+        ctx.exit(3)
 
 
 def perform_yank(

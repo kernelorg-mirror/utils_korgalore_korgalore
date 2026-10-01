@@ -100,9 +100,16 @@ Skip feed updates (useful with \fB\-\-force\fR).
 .TP
 .BR \-f ", " \-\-force
 Run deliveries even if no apparent updates.
+.TP
+.B \-\-fail\-on\-feed\-error
+Exit with status 3 if any feed failed to update.
+All other feeds and all deliveries still run.
+A failed delivery does not count.
 .PP
 If \fIDELIVERY_NAME\fR is specified, only process that delivery.
 Otherwise, process all configured deliveries including tracked threads.
+With \fIDELIVERY_NAME\fR, \fB\-\-fail\-on\-feed\-error\fR only covers
+the feeds of that delivery.
 .SS subscribe
 Manage mailing list subscriptions.
 .PP

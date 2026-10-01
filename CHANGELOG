@@ -9,6 +9,15 @@ Enhancements
 
 * GUI: Add "About" dialog showing version, description, website, and license
 
+* ``kgl pull --fail-on-feed-error``: exit with status 3 if any feed failed
+  to update
+
+  - Pull still does all its work: every other feed and every delivery
+    runs, and the failed feeds are listed again at the end
+  - Only feed updates count; a failed delivery does not change the exit
+    status
+  - Without the flag, pull keeps exiting 0 when a feed has a hiccup
+
 * HTTP failover and auto-probe for all lore.kernel.org requests
 
   - All HTTP operations to public-inbox servers now go through liblore's

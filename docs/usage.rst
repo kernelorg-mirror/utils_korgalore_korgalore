@@ -221,6 +221,10 @@ Options:
 * ``-m, --max-mail INTEGER``: Maximum number of messages to pull (0 for all, default: 0)
 * ``-n, --no-update``: Skip feed updates (useful with ``--force`` to reprocess existing commits)
 * ``-f, --force``: Run deliveries even if feeds have no apparent updates
+* ``--fail-on-feed-error``: Exit with status 3 if any feed failed to update.
+  Pull does not stop early: all other feeds and all deliveries still run.
+  Only feed updates count, a failed delivery does not. With
+  ``DELIVERY_NAME``, only the feeds of that delivery are checked
 
 Examples:
 
@@ -244,12 +248,19 @@ Examples:
    # Force re-run a specific delivery
    kgl pull -n -f lkml
 
+   # From a script: find out if every feed was updated
+   kgl pull --fail-on-feed-error || echo "some feeds failed"
+
 How Pull Works
 ~~~~~~~~~~~~~~
 
 When pulling multiple deliveries, a failure on one feed (e.g. a transient
 server error) does not abort updates to the remaining feeds. A one-line
 warning is logged for the failed feed, and processing continues.
+``kgl pull`` still exits 0 in that case, so a short lore outage doesn't
+turn into cron mail. Use ``--fail-on-feed-error`` if a script needs to
+know that every feed was updated: pull then lists the failed feeds again
+at the end and exits with status 3.
 
 For lore.kernel.org deliveries:
 
