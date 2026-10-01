@@ -581,7 +581,7 @@ class PIFeed:
                              latest_commit: Optional[str] = None,
                              message: Optional[Union[bytes, EmailMessage]] = None) -> None:
         """Save delivery progress state to disk."""
-        if not epoch:
+        if epoch is None:
             epoch = self.get_highest_epoch()
 
         if not latest_commit:
