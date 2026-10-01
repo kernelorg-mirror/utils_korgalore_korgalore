@@ -605,9 +605,7 @@ F:\tsecond/
         assert entry.excluded == ['path/to/excluded/']
         assert entry.file_regex == ['simple_pattern']
         assert entry.content_regex == ['CONFIG_TEST']
-        assert entry.trees == [
-            Tree(vcs='git', url='git://git.kernel.org/pub/scm/linux/kernel/git/test/test.git')
-        ]
+        assert entry.trees == [Tree(vcs='git', url='git://git.kernel.org/pub/scm/linux/kernel/git/test/test.git')]
 
     def test_parse_multiple_trees(self, tmp_path: Path) -> None:
         """Parse subsystem with multiple T: tree entries, one with a branch."""
