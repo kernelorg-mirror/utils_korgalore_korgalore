@@ -1428,7 +1428,7 @@ def perform_pull(
     is_flag=True,
     help='exit with status 3 if any feed failed to update (all feeds and deliveries still run)',
 )
-@click.argument('delivery_name', type=str, nargs=1, default=None)
+@click.argument('delivery_name', type=str, required=False)
 def pull(
     ctx: click.Context,
     max_mail: int,
