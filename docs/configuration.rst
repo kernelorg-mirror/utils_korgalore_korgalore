@@ -674,7 +674,8 @@ Digest Deliveries
 ~~~~~~~~~~~~~~~~~
 
 .. warning::
-   Digests are experimental, and these keys may change.
+   Digests are experimental, and these keys may change. See
+   :doc:`digests` for a walkthrough and for troubleshooting.
 
 A digest delivery doesn't put every message in your inbox. Instead, it
 sends one email per period (a day or a week) that lists the threads in
@@ -749,6 +750,8 @@ How digests are sent:
 
 Summarized Digests
 ~~~~~~~~~~~~~~~~~~
+
+To set up summaries step by step, see :doc:`digests`.
 
 A digest can also have a short summary of each thread, written by a
 language model. You choose the model: a local one (with Ollama,

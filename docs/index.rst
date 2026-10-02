@@ -46,6 +46,8 @@ Features
   * Local maildir
   * Pipe commands
 
+* Daily or weekly digests, optionally with summaries written by a
+  language model (experimental, see :doc:`digests`)
 * GNOME taskbar application for background syncing
 * Bozofilter for blocking unwanted senders
 
@@ -63,6 +65,7 @@ Non-features
    quickstart
    configuration
    usage
+   digests
    contributing
 
 Indices and tables

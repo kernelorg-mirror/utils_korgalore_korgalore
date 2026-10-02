@@ -10,7 +10,8 @@ Enhancements
 * GUI: Add "About" dialog showing version, description, website, and license
 
 * Digest deliveries (experimental): ``mode = 'digest'`` sends one
-  summary email per day or week instead of every message
+  summary email per day or week instead of every message. See the new
+  "Digests" page in the docs
 
   - The digest lists new threads and threads with new replies, with
     patch counts, review trailers, a lore link, and the ``kgl yank`` and
