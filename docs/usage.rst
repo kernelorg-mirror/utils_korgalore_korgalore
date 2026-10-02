@@ -128,6 +128,43 @@ Example file:
    When using the GUI, you can edit the bozofilter via the "Edit Bozofilter..."
    menu option, which opens it in your system's default text editor.
 
+digest
+------
+
+Send the digests that are due. A digest is a delivery with
+``mode = 'digest'``: it sends one summary email per day or week instead
+of every message. Digests are experimental.
+
+.. code-block:: bash
+
+   kgl digest [OPTIONS] [DELIVERY_NAMES]...
+
+``kgl pull`` already sends due digests, so you only need this command to
+send digests without delivering anything else, or to send one right now.
+
+Arguments:
+
+* ``DELIVERY_NAMES``: (Optional) The digest deliveries to check. If not
+  provided, all digest deliveries are checked.
+
+Options:
+
+* ``-f, --force``: Send now, even if the digest is not due yet and even if
+  there is nothing new. The next digest then starts from this one
+* ``-n, --no-update``: Skip feed updates
+* ``--fail-on-feed-error``: Exit with status 3 if any feed failed to
+  update. The digests are still sent
+
+Examples:
+
+.. code-block:: bash
+
+   # Send any digest that is due
+   kgl digest
+
+   # See what the lkml digest looks like right now
+   kgl digest --force lkml-digest
+
 edit-config
 -----------
 
@@ -225,6 +262,9 @@ Options:
   Pull does not stop early: all other feeds and all deliveries still run.
   Only feed updates count, a failed delivery does not. With
   ``DELIVERY_NAME``, only the feeds of that delivery are checked
+
+Pull also sends the digests that are due (see ``digest`` below). Digest
+deliveries never get messages one by one, not even with ``--force``.
 
 Examples:
 
@@ -769,7 +809,8 @@ The GUI provides:
 * **Automatic background sync** at configurable intervals (default: 5 minutes)
 * **Menu options**:
 
-  * Sync Now - trigger an immediate sync
+  * Sync Now - trigger an immediate sync. This also sends the digests
+    that are due
   * Yank - fetch a message or thread by message-id or lore.kernel.org URL
   * Authenticate - re-authenticate Gmail targets when tokens expire (appears only when needed)
   * Edit Config - open the configuration file in your preferred editor
@@ -949,4 +990,3 @@ Enable and start the timer:
 
    systemctl --user enable korgalore.timer
    systemctl --user start korgalore.timer
-

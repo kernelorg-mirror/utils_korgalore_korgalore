@@ -9,6 +9,7 @@ dates.
 
 import json
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
@@ -16,11 +17,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from korgalore import RemoteError, StateError
-from korgalore.cli import digest_history_needs, update_all_feeds
+from korgalore.cli import digest_history_needs, send_digest, update_all_feeds
 from korgalore.lei_feed import LeiFeed
 from korgalore.lore_feed import HISTORY_MAX, LoreFeed
+from korgalore.maildir_target import MaildirTarget
 from korgalore.pi_feed import PIFeed
-from tests.digest_helpers import DAILY, DNAME, NOW, UTC, InboxRepo, ShallowCopy, make_ctx
+from tests.digest_helpers import DAILY, DNAME, NOW, UTC, InboxRepo, ShallowCopy, digest_text, make_ctx
+
+
+def digest_body(msg: EmailMessage) -> str:
+    """The plain text of a digest, with the line wrapping undone."""
+    return ' '.join(digest_text(msg).split())
 
 
 def write_info(feed_dir: Path, info: Dict[str, Any]) -> LoreFeed:
@@ -191,6 +198,79 @@ class TestHistoryNeeds:
         netdev.update_feed.assert_called_once_with()
 
 
+class TestRealHistory:
+    """The four-week vacation, with real shallow clones."""
+
+    @pytest.fixture
+    def upstream(self, tmp_path: Path) -> InboxRepo:
+        return InboxRepo(tmp_path / 'upstream')
+
+    @staticmethod
+    def first_digest(upstream: InboxRepo, tmp_path: Path, days_ago: int) -> ShallowCopy:
+        """A feed whose last digest went out days_ago days before NOW."""
+        sent = NOW - timedelta(days=days_ago)
+        upstream.add_msg('older@x', sent - timedelta(hours=3))
+        upstream.add_msg('before@x', sent - timedelta(hours=1))
+        local = ShallowCopy(upstream, tmp_path / 'lkml', since=sent - timedelta(days=5))
+        maildir = MaildirTarget('local', str(tmp_path / 'first'))
+        assert send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=sent)
+        return local
+
+    @staticmethod
+    def fetch_for_digest(local: ShallowCopy) -> None:
+        feed = local.feed()
+        feed.fetch_epoch(0, feed.get_digest_history_start(DNAME), now=NOW)
+
+    @staticmethod
+    def next_digest(local: ShallowCopy, tmp_path: Path) -> str:
+        maildir = MaildirTarget('local', str(tmp_path / 'next'))
+        parts = send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=NOW)
+        assert len(parts) == 1
+        return digest_body(parts[0])
+
+    def test_vacation_loses_nothing(self, tmp_path: Path, upstream: InboxRepo) -> None:
+        local = self.first_digest(upstream, tmp_path, days_ago=28)
+        upstream.add_msg('vacation@x', NOW - timedelta(days=20))
+        upstream.add_msg('recent@x', NOW - timedelta(days=3))
+
+        self.fetch_for_digest(local)
+
+        text = self.next_digest(local, tmp_path)
+        assert 'vacation@x' in text
+        assert 'recent@x' in text
+        assert 'Some messages are missing' not in text
+
+    def test_lost_history_is_fetched_back(self, tmp_path: Path, upstream: InboxRepo) -> None:
+        """A feed that already lost history (older korgalore) gets it back."""
+        local = self.first_digest(upstream, tmp_path, days_ago=28)
+        upstream.add_msg('vacation@x', NOW - timedelta(days=20))
+        upstream.add_msg('recent@x', NOW - timedelta(days=3))
+        local.fetch(since=NOW - timedelta(days=7))
+        feed = local.feed()
+        assert feed.find_history_gap(DNAME, feed.get_latest_commits_for_delivery(DNAME)) is not None
+
+        self.fetch_for_digest(local)
+
+        text = self.next_digest(local, tmp_path)
+        assert 'vacation@x' in text
+        assert 'Some messages are missing' not in text
+
+    def test_very_long_vacation_is_capped(self, tmp_path: Path, upstream: InboxRepo) -> None:
+        """Past HISTORY_MAX, older messages stay out and the digest says so."""
+        local = self.first_digest(upstream, tmp_path, days_ago=45)
+        upstream.add_msg('too-old@x', NOW - timedelta(days=40))
+        upstream.add_msg('vacation@x', NOW - timedelta(days=20))
+        upstream.add_msg('recent@x', NOW - timedelta(days=3))
+        local.fetch(since=NOW - timedelta(days=7))
+
+        self.fetch_for_digest(local)
+
+        text = self.next_digest(local, tmp_path)
+        assert 'too-old@x' not in text
+        assert 'vacation@x' in text
+        assert 'Some messages are missing. Korgalore only has messages from 2026-09-11' in text
+
+
 class TestHistoryGap:
     """A pointer older than the shallow cut means missing messages.
 
@@ -251,3 +331,39 @@ class TestHistoryGap:
         repo.add_msg('b@x', NOW - timedelta(days=1))
         feed = repo.feed()
         assert feed.find_history_gap(DNAME, feed.get_latest_commits_for_delivery(DNAME)) is None
+
+    def test_digest_says_messages_are_missing(self, tmp_path: Path, upstream: InboxRepo) -> None:
+        upstream.add_msg('older@x', NOW - timedelta(days=29))
+        upstream.add_msg('before@x', NOW - timedelta(days=28, hours=1))
+        local = ShallowCopy(upstream, tmp_path / 'lkml', since=NOW - timedelta(days=35))
+        maildir = MaildirTarget('local', str(tmp_path / 'mail'))
+        sent = NOW - timedelta(days=28)
+        send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=sent)
+        upstream.add_msg('lost@x', NOW - timedelta(days=20))
+        upstream.add_msg('kept@x', NOW - timedelta(days=3))
+        local.fetch(since=NOW - timedelta(days=7))
+
+        parts = send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=NOW)
+
+        assert len(parts) == 1
+        text = digest_body(parts[0])
+        assert 'Some messages are missing.' in text
+        assert 'kept@x' in text
+        assert 'lost@x' not in text
+
+    def test_gap_with_no_new_threads_is_still_sent(self, tmp_path: Path, upstream: InboxRepo) -> None:
+        """The only news is that something is missing, and that is news."""
+        upstream.add_msg('older@x', NOW - timedelta(days=29))
+        upstream.add_msg('before@x', NOW - timedelta(days=28, hours=1))
+        local = ShallowCopy(upstream, tmp_path / 'lkml', since=NOW - timedelta(days=35))
+        maildir = MaildirTarget('local', str(tmp_path / 'mail'))
+        send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=NOW - timedelta(days=28))
+        upstream.add_msg('lost@x', NOW - timedelta(days=20))
+        # The only commit after the cut is a deletion, so there are no threads
+        upstream.add(b'', NOW - timedelta(days=3), filename='d')
+        local.fetch(since=NOW - timedelta(days=7))
+
+        parts = send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=NOW)
+
+        assert len(parts) == 1
+        assert 'Some messages are missing.' in digest_text(parts[0])

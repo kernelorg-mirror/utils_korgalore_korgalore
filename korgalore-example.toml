@@ -103,6 +103,16 @@ feed = 'lkml'  # References the feed defined above
 target = 'imap-server'
 labels = []  # Labels are ignored for IMAP (single folder delivery)
 
+# Example: One summary email per day instead of every message
+# [deliveries.lkml-digest]
+# feed = 'lkml'
+# target = 'personal'
+# labels = ['INBOX']
+# mode = 'digest'
+# schedule = 'daily'    # or 'weekly', with send_day = 'mon'
+# send_at = '07:00'     # local time
+# send_empty = false    # skip days with no messages
+
 # You can also use direct URLs without defining a feed
 # [deliveries.example-direct]
 # feed = 'https://lore.kernel.org/example'

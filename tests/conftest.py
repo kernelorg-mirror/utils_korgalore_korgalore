@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 if TYPE_CHECKING:
+    from korgalore.maildir_target import MaildirTarget
     from korgalore.pi_feed import PIFeed
     from korgalore.summarizer import SummaryCache
     from tests.digest_helpers import InboxRepo
@@ -30,6 +31,27 @@ def korgalore_logs_reach_caplog() -> Iterator[None]:
     korg_logger.propagate = True
     yield
     korg_logger.propagate = saved
+
+
+@pytest.fixture(autouse=True)
+def no_archive_lookups() -> Iterator[MagicMock]:
+    """Tests never fetch messages from the real archive.
+
+    A test that wants a fetch to work sets up the mock it gets from this
+    fixture.
+    """
+    from korgalore.lore_feed import LoreFeed
+
+    fetch = MagicMock(side_effect=AssertionError('no network in tests'))
+    fetch.unpatched = LoreFeed.get_message_by_msgid
+    with patch.object(LoreFeed, 'get_message_by_msgid', fetch):
+        yield fetch
+
+
+@pytest.fixture
+def real_get_message(no_archive_lookups: MagicMock) -> Any:
+    """The real LoreFeed.get_message_by_msgid, for the tests of that method."""
+    return no_archive_lookups.unpatched
 
 
 @pytest.fixture
@@ -91,6 +113,13 @@ def repo(tmp_path: Path) -> InboxRepo:
     from tests.digest_helpers import InboxRepo
 
     return InboxRepo(tmp_path / 'lkml')
+
+
+@pytest.fixture
+def maildir(tmp_path: Path) -> MaildirTarget:
+    from korgalore.maildir_target import MaildirTarget
+
+    return MaildirTarget('local', str(tmp_path / 'mail'))
 
 
 @pytest.fixture

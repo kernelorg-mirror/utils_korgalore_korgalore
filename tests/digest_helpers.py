@@ -1,16 +1,22 @@
 """Shared helpers for the digest tests."""
 
+import mailbox
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
+from email import policy
 from email.message import EmailMessage
+from email.parser import BytesParser
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import click
 
-from korgalore.digest import DigestSchedule
+from korgalore.cli import collect_digest, send_digest
+from korgalore.digest import DigestJob, DigestSchedule
 from korgalore.lore_feed import LoreFeed
+from korgalore.maildir_target import MaildirTarget
 from korgalore.summarizer import DEFAULT_MAX_INPUT_CHARS, SummarizerError
 
 UTC = timezone.utc
@@ -159,6 +165,25 @@ def make_ctx(obj: Dict[str, Any]) -> click.Context:
     return ctx
 
 
+# <seconds>.M<microseconds>P<pid>Q<count>.<host>, as mailbox.Maildir names
+# its files. None of the numbers are zero-padded, so the keys have to be
+# sorted as numbers: as text, M12000 sorts before M999.
+MAILDIR_KEY = re.compile(r'^(\d+)\.M(\d+)P\d+Q(\d+)\.')
+
+
+def maildir_order(key: str) -> Tuple[int, ...]:
+    match = MAILDIR_KEY.match(key)
+    assert match is not None, key
+    return tuple(int(part) for part in match.groups())
+
+
+def delivered(target: MaildirTarget) -> List[EmailMessage]:
+    """The messages in the maildir, parsed, in the order they were written."""
+    md = mailbox.Maildir(target.maildir_path, create=False)
+    parser = BytesParser(_class=EmailMessage, policy=policy.default)
+    return [parser.parsebytes(md.get_bytes(key)) for key in sorted(md.iterkeys(), key=maildir_order)]
+
+
 def part_text(msg: Optional[EmailMessage], subtype: str) -> str:
     """The text of one alternative ('plain' or 'html') of a digest."""
     assert msg is not None
@@ -175,6 +200,26 @@ def digest_text(msg: Optional[EmailMessage]) -> str:
 
 def digest_html(msg: Optional[EmailMessage]) -> str:
     return part_text(msg, 'html')
+
+
+def job_of(repo: InboxRepo) -> DigestJob:
+    return DigestJob(repo.feed().get_digest_job_dir(DNAME))
+
+
+def send_parts(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> List[EmailMessage]:
+    sched = kwargs.pop('schedule', DAILY)
+    return send_digest(DNAME, repo.feed(), target, ['digests'], None, sched, now=now, **kwargs)
+
+
+def send(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> Optional[EmailMessage]:
+    """Send a digest that fits in one message; None when nothing was sent."""
+    parts = send_parts(repo, target, now=now, **kwargs)
+    assert len(parts) <= 1
+    return parts[0] if parts else None
+
+
+def collect(repo: InboxRepo, now: datetime = NOW, **kwargs: Any) -> bool:
+    return collect_digest(DNAME, repo.feed(), DAILY, job_of(repo), now=now, **kwargs)
 
 
 class RecordingSummarizer:
@@ -197,3 +242,22 @@ class RecordingSummarizer:
         if self.fail or len(self.prompts) in self.fail_calls:
             raise SummarizerError('server said no')
         return f'summary {len(self.prompts)}'
+
+
+class FlakyTarget:
+    """Delivers to a maildir, but fails on chosen calls to import_message."""
+
+    def __init__(self, maildir: MaildirTarget, fail_on: List[int]) -> None:
+        self.identifier = 'flaky'
+        self.maildir = maildir
+        self.fail_on = fail_on
+        self.calls = 0
+
+    def connect(self) -> None:
+        self.maildir.connect()
+
+    def import_message(self, raw: bytes, **kwargs: Any) -> Any:
+        self.calls += 1
+        if self.calls in self.fail_on:
+            raise RuntimeError('server said no')
+        return self.maildir.import_message(raw, **kwargs)

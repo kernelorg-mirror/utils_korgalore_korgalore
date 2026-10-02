@@ -9,14 +9,18 @@ import tomllib
 import urllib.parse
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from email import policy
+from email.message import EmailMessage
+from email.parser import BytesParser
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, TextIO, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Mapping, Optional, Sequence, Set, TextIO, Tuple, Union
 
 import click
 import click_log  # type: ignore[import-untyped]
 import requests
-from liblore.utils import get_msgid_from_url, msg_get_subject, parse_message, split_and_dedupe_as_bytes
+from liblore.utils import clean_header, get_msgid_from_url, msg_get_subject, parse_message, split_and_dedupe_as_bytes
 
 import liblore
 from korgalore import (
@@ -35,6 +39,16 @@ from korgalore import (
     make_lore_node,
 )
 from korgalore.bozofilter import add_to_bozofilter, edit_bozofilter, is_bozofied, load_bozofilter
+from korgalore.digest import (
+    DIGEST_KEYS,
+    DigestInfo,
+    DigestJob,
+    DigestSchedule,
+    group_threads,
+    render_digest_parts,
+    roots_to_look_up,
+    strip_reply_prefixes,
+)
 from korgalore.dummy_target import DummyTarget
 from korgalore.gmail_target import GmailTarget
 from korgalore.imap_target import ImapTarget
@@ -712,6 +726,379 @@ def deliver_commit(
         return None
 
 
+# Links for lei feeds point here, since lei results can come from any list
+LEI_LINK_BASE = 'https://lore.kernel.org/all'
+# How many thread roots to fetch from the archive for one digest
+ROOT_LOOKUPS_MAX = 25
+
+
+def collect_digest(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    schedule: DigestSchedule,
+    job: DigestJob,
+    bozofilter: Optional[Set[str]] = None,
+    force: bool = False,
+    now: Optional[datetime] = None,
+) -> bool:
+    """Start a digest job when a digest is due: the collect stage.
+
+    The digest covers everything since the last digest. The very first one
+    covers one period back (a day or a week), using the feed history.
+
+    This is the only stage that reads the feed's git repositories, so the
+    feed must be locked. The messages and the pointer to save after
+    delivery are copied into the job, and the later stages use only those.
+    The subjects from look_up_root_subjects() go into the job too.
+
+    Returns:
+        True when a job was created. False when nothing was due, or when
+        the period was empty and send_empty is off; in that case the
+        state is saved right away.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    last_sent = feed.load_digest_sent(delivery_name)
+    if not force and not schedule.is_due(last_sent, now):
+        logger.debug('Digest %s is not due yet', delivery_name)
+        return False
+
+    period = read_digest_period(delivery_name, feed, schedule, bozofilter, now, last_sent)
+    if not period.messages and not schedule.send_empty and not force and period.history_start is None:
+        logger.info('Digest %s: no activity, nothing to send', delivery_name)
+        feed.save_delivery_entry(delivery_name, period.pointer, digest_sent=now)
+        return False
+
+    job.create(
+        period.messages,
+        {
+            'period_start': period.start.isoformat(),
+            'period_end': now.isoformat(),
+            'history_start': period.history_start.isoformat() if period.history_start else None,
+            'pointer': period.pointer,
+            'root_subjects': look_up_root_subjects(delivery_name, feed, period.messages),
+        },
+    )
+    return True
+
+
+def look_up_root_subjects(
+    delivery_name: str, feed: Union[LeiFeed, LoreFeed], messages: Sequence[bytes]
+) -> Dict[str, str]:
+    """Fetch the subjects of the roots that roots_to_look_up() names.
+
+    Only a lore feed can fetch messages. The lookups happen while the
+    feed is locked, so at most ROOT_LOOKUPS_MAX are made, and the first
+    failure stops them for this digest, so a busy server is not asked
+    again and again; those threads keep the name of their oldest message. A root
+    that is a reply itself, because the list never got the first message,
+    has no better name and is left out.
+
+    Returns:
+        The subjects, keyed by the root's Message-ID.
+    """
+    if not isinstance(feed, LoreFeed):
+        return {}
+    subjects: Dict[str, str] = dict()
+    roots = roots_to_look_up(group_threads([parse_message(raw) for raw in messages]))
+    if len(roots) > ROOT_LOOKUPS_MAX:
+        logger.debug('Digest %s: looking up %d of %d thread roots', delivery_name, ROOT_LOOKUPS_MAX, len(roots))
+        roots = roots[:ROOT_LOOKUPS_MAX]
+    for msgid in roots:
+        try:
+            raw = feed.get_message_by_msgid(msgid)
+        except liblore.LibloreError as e:
+            logger.warning('Digest %s: cannot look up the first messages of threads: %s', delivery_name, e)
+            break
+        subject = clean_header(parse_message(raw).get('Subject'))
+        if subject and strip_reply_prefixes(subject) == subject:
+            subjects[msgid] = subject
+    return subjects
+
+
+def _job_root_subjects(job: DigestJob, state: Mapping[str, Any]) -> Dict[str, str]:
+    """The root subjects saved in a job. Older jobs have none."""
+    saved = state.get('root_subjects') or {}
+    if not isinstance(saved, dict):
+        raise StateError(f'Bad digest job in {job.path}: root_subjects is not a map of subjects')
+    subjects: Dict[str, str] = dict()
+    for msgid, subject in saved.items():
+        if not isinstance(subject, str):
+            raise StateError(f'Bad digest job in {job.path}: root_subjects has a subject that is not text')
+        subjects[str(msgid)] = subject
+    return subjects
+
+
+@dataclass
+class DigestPeriod:
+    """The messages of one digest period, as read from the feed."""
+
+    start: datetime
+    messages: List[bytes]
+    # Where the delivery pointer goes once the digest is sent
+    pointer: Optional[Dict[str, Any]]
+    # Set when the feed history has a gap: the oldest message we still have
+    history_start: Optional[datetime] = None
+
+
+def read_digest_period(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    schedule: DigestSchedule,
+    bozofilter: Optional[Set[str]],
+    now: datetime,
+    last_sent: Optional[datetime],
+) -> DigestPeriod:
+    """Read the messages for a digest that ends now, without saving anything.
+
+    The feed must be locked. last_sent is the feed's load_digest_sent()
+    for this delivery, which the caller has already read for the due check.
+    """
+    period_start = schedule.period_start(last_sent, now)
+    history_start: Optional[datetime] = None
+    # Without a pointer (the first digest, or a feed that was empty last
+    # time), collect by commit date instead
+    if last_sent is None or not feed.has_delivery_pointer(delivery_name):
+        logger.debug('Collecting digest %s since %s', delivery_name, period_start.isoformat())
+        commits = feed.get_commits_since(period_start)
+    else:
+        commits = feed.get_latest_commits_for_delivery(delivery_name)
+        history_start = feed.find_history_gap(delivery_name, commits)
+        if history_start is not None:
+            logger.warning(
+                'Digest %s: the local feed history starts at %s, older messages are missing',
+                delivery_name,
+                history_start.isoformat(),
+            )
+
+    messages: List[bytes] = list()
+    for epoch, commit in commits:
+        try:
+            if feed.is_noop_commit(epoch, commit):
+                continue
+            raw_message = feed.get_message_at_commit(epoch, commit)
+        except (GitError, StateError) as e:
+            logger.warning('Digest %s: skipping commit %s: %s', delivery_name, commit, e)
+            continue
+        if bozofilter and is_bozofied(parse_message(raw_message).get('From', ''), bozofilter):
+            continue
+        messages.append(raw_message)
+
+    # The pointer moves to the last commit we looked at, even when that one
+    # was skipped. With no commits at all, it moves to the top of the feed.
+    if commits:
+        last_epoch, last_commit = commits[-1]
+    else:
+        last_epoch = feed.get_highest_epoch()
+        last_commit = feed.get_top_commit(last_epoch)
+    pointer: Optional[Dict[str, Any]] = None
+    if last_commit:
+        pointer = {'epoch': last_epoch, 'entry': feed.make_delivery_entry(last_epoch, last_commit)}
+    return DigestPeriod(period_start, messages, pointer, history_start)
+
+
+def render_digest_job(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    schedule: DigestSchedule,
+    job: DigestJob,
+    now: Optional[datetime] = None,
+) -> None:
+    """Turn a collected job into digest parts: the render stage.
+
+    Only the job is read, never the feed's git repositories, so this does
+    not need the feed lock.
+    """
+    state = job.load()
+    try:
+        period_start = datetime.fromisoformat(state['period_start'])
+        period_end = datetime.fromisoformat(state['period_end'])
+        history_start = datetime.fromisoformat(state['history_start']) if state.get('history_start') else None
+    except (KeyError, TypeError, ValueError) as e:
+        raise StateError(f'Bad digest job in {job.path}: {e}') from e
+    # Only the summarize stage stores a model
+    model = state.get('model')
+    summaries = job.summaries(state)
+    threads = group_threads([parse_message(raw) for raw in job.messages()], _job_root_subjects(job, state))
+    info = DigestInfo(
+        feed_name=format_key_for_display(feed.feed_key),
+        delivery_name=delivery_name,
+        link_base=feed.feed_url if isinstance(feed, LoreFeed) else LEI_LINK_BASE,
+        period_start=period_start.astimezone(),
+        period_end=period_end.astimezone(),
+        from_addr=schedule.from_addr,
+        model=str(model) if model else None,
+        history_start=history_start.astimezone() if history_start else None,
+    )
+    job.write_parts(render_digest_parts(info, threads, summaries, now=now))
+
+
+def deliver_digest_job(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    target: Any,
+    labels: List[str],
+    subfolder: Optional[str],
+    job: DigestJob,
+) -> List[EmailMessage]:
+    """Send the parts of a rendered job, in order: the deliver stage.
+
+    Each part is removed from the job as soon as the target accepts it.
+    The pointer collected with the job is saved after the last part, and
+    then the job is removed. No git data is read.
+
+    Returns:
+        The parts that were sent in this call.
+    """
+    state = job.load()
+    try:
+        period_end = datetime.fromisoformat(state['period_end'])
+    except (KeyError, TypeError, ValueError) as e:
+        raise StateError(f'Bad digest job in {job.path}: {e}') from e
+
+    sent: List[EmailMessage] = list()
+    pending = job.pending()
+    if pending:
+        target.connect()
+    for part_file in pending:
+        raw = part_file.read_bytes()
+        target.import_message(
+            raw,
+            labels=labels,
+            feed_name=format_key_for_display(feed.feed_key),
+            delivery_name=delivery_name,
+            subfolder=subfolder,
+        )
+        part_file.unlink()
+        part = BytesParser(_class=EmailMessage, policy=policy.default).parsebytes(raw)
+        assert isinstance(part, EmailMessage)
+        sent.append(part)
+    feed.save_delivery_entry(delivery_name, state.get('pointer'), digest_sent=period_end)
+    job.clear()
+    return sent
+
+
+def finish_digest_job(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    target: Any,
+    labels: List[str],
+    subfolder: Optional[str],
+    schedule: DigestSchedule,
+    job: DigestJob,
+    now: Optional[datetime] = None,
+) -> List[EmailMessage]:
+    """Run the stages that are left in a job, from where it stopped.
+
+    The caller must hold the job lock. The feed lock is not needed.
+
+    Returns:
+        The digest parts that were sent.
+    """
+    state = job.load()
+    try:
+        period_end = datetime.fromisoformat(state['period_end'])
+    except (KeyError, TypeError, ValueError) as e:
+        raise StateError(f'Bad digest job in {job.path}: {e}') from e
+    last_sent = feed.load_digest_sent(delivery_name)
+    if last_sent is not None and last_sent >= period_end:
+        # State was saved, but we stopped before removing the job
+        logger.debug('Digest %s: job was already delivered, removing it', delivery_name)
+        job.clear()
+        return []
+
+    if state['stage'] != DigestJob.RENDERED:
+        render_digest_job(delivery_name, feed, schedule, job, now=now)
+    return deliver_digest_job(delivery_name, feed, target, labels, subfolder, job)
+
+
+def send_digest(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    target: Any,
+    labels: List[str],
+    subfolder: Optional[str],
+    schedule: DigestSchedule,
+    bozofilter: Optional[Set[str]] = None,
+    force: bool = False,
+    now: Optional[datetime] = None,
+) -> List[EmailMessage]:
+    """Build and deliver a digest when one is due, running all job stages.
+
+    A job left from an earlier run goes first and resumes from its last
+    finished stage, even when no new digest is due. See DigestJob for the
+    stages. A job that another process is working on is left alone.
+
+    With force, a digest is sent even when it is not due and even when
+    there is no activity.
+
+    Returns:
+        The digest parts that were sent. The list is empty when nothing
+        was due or the period was empty and send_empty is off.
+
+    Raises:
+        Whatever the feed or the target raises; the caller decides what to do.
+    """
+    job = DigestJob(feed.get_digest_job_dir(delivery_name))
+    with job.locked() as have_lock:
+        if not have_lock:
+            logger.info('Digest %s: another process is working on it', delivery_name)
+            return []
+        if job.exists():
+            logger.info('Digest %s: finishing the digest from the last run', delivery_name)
+        else:
+            # A job without a job file was never finished, so start again
+            job.clear()
+            if not collect_digest(delivery_name, feed, schedule, job, bozofilter, force=force, now=now):
+                return []
+        return finish_digest_job(delivery_name, feed, target, labels, subfolder, schedule, job, now=now)
+
+
+def run_due_digests(
+    ctx: click.Context,
+    delivery_names: List[str],
+    force: bool = False,
+    status_callback: Optional[Callable[[str], None]] = None,
+) -> Dict[str, List[str]]:
+    """Send the digests that are due, logging failures and moving on.
+
+    Feeds must already be locked and updated.
+
+    Returns:
+        A mapping of delivery name to the Message-IDs of the digest parts
+        sent. Digests that sent nothing are left out.
+    """
+    schedules: Dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
+    bozo_set = ctx.obj.get('bozofilter', set())
+    sent: Dict[str, List[str]] = dict()
+    used_targets: Dict[str, Any] = dict()
+    for dname in delivery_names:
+        feed, target, labels, subfolder = ctx.obj['deliveries'][dname]
+        if status_callback:
+            status_callback(f'Checking digest {format_key_for_display(dname)}...')
+        schedule = schedules[dname]
+        try:
+            parts = send_digest(dname, feed, target, labels, subfolder, schedule, bozo_set, force=force)
+        except AuthenticationError:
+            # The GUI shows an auth button for this, so let it through
+            raise
+        except Exception as e:
+            logger.error('Could not send digest %s, will retry on the next run: %s', dname, e)
+            logger.debug('Traceback:', exc_info=True)
+            continue
+        finally:
+            used_targets[target.identifier] = target
+        for part in parts:
+            logger.info('Sent digest %s: %s', dname, part['Subject'])
+        if parts:
+            sent[dname] = [str(part['Message-ID']) for part in parts]
+
+    for target in used_targets.values():
+        if hasattr(target, 'disconnect'):
+            target.disconnect()
+    return sent
+
+
 def normalize_feed_key(feed_url: str) -> str:
     """Normalize a feed URL into a consistent key for internal tracking.
 
@@ -849,9 +1236,22 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
     dmap: Dict[str, Tuple[Union[LeiFeed, LoreFeed], Any, List[str], Optional[str]]] = dict()
     # Store original strftime templates for refresh (used by GUI for long-running processes)
     templates: Dict[str, str] = dict()
+    # Deliveries with mode = 'digest', and when they send
+    schedules: Dict[str, DigestSchedule] = dict()
     logger.debug('Mapping deliveries to their feeds and targets')
     # Pre-map deliveries to their feeds and targets for later use.
     for delivery_name, details in deliveries.items():
+        mode = details.get('mode', 'message')
+        if mode == 'digest':
+            schedules[delivery_name] = DigestSchedule.from_config(delivery_name, details)
+        elif mode == 'message':
+            digest_keys = [key for key in DIGEST_KEYS if key in details]
+            if digest_keys:
+                raise ConfigurationError(
+                    f"Delivery '{delivery_name}' sets {', '.join(digest_keys)}, which only work with mode = 'digest'"
+                )
+        else:
+            raise ConfigurationError(f"Delivery '{delivery_name}': mode must be 'message' or 'digest' (got {mode!r})")
         # Map feed
         feed = get_feed_for_delivery(details, ctx)
         # Map target
@@ -901,6 +1301,7 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
         dmap[delivery_name] = (feed, target, labels, subfolder)
     ctx.obj['deliveries'] = dmap
     ctx.obj['subfolder_templates'] = templates
+    ctx.obj['digest_schedules'] = schedules
 
 
 def refresh_subfolder_templates(ctx: click.Context) -> None:
@@ -1043,8 +1444,13 @@ def retry_all_failed_deliveries(ctx: click.Context) -> None:
 
     # 'deliveries' is a mapping: delivery_name -> Tuple[feed, target, labels, subfolder]
     deliveries = ctx.obj['deliveries']
+    digest_names = ctx.obj.get('digest_schedules', {})
     retry_list: List[Tuple[str, Any, Union[LeiFeed, LoreFeed], int, str, List[str], Optional[str]]] = list()
     for delivery_name, (feed, target, labels, subfolder) in deliveries.items():
+        if delivery_name in digest_names:
+            # Digests never deliver single messages, not even ones left
+            # over from before the delivery was switched to a digest
+            continue
         to_retry = feed.get_failed_commits_for_delivery(delivery_name)
         if not to_retry:
             logger.debug('No failed commits to retry for delivery: %s', delivery_name)
@@ -1377,9 +1783,15 @@ def perform_pull(
         logger.debug('Force flag set, treating all feeds as updated')
         run_deliveries = list(ctx.obj['deliveries'].keys())
 
+    # Digests are sent on their own schedule, not message by message. They
+    # are checked on every pull, because a digest can be due even when its
+    # feed has nothing new.
+    digest_names = list(ctx.obj.get('digest_schedules', {}))
+    run_deliveries = [dname for dname in run_deliveries if dname not in digest_names]
+
     logger.debug('Deliveries to run: %s', ', '.join(run_deliveries))
 
-    if not run_deliveries:
+    if not run_deliveries and not digest_names:
         unlock_all_feeds(ctx)
         return {}, set()
 
@@ -1458,6 +1870,16 @@ def perform_pull(
         if target_service is not None and hasattr(target_service, 'disconnect'):
             target_service.disconnect()
 
+    if digest_names:
+        try:
+            sent = run_due_digests(ctx, digest_names, status_callback=status_callback)
+        except AuthenticationError:
+            unlock_all_feeds(ctx)
+            raise
+        for dname, digest_msgids in sent.items():
+            changes[dname] = len(digest_msgids)
+            unique_msgids.update(digest_msgids)
+
     unlock_all_feeds(ctx)
 
     # Update tracking manifest activity for any tracked threads that had deliveries
@@ -1513,6 +1935,70 @@ def pull(
                 logger.info('  %s: %d', dname, count)
     else:
         logger.info('Pull complete with no updates.')
+
+    failed_feeds: List[str] = ctx.obj.get('failed_feeds', [])
+    if fail_on_feed_error and failed_feeds:
+        logger.error('Feeds that failed to update:')
+        for feed_key in failed_feeds:
+            logger.error('  %s', feed_key)
+        ctx.exit(3)
+
+
+@main.command('digest')
+@click.pass_context
+@click.option('--force', '-f', is_flag=True, help='send now, even if not due and even if there is no activity')
+@click.option('--no-update', '-n', is_flag=True, help='skip feed updates')
+@click.option(
+    '--fail-on-feed-error',
+    is_flag=True,
+    help='exit with status 3 if any feed failed to update (digests are still sent)',
+)
+@click.argument('delivery_names', type=str, nargs=-1)
+def digest_cmd(
+    ctx: click.Context,
+    force: bool,
+    no_update: bool,
+    fail_on_feed_error: bool,
+    delivery_names: Tuple[str, ...],
+) -> None:
+    """Send the digests that are due.
+
+    Digests are also sent by "kgl pull", so you only need this command to
+    send them without delivering anything else, or to send one right away
+    with --force. With DELIVERY_NAMES, only those digests are checked.
+    """
+    ctx.obj['failed_feeds'] = []
+    cfg = ctx.obj.get('config', {})
+    all_deliveries: Dict[str, Any] = cfg.get('deliveries', {})
+    digests = {name: details for name, details in all_deliveries.items() if details.get('mode') == 'digest'}
+    if delivery_names:
+        for name in delivery_names:
+            if name not in all_deliveries:
+                logger.critical('Delivery "%s" not found in configuration.', name)
+                raise click.Abort()
+            if name not in digests:
+                logger.critical('Delivery "%s" is not a digest (set mode = "digest").', name)
+                raise click.Abort()
+        digests = {name: digests[name] for name in delivery_names}
+    if not digests:
+        logger.info('No digest deliveries configured.')
+        return
+
+    map_deliveries(ctx, digests)
+    with abort_if_feed_locked():
+        lock_all_feeds(ctx)
+    try:
+        if no_update:
+            logger.debug('No-update flag set, skipping feed updates')
+        else:
+            update_all_feeds(ctx)
+        sent = run_due_digests(ctx, list(digests), force=force)
+        if not sent:
+            logger.info('No digests were due.')
+    finally:
+        unlock_all_feeds(ctx)
+        close_requests_session()
+        ctx.obj['targets'] = {}
 
     failed_feeds: List[str] = ctx.obj.get('failed_feeds', [])
     if fail_on_feed_error and failed_feeds:

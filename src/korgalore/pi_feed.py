@@ -734,6 +734,10 @@ class PIFeed:
             info: Dict[str, Any] = json.load(gf)
         return info
 
+    def get_digest_job_dir(self, delivery_name: str) -> Path:
+        """Where a digest delivery keeps a digest until it is sent."""
+        return self._get_state_file_path(delivery_name, 'digest-job')
+
     def find_history_gap(self, delivery_name: str, commits: List[Tuple[int, str]]) -> Optional[datetime]:
         """Find out if commits between the delivery pointer and HEAD are missing.
 

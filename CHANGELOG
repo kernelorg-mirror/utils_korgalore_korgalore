@@ -9,6 +9,25 @@ Enhancements
 
 * GUI: Add "About" dialog showing version, description, website, and license
 
+* Digest deliveries (experimental): ``mode = 'digest'`` sends one
+  summary email per day or week instead of every message
+
+  - The digest lists new threads and threads with new replies, with
+    patch counts, review trailers, a lore link, and the ``kgl yank`` and
+    ``kgl track add`` commands to grab each thread
+  - Plain text and HTML parts; the HTML loads nothing remote
+  - ``schedule``, ``send_at``, ``send_day``, ``send_empty`` and
+    ``digest_from`` control when it is sent and how it looks
+  - ``kgl pull`` and the GUI send due digests; the new ``kgl digest``
+    command sends them on their own, and ``--force`` sends one right now
+  - A big digest is split into numbered parts (``[DIGEST 1/3]``) that
+    reply to the first one, so mail clients don't cut it off
+  - A digest that the target rejects is retried with the same messages;
+    parts that were already delivered are not sent again
+  - Lore feeds with a digest keep their history back to the last digest
+    (up to 30 days), so weekly digests and digests after a vacation don't
+    lose messages; past that, the digest says that some are missing
+
 * ``kgl pull --fail-on-feed-error``: exit with status 3 if any feed failed
   to update
 

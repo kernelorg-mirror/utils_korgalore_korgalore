@@ -59,6 +59,24 @@ List all addresses in the bozofilter.
 .PP
 Messages from blocked addresses are silently skipped during delivery.
 The filter file is stored at \fI~/.config/korgalore/bozofilter.txt\fR.
+.SS digest
+Send the digests that are due, without delivering anything else.
+Digests are experimental.
+.PP
+.B kgl digest
+[\fIOPTIONS\fR] [\fIDELIVERY_NAMES\fR]...
+.TP
+.BR \-f ", " \-\-force
+Send now, even if the digest is not due and even if there is nothing new.
+.TP
+.BR \-n ", " \-\-no\-update
+Skip feed updates.
+.TP
+.B \-\-fail\-on\-feed\-error
+Exit with status 3 if any feed failed to update. The digests are still sent.
+.PP
+Without \fIDELIVERY_NAMES\fR, all deliveries with
+\fBmode = 'digest'\fR are checked.
 .SS edit-config
 Open the configuration file in the default editor.
 .PP
@@ -110,6 +128,9 @@ If \fIDELIVERY_NAME\fR is specified, only process that delivery.
 Otherwise, process all configured deliveries including tracked threads.
 With \fIDELIVERY_NAME\fR, \fB\-\-fail\-on\-feed\-error\fR only covers
 the feeds of that delivery.
+.PP
+Pull also sends the digests that are due. Digest deliveries never get
+messages one by one, not even with \fB\-\-force\fR.
 .SS subscribe
 Manage mailing list subscriptions.
 .PP
@@ -230,7 +251,7 @@ Additional configuration files (merged alphabetically).
 Sender blocking filter.
 .TP
 .I ~/.local/share/korgalore/
-Feed state and tracking data.
+Feed state and tracking data, and digests that are on their way out.
 .SH ENVIRONMENT
 .TP
 .B EDITOR

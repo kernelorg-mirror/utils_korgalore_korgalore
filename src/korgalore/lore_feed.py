@@ -122,6 +122,14 @@ class LoreFeed(PIFeed):
 
         return prefixes.pop()
 
+    def get_message_by_msgid(self, msgid: str) -> bytes:
+        """Fetch one raw message from the archive.
+
+        Raises:
+            liblore.LibloreError: If the message cannot be fetched.
+        """
+        return self._node.get_message_by_msgid(msgid)
+
     def get_manifest(self) -> Dict[str, Any]:
         """Fetch and parse the gzipped manifest from the Lore server."""
         return _fetch_manifest(self._node, self.feed_url)

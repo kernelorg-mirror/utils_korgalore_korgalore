@@ -608,6 +608,9 @@ Delivery Parameters
 * ``feed``: Name of a feed defined in the ``feeds`` section, or a direct URL of a lore.kernel.org archive or lei search path (prefixed with ``lei:``)
 * ``target``: Identifier of the target (must match a target name defined in the ``targets`` section)
 * ``labels``: List of labels to apply to imported messages (Gmail/JMAP only; ignored for maildir and IMAP targets)
+* ``mode``: (Optional) ``'message'`` (the default) delivers every message.
+  ``'digest'`` sends one summary email per period instead; see
+  `Digest Deliveries`_ for the other keys it uses
 * ``subfolder``: (Optional) Subfolder path for IMAP and Maildir targets
 
   - For IMAP: Combined with the target's base folder (e.g., ``INBOX`` + ``Lists/LKML`` = ``INBOX/Lists/LKML``)
@@ -666,6 +669,83 @@ Example with date-based archiving (Maildir only):
    feed = 'lkml'
    target = 'archive'
    subfolder = '%Y/%m'  # Results in ~/Mail/Archive/2026/01
+
+Digest Deliveries
+~~~~~~~~~~~~~~~~~
+
+.. warning::
+   Digests are experimental, and these keys may change.
+
+A digest delivery doesn't put every message in your inbox. Instead, it
+sends one email per period (a day or a week) that lists the threads in
+the feed. The threads are in sections: new patches and pull requests,
+updates to earlier patches, bug reports, and discussions. For each
+thread you get:
+
+* who started it, how many messages and patches it has, and any
+  ``Reviewed-by`` or ``Acked-by`` trailers
+* the patches posted, in series order, and the replies
+* a link to the thread on lore.kernel.org. To get the whole thread into
+  your mailbox, give that link to ``kgl yank -T``. To follow the thread
+  from now on, give it to ``kgl track add``.
+
+The email has a plain text part and an HTML part. The HTML part has no
+scripts and loads nothing from the network.
+
+.. code-block:: toml
+
+   [deliveries.lkml-digest]
+   feed = 'lkml'
+   target = 'personal'
+   labels = ['INBOX']
+   mode = 'digest'
+   schedule = 'daily'    # or 'weekly'
+   send_at = '07:00'     # local time
+
+Digest parameters (only allowed with ``mode = 'digest'``):
+
+* ``schedule``: ``'daily'`` (the default) or ``'weekly'``
+* ``send_at``: Local time to send at, as ``'HH:MM'`` (default ``'07:00'``).
+  This is wall-clock time, so a 07:00 digest stays at 07:00 when daylight
+  saving time starts or ends
+* ``send_day``: Weekly digests only: the day to send on, such as
+  ``'mon'`` or ``'friday'`` (default ``'mon'``)
+* ``send_empty``: Send a digest even when nothing happened in the period
+  (default ``false``, so quiet days send nothing)
+* ``digest_from``: The ``From:`` address of the digest email (default
+  ``'korgalore <korgalore@localhost>'``). Set this to an address your mail
+  filters will recognize
+
+How digests are sent:
+
+* ``kgl pull`` (and the GUI) sends any digest that is due, after it
+  delivers the other messages. ``kgl digest`` sends due digests without
+  delivering anything else. Neither one waits until ``send_at``: a digest
+  goes out on the first run at or after that time, so run ``kgl pull``
+  often enough (for example, from a timer every 15 minutes)
+* If korgalore didn't run for a few days, you get one digest that covers
+  all of that time, not one digest per day
+* The first digest of a new delivery is sent on the next run and covers
+  one period back: the last 24 hours, or the last 7 days for a weekly
+  digest
+* A big digest is split into several emails, so that mail clients
+  don't cut it off. The subjects are numbered like a patch series
+  (``[DIGEST 1/3]``, ``[DIGEST 2/3]``, ...), parts 2 and up are replies
+  to part 1, and every part shows the totals for the whole digest. A
+  thread is never split between two parts
+* If the target doesn't accept the digest (or one of its parts), nothing
+  is marked as sent. The next run sends the parts that were not
+  delivered yet, before anything else, so you never get a part twice
+* Messages from addresses in your bozofilter are left out
+* Lore feeds normally keep about one week of history on your disk. When
+  a feed has a digest that was last sent longer ago than that (for
+  example, a weekly digest, or after a vacation), korgalore keeps the
+  history back to that digest, up to 30 days. If messages are missing
+  anyway (after more than 30 days away), the digest starts with a note
+  that says which messages are missing and links to the archive where
+  you can find them
+* Lei feeds link to ``https://lore.kernel.org/all/``, because lei results
+  can come from any list
 
 Gmail Labels
 ------------
@@ -818,6 +898,7 @@ This directory contains:
 * Cloned git repositories for each lore mailing list
 * Epoch tracking information
 * Metadata about imported messages
+* Digests on their way out
 
 You can override this by setting the ``XDG_DATA_HOME`` environment
 variable, but then korgalore will lose your existing clones, so this is
