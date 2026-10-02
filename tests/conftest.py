@@ -11,6 +11,7 @@ import pytest
 
 if TYPE_CHECKING:
     from korgalore.pi_feed import PIFeed
+    from korgalore.summarizer import SummaryCache
     from tests.digest_helpers import InboxRepo
 
 
@@ -90,3 +91,10 @@ def repo(tmp_path: Path) -> InboxRepo:
     from tests.digest_helpers import InboxRepo
 
     return InboxRepo(tmp_path / 'lkml')
+
+
+@pytest.fixture
+def cache(tmp_path: Path) -> SummaryCache:
+    from korgalore.summarizer import SummaryCache
+
+    return SummaryCache(tmp_path / 'summaries')

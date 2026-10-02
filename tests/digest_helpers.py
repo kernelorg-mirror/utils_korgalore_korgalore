@@ -5,18 +5,21 @@ import subprocess
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import click
 
 from korgalore.digest import DigestSchedule
 from korgalore.lore_feed import LoreFeed
+from korgalore.summarizer import DEFAULT_MAX_INPUT_CHARS, SummarizerError
 
 UTC = timezone.utc
 # 09:00 UTC, well after a 07:00 send time in any time zone near UTC
 NOW = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
 DAILY = DigestSchedule()
 DNAME = 'lkml-digest'
+ALICE = 'Alice <alice@x>'
+BOB = 'Bob <bob@x>'
 
 
 def mkmsg(
@@ -172,3 +175,25 @@ def digest_text(msg: Optional[EmailMessage]) -> str:
 
 def digest_html(msg: Optional[EmailMessage]) -> str:
     return part_text(msg, 'html')
+
+
+class RecordingSummarizer:
+    """Answers "summary N" and keeps every prompt it was given."""
+
+    name = 'fake'
+    max_input_chars = DEFAULT_MAX_INPUT_CHARS
+    allow_private_feeds = False
+    is_local = True
+
+    def __init__(self, model: str = 'qwen3:32b', fail: bool = False, fail_calls: Sequence[int] = ()) -> None:
+        self.model = model
+        self.fail = fail
+        # 1-based numbers of the calls that fail
+        self.fail_calls = fail_calls
+        self.prompts: List[str] = []
+
+    def summarize(self, text: str) -> str:
+        self.prompts.append(text)
+        if self.fail or len(self.prompts) in self.fail_calls:
+            raise SummarizerError('server said no')
+        return f'summary {len(self.prompts)}'
