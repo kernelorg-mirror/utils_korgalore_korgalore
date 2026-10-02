@@ -191,7 +191,7 @@ def _report_still_running(what: str, finished: threading.Event, interval: float)
         logger.info('Still running lei %s (%d seconds so far)...', what, round(time.monotonic() - started))
 
 
-def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
+def run_lei_command(args: List[str], stdin: Optional[bytes] = None) -> Tuple[int, bytes]:
     """Run a lei command and return (returncode, stdout).
 
     Reports progress every LEI_HEARTBEAT_INTERVAL seconds while the command
@@ -199,6 +199,8 @@ def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
 
     Args:
         args: Arguments to pass to lei command (first element is the subcommand).
+        stdin: Data to feed to the command's standard input, e.g. a query
+               for 'lei q --stdin'.
 
     Returns:
         Tuple of (return_code, stdout_output).
@@ -225,7 +227,7 @@ def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
         name='lei-heartbeat',
     ).start()
     try:
-        result = subprocess.run(cmd, capture_output=True)
+        result = subprocess.run(cmd, capture_output=True, input=stdin)
     except FileNotFoundError as e:
         raise PublicInboxError(f"LEI command '{LEICMD}' not found. Is it installed?") from e
     finally:

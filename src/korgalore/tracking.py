@@ -400,7 +400,12 @@ def create_lei_thread_search(msgid: str, output_path: Path) -> Tuple[int, bytes]
 def create_lei_query_search(query: str, output_path: Path, threads: bool = False) -> Tuple[int, bytes]:
     """Create a new lei search with an arbitrary query string.
 
-    Uses: lei q '<query>' [--threads] --only https://lore.kernel.org/all -o v2:<output_path>
+    Uses: lei q --stdin [--threads] --only https://lore.kernel.org/all -o v2:<output_path>
+
+    The query goes to lei on standard input, not as an argument. lei turns
+    each argument that contains whitespace into a phrase search, so a whole
+    query passed as one argument matches nothing. A query read from stdin
+    is used as written, and lei saves it that way for 'lei up' as well.
 
     Args:
         query: The lei query string (e.g., 'd:30.days.ago.. AND a:foo@bar.com').
@@ -418,13 +423,13 @@ def create_lei_query_search(query: str, output_path: Path, threads: bool = False
     # Ensure output directory's parent exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    args = ['q', query]
+    args = ['q', '--stdin']
     if threads:
         args.append('--threads')
     args.extend(['--only', 'https://lore.kernel.org/all', '-o', f'v2:{output_path}'])
-    logger.debug('Creating lei query search: lei %s', ' '.join(args))
+    logger.debug('Creating lei query search: lei %s <<< %s', ' '.join(args), query)
 
-    return run_lei_command(args)
+    return run_lei_command(args, stdin=query.encode())
 
 
 def update_lei_search(search_path: Path) -> Tuple[int, bytes]:

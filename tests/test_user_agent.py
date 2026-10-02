@@ -218,6 +218,22 @@ class TestRunLeiCommand:
             assert retcode == 0
             assert output == b'output data'
 
+    def test_passes_stdin_to_command(self) -> None:
+        """Data given as stdin reaches the lei process, for 'lei q --stdin'."""
+        with mock.patch('subprocess.run') as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stdout=b'')
+            run_lei_command(['q', '--stdin'], stdin=b'l:foo AND d:2.days.ago..')
+
+            assert mock_run.call_args.kwargs['input'] == b'l:foo AND d:2.days.ago..'
+
+    def test_no_stdin_by_default(self) -> None:
+        """Without stdin, lei gets no input, as before."""
+        with mock.patch('subprocess.run') as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stdout=b'')
+            run_lei_command(['up', '/path'])
+
+            assert mock_run.call_args.kwargs['input'] is None
+
 
 class TestMakeLoreNode:
     """Tests for make_lore_node factory function."""
