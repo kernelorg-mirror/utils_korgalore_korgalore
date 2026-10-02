@@ -129,11 +129,13 @@ def run_git_command(gitdir: Optional[str], args: List[str],
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
-def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
+def run_lei_command(args: List[str], stdin: Optional[bytes] = None) -> Tuple[int, bytes]:
     """Run a lei command and return (returncode, stdout).
 
     Args:
         args: Arguments to pass to lei command (first element is the subcommand).
+        stdin: Data to feed to the command's standard input, e.g. a query
+               for 'lei q --stdin'.
 
     Returns:
         Tuple of (return_code, stdout_output).
@@ -149,7 +151,7 @@ def run_lei_command(args: List[str]) -> Tuple[int, bytes]:
     logger.debug('Running lei command: %s', ' '.join(cmd))
 
     try:
-        result = subprocess.run(cmd, capture_output=True)
+        result = subprocess.run(cmd, capture_output=True, input=stdin)
     except FileNotFoundError:
         raise PublicInboxError(f"LEI command '{LEICMD}' not found. Is it installed?")
     return result.returncode, result.stdout.strip()
