@@ -13,15 +13,7 @@ from korgalore import PublicInboxError, _report_still_running, run_lei_command
 
 @pytest.fixture
 def korgalore_logs(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
-    """Capture korgalore's INFO records.
-
-    Importing cli.py anywhere in the run leaves click-log's own handler on
-    the korgalore logger with propagation off, which would keep these
-    records away from caplog.
-    """
-    korg_logger = logging.getLogger('korgalore')
-    korg_logger.handlers.clear()
-    korg_logger.propagate = True
+    """Capture korgalore's INFO records."""
     caplog.set_level(logging.INFO, logger='korgalore')
     return caplog
 

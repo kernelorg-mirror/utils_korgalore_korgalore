@@ -64,11 +64,6 @@ class TestPipeTargetConnect:
         """Connect logs the configured command."""
         import logging
 
-        # Clear any handlers added by click-log from cli.py imports
-        # and ensure propagation for caplog to capture
-        korg_logger = logging.getLogger('korgalore')
-        korg_logger.handlers.clear()
-        korg_logger.propagate = True
         caplog.set_level(logging.DEBUG, logger='korgalore')
         target = PipeTarget('test', '/usr/bin/mycommand --flag')
         target.connect()

@@ -2,14 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterator
 from unittest.mock import MagicMock
 
 import pytest
 
 if TYPE_CHECKING:
     from korgalore.pi_feed import PIFeed
+
+
+@pytest.fixture(autouse=True)
+def korgalore_logs_reach_caplog() -> Iterator[None]:
+    """Let caplog see what korgalore logs.
+
+    Importing cli.py runs click_log.basic_config(), which puts click-log's
+    own handler on the korgalore logger and turns propagation off. Before
+    pytest 9, caplog only listens on the root logger, so on the pytest
+    that distros ship those records never reach it and caplog.text stays
+    empty. Propagate for the length of the test, then put it back.
+    """
+    korg_logger = logging.getLogger('korgalore')
+    saved = korg_logger.propagate
+    korg_logger.propagate = True
+    yield
+    korg_logger.propagate = saved
 
 
 @pytest.fixture
