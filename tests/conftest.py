@@ -11,6 +11,7 @@ import pytest
 
 if TYPE_CHECKING:
     from korgalore.pi_feed import PIFeed
+    from tests.digest_helpers import InboxRepo
 
 
 @pytest.fixture(autouse=True)
@@ -81,3 +82,11 @@ def sample_deliveries() -> dict[str, tuple[Any, Any, list[str]]]:
         target.identifier = f'target-{i % 2}'
         feeds[f'delivery-{i}'] = (feed, target, [f'label-{i}'])
     return feeds
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> InboxRepo:
+    """An empty public-inbox style repository for digest tests."""
+    from tests.digest_helpers import InboxRepo
+
+    return InboxRepo(tmp_path / 'lkml')

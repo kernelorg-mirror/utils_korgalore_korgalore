@@ -352,6 +352,27 @@ class PIFeed:
 
         return new_commits
 
+    def get_commits_since(self, since: datetime) -> List[Tuple[int, str]]:
+        """Return (epoch, commit) tuples for the commits made after since.
+
+        Every local epoch is walked, oldest first, so a feed that rolled
+        over to a new epoch inside the window loses nothing. This uses the
+        commit date, which public-inbox sets when a message arrives, so it
+        is not affected by wrong Date headers.
+        """
+        commits: List[Tuple[int, str]] = []
+        for epoch in self.find_epochs():
+            if self.is_empty_repo(epoch):
+                continue
+            gitdir = self.get_gitdir(epoch)
+            branch = self._get_default_branch(gitdir)
+            gitargs = ['rev-list', '--reverse', f'--since-as-filter={since.isoformat()}', branch]
+            retcode, output, error = run_git_command(str(gitdir), gitargs)
+            if retcode != 0:
+                raise GitError(f'Git rev-list failed (exit {retcode}): {error.decode()}')
+            commits.extend((epoch, commit) for commit in output.decode().splitlines())
+        return commits
+
     def is_noop_commit(self, epoch: int, commitish: str) -> bool:
         """Check if a commit has no 'm' file and should be skipped.
 
@@ -591,17 +612,38 @@ class PIFeed:
         epoch: Optional[int] = None,
         latest_commit: Optional[str] = None,
         message: Optional[Union[bytes, EmailMessage]] = None,
+        digest_sent: Optional[datetime] = None,
     ) -> None:
-        """Save delivery progress state to disk."""
+        """Save delivery progress state to disk.
+
+        For digest deliveries, digest_sent records when the digest was
+        sent. It is written together with the pointer, so the two can never
+        disagree.
+        """
         if epoch is None:
             epoch = self.get_highest_epoch()
+
+        if digest_sent is not None and not latest_commit and self.is_empty_repo(epoch):
+            # An empty feed has nothing to point at yet. The next digest
+            # notices the missing pointer and collects by date instead.
+            self.save_delivery_entry(delivery_name, None, digest_sent=digest_sent)
+            return
 
         if not latest_commit:
             latest_commit = self.get_top_commit(epoch)
 
-        # Get the commit date
+        entry = self.make_delivery_entry(epoch, latest_commit, message)
+        self.save_delivery_entry(delivery_name, {'epoch': epoch, 'entry': entry}, digest_sent=digest_sent)
+
+    def make_delivery_entry(
+        self,
+        epoch: int,
+        commit: str,
+        message: Optional[Union[bytes, EmailMessage]] = None,
+    ) -> Dict[str, str]:
+        """Build the state entry that points a delivery at this commit."""
         gitdir = self.get_gitdir(epoch)
-        gitargs = ['show', '-s', '--format=%ci', latest_commit]
+        gitargs = ['show', '-s', '--format=%ci', commit]
         retcode, output, error = run_git_command(str(gitdir), gitargs)
         if retcode != 0:
             raise GitError(f'Git show failed (exit {retcode}): {error.decode()}')
@@ -612,11 +654,11 @@ class PIFeed:
         # entirely. The state file needs both keys regardless.
         subject = '(no subject)'
         msgid = '(no message-id)'
-        if not message and self.is_noop_commit(epoch, latest_commit):
+        if not message and self.is_noop_commit(epoch, commit):
             subject = '(noop)'
             msgid = '(noop)'
         elif not message:
-            message = self.get_message_at_commit(epoch, latest_commit)
+            message = self.get_message_at_commit(epoch, commit)
 
         if message:
             if isinstance(message, bytes):
@@ -626,17 +668,31 @@ class PIFeed:
             subject = msg_get_subject(msg) or '(no subject)'
             msgid = msg.get('Message-ID', '(no message-id)')
 
-        state_file = self._get_state_file_path(delivery_name, 'info')
-        if state_file.exists():
-            state_info = self.load_delivery_info(delivery_name)
-        else:
-            state_info = {'epochs': {}}
-        state_info['epochs'][str(epoch)] = {
-            'last': latest_commit,
+        return {
+            'last': commit,
             'subject': subject,
             'msgid': msgid,
             'commit_date': commit_date,
         }
+
+    def save_delivery_entry(
+        self,
+        delivery_name: str,
+        pointer: Optional[Dict[str, Any]],
+        digest_sent: Optional[datetime] = None,
+    ) -> None:
+        """Write a pointer made by make_delivery_entry() to the state file.
+
+        pointer is {'epoch': N, 'entry': {...}}, or None to leave the
+        pointer as it is. This reads no git data, so a digest job can save
+        the pointer it collected long after the feed has moved on.
+        """
+        state_file = self._get_state_file_path(delivery_name, 'info')
+        state_info = self._read_delivery_info(delivery_name) or {'epochs': {}}
+        if pointer is not None:
+            state_info.setdefault('epochs', {})[str(pointer['epoch'])] = pointer['entry']
+        if digest_sent is not None:
+            state_info['digest'] = {'last_sent': digest_sent.isoformat()}
 
         self._atomic_write(state_file, json.dumps(state_info, indent=2))
 
@@ -668,6 +724,34 @@ class PIFeed:
             info: Dict[str, Any] = json.load(gf)
 
         return info
+
+    def _read_delivery_info(self, delivery_name: str) -> Optional[Dict[str, Any]]:
+        """Read the delivery state file as it is, or None if there is none."""
+        state_file = self._get_state_file_path(delivery_name, 'info')
+        if not state_file.exists():
+            return None
+        with open(state_file, 'r') as gf:
+            info: Dict[str, Any] = json.load(gf)
+        return info
+
+    def has_delivery_pointer(self, delivery_name: str) -> bool:
+        """True when the delivery has saved how far it got in the feed."""
+        info = self._read_delivery_info(delivery_name)
+        return bool(info and info.get('epochs'))
+
+    def load_digest_sent(self, delivery_name: str) -> Optional[datetime]:
+        """Return when the last digest of a delivery was sent, or None if never."""
+        info = self._read_delivery_info(delivery_name)
+        if info is None:
+            return None
+        state_file = self._get_state_file_path(delivery_name, 'info')
+        value = info.get('digest', {}).get('last_sent')
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError as e:
+            raise StateError(f'Bad digest last_sent {value!r} in {state_file}') from e
 
     def feed_updated(self, epoch: Optional[int] = None) -> bool:
         """Check if feed has new commits since last recorded state."""
