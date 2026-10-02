@@ -103,6 +103,10 @@ class PublicInboxError(KorgaloreError, liblore.PublicInboxError):
     """Raised when something is wrong with Public-Inbox."""
 
 
+class FeedLockedError(PublicInboxError):
+    """Raised when another process is using a feed."""
+
+
 class StateError(KorgaloreError):
     """Raised when there is an error with the internal state."""
 

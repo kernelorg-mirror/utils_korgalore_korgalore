@@ -8,8 +8,9 @@ import re
 import tomllib
 import urllib.parse
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, TextIO, Tuple, Union
 
 import click
 import click_log  # type: ignore[import-untyped]
@@ -20,6 +21,7 @@ import liblore
 from korgalore import (
     AuthenticationError,
     ConfigurationError,
+    FeedLockedError,
     GitError,
     PublicInboxError,
     RemoteError,
@@ -923,11 +925,34 @@ def refresh_subfolder_templates(ctx: click.Context) -> None:
 
 
 def lock_all_feeds(ctx: click.Context) -> None:
-    """Acquire exclusive locks on all feeds in the context."""
+    """Acquire exclusive locks on all feeds in the context.
+
+    Either all feeds are locked, or none: when one is busy, the feeds
+    locked before it are released again.
+
+    Raises:
+        FeedLockedError: Another process is using one of the feeds.
+    """
     feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
-    for feed_key in feeds:
-        feed = feeds[feed_key]
-        feed.feed_lock()
+    locked: List[Union[LeiFeed, LoreFeed]] = []
+    try:
+        for feed in feeds.values():
+            feed.feed_lock()
+            locked.append(feed)
+    except FeedLockedError:
+        for feed in locked:
+            feed.feed_unlock()
+        raise
+
+
+@contextmanager
+def abort_if_feed_locked() -> Generator[None, None, None]:
+    """Turn a busy feed into a short error message instead of a traceback."""
+    try:
+        yield
+    except FeedLockedError as fe:
+        logger.critical('Error: %s', str(fe))
+        raise click.Abort() from fe
 
 
 def unlock_all_feeds(ctx: click.Context) -> None:
@@ -1442,7 +1467,8 @@ def pull(
     With DELIVERY_NAME, only the feeds of that delivery are updated, so
     --fail-on-feed-error only covers those feeds.
     """
-    changes, _ = perform_pull(ctx, no_update, force, delivery_name)
+    with abort_if_feed_locked():
+        changes, _ = perform_pull(ctx, no_update, force, delivery_name)
 
     if changes:
         logger.info('Pull complete with updates:')

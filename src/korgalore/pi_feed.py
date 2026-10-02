@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from liblore.utils import clean_header, msg_get_subject, parse_message
 
-from korgalore import GitError, PublicInboxError, StateError, run_git_command
+from korgalore import FeedLockedError, GitError, PublicInboxError, StateError, run_git_command
 
 logger = logging.getLogger('korgalore')
 
@@ -453,7 +453,11 @@ class PIFeed:
         return first_commit
 
     def feed_lock(self) -> None:
-        """Acquire exclusive lock on feed to prevent concurrent access."""
+        """Acquire exclusive lock on feed to prevent concurrent access.
+
+        Raises:
+            FeedLockedError: Another process holds the lock.
+        """
         # Grab an exclusive posix lock to make sure that we're not running the
         # same delivery in multiple processes at the same time.
         global LOCKED_FEEDS
@@ -464,7 +468,9 @@ class PIFeed:
             lockf(lockfh, LOCK_EX | LOCK_NB)
         except BlockingIOError as e:
             lockfh.close()
-            raise PublicInboxError(f"Feed '{self.feed_dir}' is already locked by another process.") from e
+            raise FeedLockedError(
+                f"Another kgl process is using feed '{self.feed_key}' ({self.feed_dir}). Try again when it is done."
+            ) from e
         except Exception:
             lockfh.close()
             raise
