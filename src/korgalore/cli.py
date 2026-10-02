@@ -9,6 +9,7 @@ import tomllib
 import urllib.parse
 import uuid
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, TextIO, Tuple, Union
 
@@ -963,6 +964,28 @@ def unlock_all_feeds(ctx: click.Context) -> None:
         feed.feed_unlock()
 
 
+def digest_history_needs(ctx: click.Context) -> Dict[str, datetime]:
+    """How far back each lore feed must keep its history for its digests.
+
+    Lore clones only keep one week of history, and a digest that was last
+    sent longer ago than that would miss messages. Returns a mapping of
+    feed key to the oldest commit date that any of its digests needs.
+    """
+    needs: Dict[str, datetime] = dict()
+    for dname in ctx.obj.get('digest_schedules', {}):
+        feed = ctx.obj['deliveries'][dname][0]
+        if not isinstance(feed, LoreFeed):
+            continue
+        try:
+            since = feed.get_digest_history_start(dname)
+        except StateError as e:
+            logger.warning('Digest %s: %s', dname, e)
+            continue
+        if since is not None and (feed.feed_key not in needs or since < needs[feed.feed_key]):
+            needs[feed.feed_key] = since
+    return needs
+
+
 def update_all_feeds(
     ctx: click.Context,
     status_callback: Optional[Callable[[str], None]] = None,
@@ -977,6 +1000,7 @@ def update_all_feeds(
     failed_feeds: List[str] = []
     ctx.obj['failed_feeds'] = failed_feeds
     feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
+    history_needs = digest_history_needs(ctx)
 
     if status_callback:
         status_callback('Querying feeds...')
@@ -993,7 +1017,10 @@ def update_all_feeds(
                 status_callback(f'Querying {format_key_for_display(feed_key)}...')
             feed = feeds[feed_key]
             try:
-                status = feed.update_feed()
+                if feed_key in history_needs and isinstance(feed, LoreFeed):
+                    status = feed.update_feed(keep_history_since=history_needs[feed_key])
+                else:
+                    status = feed.update_feed()
             except (RemoteError, PublicInboxError, GitError) as e:
                 logger.warning('Failed to update %s: %s', feed_key, e)
                 failed_feeds.append(feed_key)

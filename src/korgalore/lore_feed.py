@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from gzip import GzipFile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,6 +11,12 @@ from korgalore.pi_feed import PIFeed
 from liblore import LoreNode
 
 logger = logging.getLogger('korgalore')
+
+# How much history a lore clone keeps on disk
+HISTORY_WINDOW = timedelta(weeks=1)
+# Digests can ask for more history, but never more than this. Older
+# messages are left out, and the digest says that they are missing.
+HISTORY_MAX = timedelta(days=30)
 
 
 def _fetch_manifest(node: LoreNode, base_url: str) -> Dict[str, Any]:
@@ -200,6 +207,58 @@ class LoreFeed(PIFeed):
             epochs.append((entry['epoch'], entry['path'], entry['fpr']))
         return epochs
 
+    @staticmethod
+    def shallow_since(keep_history_since: Optional[datetime], now: Optional[datetime] = None) -> Optional[str]:
+        """The --shallow-since value for a fetch, or None for the default window.
+
+        keep_history_since is the oldest commit date a digest still needs.
+        When it is inside the default one-week window, the default is used.
+        Otherwise the history goes back to it, but never more than
+        HISTORY_MAX.
+        """
+        if keep_history_since is None:
+            return None
+        if now is None:
+            now = datetime.now(timezone.utc)
+        if keep_history_since >= now - HISTORY_WINDOW:
+            return None
+        since = max(keep_history_since, now - HISTORY_MAX)
+        return since.strftime('%Y-%m-%d %H:%M:%S %z')
+
+    def fetch_epoch(
+        self, epoch: int, keep_history_since: Optional[datetime] = None, now: Optional[datetime] = None
+    ) -> None:
+        """Fetch new commits for an epoch and move the shallow cut.
+
+        Normally the cut moves to one week back on every fetch. When a
+        digest needs older history, the cut moves to keep_history_since
+        instead (see shallow_since()), and git fetches the older commits
+        back if they are already gone.
+        """
+        gitdir = self.get_gitdir(epoch)
+        mirror_config = self._git_mirror_config()
+        since = self.shallow_since(keep_history_since, now)
+        if since is None:
+            gitargs = ['fetch', 'origin', '--shallow-since=1.week.ago', '--update-shallow']
+            # Shallow fetch with --shallow-since can fail for dormant lists
+            # that have no commits in the time window. Fall back to --depth=1
+            # which always succeeds regardless of commit dates.
+            fallback = ['fetch', 'origin', '--depth=1', '--update-shallow']
+        else:
+            logger.debug('Keeping history of %s since %s for digests', self.feed_key, since)
+            gitargs = ['fetch', 'origin', f'--shallow-since={since}', '--update-shallow']
+            # --depth=1 would cut off the history a digest needs, so fall
+            # back to a plain fetch, which leaves the cut where it is
+            fallback = ['fetch', 'origin']
+        retcode, _output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
+        if retcode != 0:
+            logger.debug(
+                'Shallow fetch failed, retrying with %s: %s', ' '.join(fallback[2:]) or 'a plain fetch', error.decode()
+            )
+            retcode, _output, error = run_git_command(str(gitdir), fallback, git_config=mirror_config)
+        if retcode != 0:
+            raise RemoteError(f'Git fetch failed (exit {retcode}): {error.decode()}')
+
     def init_feed(self) -> None:
         """Initialize a new Lore feed by fetching manifest and cloning latest epoch."""
         if not self.feed_dir.exists():
@@ -209,8 +268,11 @@ class LoreFeed(PIFeed):
         self.clone_epoch(epoch)
         self.save_feed_state(epoch=epoch, success=True)
 
-    def update_feed(self) -> int:
+    def update_feed(self, keep_history_since: Optional[datetime] = None) -> int:
         """Update feed by fetching new epochs and commits.
+
+        keep_history_since is the oldest commit date that a digest on this
+        feed still needs (see fetch_epoch()).
 
         Returns:
             Status constant: STATUS_NOCHANGE, STATUS_UPDATED, or STATUS_INITIALIZED.
@@ -229,20 +291,8 @@ class LoreFeed(PIFeed):
         # What is our highest epoch?
         highest_local_epoch = max(int(e) for e in feed_state['epochs'])
         logger.debug('Highest local epoch: %s', highest_local_epoch)
-        gitdir = self.get_gitdir(highest_local_epoch)
         # Pull the latest changes
-        mirror_config = self._git_mirror_config()
-        gitargs = ['fetch', 'origin', '--shallow-since=1.week.ago', '--update-shallow']
-        retcode, _output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
-        if retcode != 0:
-            # Shallow fetch with --shallow-since can fail for dormant lists
-            # that have no commits in the time window. Fall back to --depth=1
-            # which always succeeds regardless of commit dates.
-            logger.debug('Shallow fetch failed, retrying with --depth=1: %s', error.decode())
-            gitargs = ['fetch', 'origin', '--depth=1', '--update-shallow']
-            retcode, _output, error = run_git_command(str(gitdir), gitargs, git_config=mirror_config)
-        if retcode != 0:
-            raise RemoteError(f'Git fetch failed (exit {retcode}): {error.decode()}')
+        self.fetch_epoch(highest_local_epoch, keep_history_since)
 
         updated = self.feed_updated(highest_local_epoch)
 

@@ -102,6 +102,53 @@ class InboxRepo:
         return LoreFeed('lkml', self.feed_dir, 'https://lore.kernel.org/lkml')
 
 
+class ShallowCopy:
+    """A shallow mirror clone of an InboxRepo, like a lore feed has.
+
+    Lore feeds fetch with --shallow-since and --update-shallow, so the cut
+    moves forward on every fetch. The dates here are absolute, because the
+    commits in InboxRepo have made-up dates.
+    """
+
+    def __init__(self, upstream: InboxRepo, feed_dir: Path, since: datetime) -> None:
+        self.upstream = upstream
+        self.feed_dir = feed_dir
+        self.gitdir = feed_dir / 'git' / '0.git'
+        self.gitdir.parent.mkdir(parents=True)
+        subprocess.run(
+            [
+                'git',
+                'clone',
+                '--quiet',
+                '--mirror',
+                f'--shallow-since={since.isoformat()}',
+                f'file://{upstream.gitdir}',
+                str(self.gitdir),
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+    def fetch(self, since: datetime) -> None:
+        subprocess.run(
+            [
+                'git',
+                '-C',
+                str(self.gitdir),
+                'fetch',
+                '--quiet',
+                f'--shallow-since={since.isoformat()}',
+                '--update-shallow',
+                'origin',
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+    def feed(self) -> LoreFeed:
+        return LoreFeed('lkml', self.feed_dir, 'https://lore.kernel.org/lkml')
+
+
 def make_ctx(obj: Dict[str, Any]) -> click.Context:
     """A click context with the given ctx.obj, like the cli functions get."""
     ctx = click.Context(click.Command('test'))

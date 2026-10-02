@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, lockf
 from pathlib import Path
@@ -734,6 +734,45 @@ class PIFeed:
             info: Dict[str, Any] = json.load(gf)
         return info
 
+    def find_history_gap(self, delivery_name: str, commits: List[Tuple[int, str]]) -> Optional[datetime]:
+        """Find out if commits between the delivery pointer and HEAD are missing.
+
+        Lore clones are shallow, and every fetch moves the cut to one week
+        back. When the pointer is older than that, the walk from HEAD stops
+        at the cut, before it gets to the pointer. git lists the cut
+        commits in the "shallow" file, and the raw commit object still
+        names its real parent. If a cut commit is in the range and its
+        parent is not the pointer, the messages in between are missing.
+
+        Returns the commit date of the first commit after the gap, or None
+        when nothing is missing.
+        """
+        info = self._read_delivery_info(delivery_name)
+        if not info or not info.get('epochs'):
+            return None
+        epoch = max(int(e) for e in info['epochs'])
+        pointer = info['epochs'][str(epoch)]['last']
+        gitdir = self.get_gitdir(epoch)
+        shallow_file = gitdir / 'shallow'
+        if not shallow_file.exists():
+            return None
+        cuts = set(shallow_file.read_text().split())
+        for commit_epoch, commit in commits:
+            if commit_epoch != epoch or commit not in cuts:
+                continue
+            retcode, output, error = run_git_command(str(gitdir), ['cat-file', 'commit', commit])
+            if retcode != 0:
+                raise GitError(f'Git cat-file failed (exit {retcode}): {error.decode()}')
+            header = output.decode(errors='replace').split('\n\n', 1)[0]
+            parents = [line[7:] for line in header.splitlines() if line.startswith('parent ')]
+            if pointer in parents:
+                continue
+            retcode, output, error = run_git_command(str(gitdir), ['show', '-s', '--format=%cI', commit])
+            if retcode != 0:
+                raise GitError(f'Git show failed (exit {retcode}): {error.decode()}')
+            return datetime.fromisoformat(output.decode().strip())
+        return None
+
     def has_delivery_pointer(self, delivery_name: str) -> bool:
         """True when the delivery has saved how far it got in the feed."""
         info = self._read_delivery_info(delivery_name)
@@ -752,6 +791,35 @@ class PIFeed:
             return datetime.fromisoformat(value)
         except ValueError as e:
             raise StateError(f'Bad digest last_sent {value!r} in {state_file}') from e
+
+    def get_digest_history_start(self, delivery_name: str) -> Optional[datetime]:
+        """How far back a digest delivery needs the feed history.
+
+        The next digest starts at the pointer, so its commit must stay in
+        the local history, with its parent. Without a pointer, the next
+        digest collects by commit date from last_sent. We keep one extra
+        day as a margin, so the pointer is never right at the shallow cut.
+
+        Returns None when the delivery has no digest state yet.
+        """
+        info = self._read_delivery_info(delivery_name)
+        if not info:
+            return None
+        starts: List[datetime] = []
+        last_sent = self.load_digest_sent(delivery_name)
+        if last_sent is not None:
+            starts.append(last_sent)
+        epochs = info.get('epochs', {})
+        if epochs:
+            pointer = epochs[str(max(int(e) for e in epochs))]
+            if pointer.get('commit_date'):
+                try:
+                    starts.append(datetime.strptime(pointer['commit_date'], '%Y-%m-%d %H:%M:%S %z'))
+                except ValueError as e:
+                    raise StateError(f'Bad commit_date for delivery {delivery_name}: {e}') from e
+        if not starts:
+            return None
+        return min(starts) - timedelta(days=1)
 
     def feed_updated(self, epoch: Optional[int] = None) -> bool:
         """Check if feed has new commits since last recorded state."""
