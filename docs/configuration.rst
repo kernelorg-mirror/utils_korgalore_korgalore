@@ -766,6 +766,7 @@ llama.cpp, vLLM or LM Studio) or a hosted one. To try it, add a
    mode = 'digest'
    summarizer = 'local'
    max_summaries = 50    # optional
+   summary_instructions = 'Tell me if anyone sounds confused or upset.'    # optional
 
    [summarizers.local]
    type = 'openai'
@@ -784,6 +785,13 @@ Digest parameters for summaries:
   Summaries that korgalore made before don't count. The busiest threads
   (the most new messages) get their summaries first. The other threads
   are still in the digest, with a note that the limit was reached
+* ``summary_instructions``: (Optional) More instructions for the model,
+  added at the end of korgalore's own. Use it to ask for something you
+  want to know about each thread, for example "Tell me if anyone sounds
+  confused or upset." korgalore's own rules still come first, and the
+  facts in the digest never come from the model. Saved summaries are
+  only used again with the same text, so after a change, the next
+  digest writes a new summary for each thread that needs one
 
 Summarizer parameters, for every type:
 

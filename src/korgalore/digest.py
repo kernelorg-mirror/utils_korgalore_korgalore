@@ -1440,7 +1440,16 @@ _WEEKDAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
 _WEEKDAY_NAMES = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')
 _SEND_AT_RE = re.compile(r'^([01]?\d|2[0-3]):([0-5]\d)$')
 # Delivery keys that only make sense for digests
-DIGEST_KEYS = ('schedule', 'send_at', 'send_day', 'send_empty', 'digest_from', 'summarizer', 'max_summaries')
+DIGEST_KEYS = (
+    'schedule',
+    'send_at',
+    'send_day',
+    'send_empty',
+    'digest_from',
+    'summarizer',
+    'max_summaries',
+    'summary_instructions',
+)
 
 
 @dataclass(frozen=True)
@@ -1457,6 +1466,9 @@ class DigestSchedule:
     summarizer: Optional[str] = None
     # The most new summaries one digest asks for; None means no limit
     max_summaries: Optional[int] = None
+    # Added to the summarizer's system prompt, for what this maintainer
+    # wants to know about each thread
+    summary_instructions: Optional[str] = None
 
     @classmethod
     def from_config(cls, delivery_name: str, details: Mapping[str, Any]) -> 'DigestSchedule':
@@ -1509,6 +1521,14 @@ class DigestSchedule:
             if isinstance(max_summaries, bool) or not isinstance(max_summaries, int) or max_summaries < 1:
                 raise bad('max_summaries', f'must be a whole number of at least 1 (got {max_summaries!r})')
 
+        summary_instructions = details.get('summary_instructions')
+        if summary_instructions is not None:
+            if summarizer is None:
+                raise bad('summary_instructions', 'only works with a summarizer')
+            if not isinstance(summary_instructions, str) or not summary_instructions.strip():
+                raise bad('summary_instructions', f'must be some text (got {summary_instructions!r})')
+            summary_instructions = summary_instructions.strip()
+
         return cls(
             schedule,
             send_at,
@@ -1517,6 +1537,7 @@ class DigestSchedule:
             from_addr,
             summarizer=summarizer,
             max_summaries=max_summaries,
+            summary_instructions=summary_instructions,
         )
 
     @property

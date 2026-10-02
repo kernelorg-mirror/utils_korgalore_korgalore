@@ -926,7 +926,12 @@ def summarize_digest_job(
     msgs = [parse_message(raw) for raw in job.messages()]
     threads = group_threads(msgs, _job_root_subjects(job, job.load()))
     summaries = run.summarize_threads(
-        f'Digest {delivery_name}', threads, msgs, now, max_summaries=schedule.max_summaries
+        f'Digest {delivery_name}',
+        threads,
+        msgs,
+        now,
+        max_summaries=schedule.max_summaries,
+        instructions=schedule.summary_instructions,
     )
     job.write_summaries(run.summarizer.model, summaries)
 
@@ -1377,7 +1382,7 @@ def estimate_digest(
 
     where = 'on this machine' if summarizer.is_local else 'NOT on this machine'
     lines.append(f'  Summarizer {summarizer.name}, model {summarizer.model}, {where}')
-    est = estimate_summaries(summarizer, cache, threads, msgs, schedule.max_summaries)
+    est = estimate_summaries(summarizer, cache, threads, msgs, schedule.max_summaries, schedule.summary_instructions)
     lines.append(
         f'  No summary needed: {est.not_needed:,}, cached: {est.cached:,}, over max_summaries: {est.over_limit:,}'
     )

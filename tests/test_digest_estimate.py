@@ -116,6 +116,15 @@ class TestEstimateDigest:
         assert '  Model calls: 0 (0 build on an earlier summary)' in lines
         assert not any(line.startswith('  Input:') for line in lines)
 
+    def test_summary_instructions(self, repo: InboxRepo, cache: SummaryCache) -> None:
+        """A summary made without the instructions is not counted as cached."""
+        cache.store('a@x', 'qwen3:32b', 'from before', ['a@x', 'r@x'], NOW)
+        schedule = DigestSchedule(summarizer='local', summary_instructions='Tell me if anyone sounds upset.')
+        lines = estimate(repo, cache, RecordingSummarizer(), schedule=schedule)
+
+        assert '  No summary needed: 1, cached: 0, over max_summaries: 0' in lines
+        assert '  Model calls: 1 (0 build on an earlier summary)' in lines
+
     def test_max_summaries(self, repo: InboxRepo, cache: SummaryCache) -> None:
         repo.add_msg('b@x', NOW - timedelta(minutes=30))
         repo.add_msg('rb@x', NOW - timedelta(minutes=20), sender=BOB, irt='b@x')

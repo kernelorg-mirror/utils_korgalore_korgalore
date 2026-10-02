@@ -62,6 +62,11 @@ class TestFromConfig:
         assert sched.max_summaries == 25
         assert sched.needs_worker
 
+    def test_summary_instructions(self) -> None:
+        sched = parse(summarizer='local', summary_instructions='  Tell me if anyone sounds upset.\n')
+        assert sched.summary_instructions == 'Tell me if anyone sounds upset.'
+        assert parse(summarizer='local').summary_instructions is None
+
     def test_no_summarizer_is_plain(self) -> None:
         sched = parse()
         assert sched.summarizer is None
@@ -97,6 +102,13 @@ class TestFromConfig:
             ({'summarizer': 'local', 'max_summaries': 0}, 'max_summaries'),
             ({'summarizer': 'local', 'max_summaries': '10'}, 'max_summaries'),
             ({'summarizer': 'local', 'max_summaries': True}, 'max_summaries'),
+            ({'summary_instructions': 'Tell me if anyone sounds upset.'}, 'summary_instructions'),
+            ({'summarizer': 'local', 'summary_instructions': ''}, 'summary_instructions'),
+            ({'summarizer': 'local', 'summary_instructions': ' \n'}, 'summary_instructions'),
+            (
+                {'summarizer': 'local', 'summary_instructions': ['Tell me if anyone sounds upset.']},
+                'summary_instructions',
+            ),
         ],
     )
     def test_bad_values(self, details: Dict[str, Any], key: str) -> None:

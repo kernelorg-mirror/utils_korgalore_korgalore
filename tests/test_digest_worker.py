@@ -310,6 +310,19 @@ class TestSummarizedDigest:
         assert len(fake.prompts) == 1
         assert 'reached its max_summaries limit' in digest_text(delivered(maildir)[0])
 
+    def test_summary_instructions(self, tmp_path: Path, answered: InboxRepo, maildir: MaildirTarget) -> None:
+        fake = RecordingSummarizer()
+        ctx = summarized_ctx(tmp_path, answered, maildir, fake)
+        ctx.obj['digest_schedules'][DNAME] = DigestSchedule(
+            summarizer='local', summary_instructions='Tell me if anyone sounds upset.'
+        )
+        assert collect(answered)
+
+        run_digest_worker(ctx, [DNAME])
+
+        assert fake.instructions == ['Tell me if anyone sounds upset.']
+        assert cache_of(ctx).latest('a@x', fake.model, 'Tell me if anyone sounds upset.') is not None
+
     def test_failures_count_across_digests(self, tmp_path: Path, answered: InboxRepo, maildir: MaildirTarget) -> None:
         """One run gives up on a dead summarizer, even across digests."""
         other = InboxRepo(tmp_path / 'netdev')

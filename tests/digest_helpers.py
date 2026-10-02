@@ -262,9 +262,12 @@ class RecordingSummarizer:
         # 1-based numbers of the calls that fail
         self.fail_calls = fail_calls
         self.prompts: List[str] = []
+        # The summary_instructions of each call
+        self.instructions: List[Optional[str]] = []
 
-    def summarize(self, text: str) -> str:
+    def summarize(self, text: str, instructions: Optional[str] = None) -> str:
         self.prompts.append(text)
+        self.instructions.append(instructions)
         if self.fail or len(self.prompts) in self.fail_calls:
             raise SummarizerError('server said no')
         return f'summary {len(self.prompts)}'

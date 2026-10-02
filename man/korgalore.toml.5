@@ -198,6 +198,13 @@ answered get none. Without it, the digest has no summaries.
 (Optional) The most new summaries in one digest. Saved summaries do not
 count. The busiest threads get theirs first; the others say that the
 limit was reached.
+.TP
+.B summary_instructions
+(Optional) More instructions for the model, added at the end of its
+usual ones, for example \fITell me if anyone sounds confused or upset.\fR The usual
+rules still come first. Saved summaries are only used again with the same
+text, so after a change, the next digest writes a new summary for each
+thread that needs one.
 .SS [summarizers.<name>]
 A language model that writes digest summaries. Run
 \fBkgl digest \-\-estimate\fR to see what a digest would send to it.

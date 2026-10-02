@@ -114,6 +114,7 @@ labels = []  # Labels are ignored for IMAP (single folder delivery)
 # send_empty = false    # skip days with no messages
 # summarizer = 'local'  # add a short summary of each thread
 # max_summaries = 50    # the most new summaries per digest
+# summary_instructions = 'Tell me if anyone sounds confused or upset.'  # added to the prompt
 
 # A language model for digest summaries. "kgl digest --estimate" shows
 # what a digest would send to it, without calling it.

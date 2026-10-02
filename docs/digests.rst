@@ -234,6 +234,39 @@ The second digest is much faster than the first. korgalore keeps each
 summary for 30 days. When a thread gets new replies, only the new
 messages and the earlier summary go to the model.
 
+Asking for More in the Summaries
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The model gets the same instructions for every digest. If you want
+to know something more about each thread, add ``summary_instructions``
+to the delivery:
+
+.. code-block:: toml
+
+   [deliveries.lkml-digest]
+   feed = 'lkml'
+   target = 'personal'
+   mode = 'digest'
+   summarizer = 'local'
+   summary_instructions = 'Tell me if anyone sounds confused or upset.'
+
+korgalore adds your text at the end of its own instructions. Its own
+rules still come first: the model writes short plain points, and never
+says that a patch was reviewed or applied. The facts in the digest
+(versions, trailers, counts) never come from the model, so your
+instructions can't change them.
+
+Each delivery has its own instructions, so two digests of the same
+feed can ask for different things. korgalore only uses a saved summary
+again when it was made with the same instructions. So after you change
+them, the next digest can't build on the earlier summaries: it writes a
+new summary for each thread that needs one (up to ``max_summaries``),
+from the messages in that digest only. The summaries made with the old
+text stay saved for up to 30 days, so changing the text back makes them
+useful again.
+Run ``kgl digest --estimate`` to see how many summaries the next digest
+needs.
+
 The Digest Worker
 -----------------
 

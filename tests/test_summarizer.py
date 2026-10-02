@@ -34,6 +34,7 @@ from korgalore.summarizer import (
     needs_summary,
     rank_threads,
     summarize_thread,
+    system_prompt,
     thread_prompt,
 )
 from tests.digest_helpers import ALICE, BOB, UTC, RecordingSummarizer, mkmsg
@@ -126,6 +127,14 @@ class TestOpenAI:
         assert req['body']['stream'] is False
         assert req['body']['messages'] == [
             {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': 'Thread: mm: fix it'},
+        ]
+
+    def test_instructions_go_in_the_system_message(self, server: FakeServer, session: requests.Session) -> None:
+        openai(server, session).summarize('Thread: mm: fix it', 'Tell me if anyone sounds upset.')
+
+        assert server.requests[0]['body']['messages'] == [
+            {'role': 'system', 'content': system_prompt('Tell me if anyone sounds upset.')},
             {'role': 'user', 'content': 'Thread: mm: fix it'},
         ]
 
@@ -227,6 +236,13 @@ class TestCommand:
         assert summarizer.summarize('Thread: mm: fix it') == 'The summary.'
         assert seen.read_text() == f'{SYSTEM_PROMPT}\n\nThread: mm: fix it'
 
+    def test_instructions_on_stdin(self, tmp_path: Path) -> None:
+        seen = tmp_path / 'stdin'
+        summarizer = CommandSummarizer('script', f"sh -c 'cat > {seen}; echo The summary.'")
+
+        summarizer.summarize('Thread: mm: fix it', 'Tell me if anyone sounds upset.')
+        assert seen.read_text() == f'{system_prompt("Tell me if anyone sounds upset.")}\n\nThread: mm: fix it'
+
     def test_never_local(self) -> None:
         assert CommandSummarizer('s', 'cat').is_local is False
 
@@ -257,6 +273,19 @@ class TestCommand:
     def test_empty_output(self) -> None:
         with pytest.raises(SummarizerError, match='empty'):
             CommandSummarizer('s', "sh -c 'cat >/dev/null'").summarize('x')
+
+
+class TestSystemPrompt:
+    def test_no_instructions(self) -> None:
+        assert system_prompt() == SYSTEM_PROMPT
+        assert system_prompt(None) == SYSTEM_PROMPT
+
+    def test_instructions_come_after_the_rules(self) -> None:
+        """The fixed rules stay first, and say that they win."""
+        prompt = system_prompt('Tell me if anyone sounds upset.')
+        assert prompt.startswith(SYSTEM_PROMPT + '\n\n')
+        assert prompt.endswith('\n\nTell me if anyone sounds upset.')
+        assert 'as long as it fits the rules above' in prompt
 
 
 class TestCleanSummary:
@@ -439,6 +468,42 @@ class TestSummaryCache:
         cache.store(ROOT, 'm', 'old prompt', ['a@x'], DAY1)
         monkeypatch.setattr(summarizer_mod, 'PROMPT_VERSION', summarizer_mod.PROMPT_VERSION + 1)
         assert cache.find(ROOT, ['a@x'], 'm') is None
+
+    def test_other_instructions_are_a_miss(self, cache: SummaryCache) -> None:
+        cache.store(ROOT, 'm', 'plain', ['a@x'], DAY1)
+        cache.store(ROOT, 'm', 'upset', ['a@x'], DAY1, 'Tell me if anyone sounds upset.')
+
+        assert [cached.summary for cached in cache.entries(ROOT, 'm')] == ['plain']
+        assert [cached.summary for cached in cache.entries(ROOT, 'm', 'Tell me if anyone sounds upset.')] == ['upset']
+        assert cache.find(ROOT, ['a@x'], 'm', 'Tell me about swearing.') is None
+        assert cache.latest(ROOT, 'm', 'Tell me about swearing.') is None
+
+    def test_summaries_from_before_instructions_still_match(self, cache: SummaryCache) -> None:
+        """Entries written before summary_instructions existed are used without them."""
+        cache.store(ROOT, 'm', 'old', ['a@x'], DAY1)
+        [cache_file] = cache.path.iterdir()
+        [entry] = json.loads(cache_file.read_text())['entries']
+        assert 'instructions' not in entry
+
+        assert cache.find(ROOT, ['a@x'], 'm') is not None
+        assert cache.find(ROOT, ['a@x'], 'm', 'Tell me if anyone sounds upset.') is None
+
+    def test_only_a_hash_of_the_instructions_is_stored(self, cache: SummaryCache) -> None:
+        cache.store(ROOT, 'm', 'upset', ['a@x'], DAY1, 'Tell me if anyone sounds upset.')
+        [cache_file] = cache.path.iterdir()
+        text = cache_file.read_text()
+        assert 'upset.' not in text
+        [entry] = json.loads(text)['entries']
+        assert len(entry['instructions']) == 64
+
+    def test_newer_summary_keeps_other_instructions(self, cache: SummaryCache) -> None:
+        """Two deliveries of one feed with other instructions keep their own summaries."""
+        cache.store(ROOT, 'm', 'upset day 1', ['a@x'], DAY1, 'Tell me if anyone sounds upset.')
+        cache.store(ROOT, 'm', 'plain day 2', ['a@x', 'b@x'], DAY1 + timedelta(days=1))
+
+        assert [cached.summary for cached in cache.entries(ROOT, 'm', 'Tell me if anyone sounds upset.')] == [
+            'upset day 1'
+        ]
 
     def test_newer_summary_replaces_the_one_it_covers(self, cache: SummaryCache) -> None:
         cache.store(ROOT, 'm', 'day 1', ['a@x'], DAY1)
@@ -701,6 +766,29 @@ class TestSummaryRun:
         assert results['third@x'] == 'summary 1'
         assert len(fake.prompts) == 1
 
+    def test_instructions_reach_the_summarizer(self, cache: SummaryCache) -> None:
+        fake = RecordingSummarizer()
+        msgs = digest_msgs()
+        SummaryRun(fake, cache).summarize_threads(
+            'Digest t', group_threads(msgs), msgs, DAY1, instructions='Tell me if anyone sounds upset.'
+        )
+
+        assert fake.instructions == ['Tell me if anyone sounds upset.', 'Tell me if anyone sounds upset.']
+
+    def test_other_instructions_summarize_again(self, cache: SummaryCache) -> None:
+        """A second delivery of the same feed asks for its own summaries."""
+        msgs = digest_msgs()
+        threads = group_threads(msgs)
+        SummaryRun(RecordingSummarizer(), cache).summarize_threads('Digest t', threads, msgs, DAY1)
+        fake = RecordingSummarizer()
+        run = SummaryRun(fake, cache)
+
+        run.summarize_threads('Digest u', threads, msgs, DAY1, instructions='Tell me if anyone sounds upset.')
+        assert len(fake.prompts) == 2
+        # And then they are cached too
+        run.summarize_threads('Digest u', threads, msgs, DAY1, instructions='Tell me if anyone sounds upset.')
+        assert len(fake.prompts) == 2
+
     def test_failure_moves_on(self, cache: SummaryCache, caplog: pytest.LogCaptureFixture) -> None:
         run = SummaryRun(RecordingSummarizer(fail_calls=[1]), cache)
         with caplog.at_level(logging.WARNING, logger='korgalore'):
@@ -804,6 +892,18 @@ class TestEstimateSummaries:
         assert 'Summary of the earlier messages' in fake.prompts[0]
         assert est.input_chars == len(fake.prompts[0])
         assert est.cached == 1
+
+    def test_instructions_pick_the_cache_entries(self, cache: SummaryCache) -> None:
+        self.run(RecordingSummarizer(), cache, digest_msgs())
+        msgs = digest_msgs()
+        threads = group_threads(msgs)
+
+        assert estimate_summaries(RecordingSummarizer(), cache, threads, msgs).calls == 0
+        est = estimate_summaries(
+            RecordingSummarizer(), cache, threads, msgs, instructions='Tell me if anyone sounds upset.'
+        )
+        assert est.calls == 2
+        assert est.cached == 0
 
     def test_counts(self, cache: SummaryCache) -> None:
         cache.store('small@x', 'qwen3:32b', 'from before', ['small@x', 's1@x'], DAY1)
