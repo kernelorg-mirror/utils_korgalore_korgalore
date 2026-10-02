@@ -1,0 +1,47 @@
+lkml digest
+2026-09-30 07:00 to 2026-10-01 07:00
+3 threads, 8 messages (2 new, 1 continuing)
+
+========================================================================
+NEW PATCHES AND PULL REQUESTS (2)
+========================================================================
+[PATCH v3 0/2] mm: frobnicate the widgets
+  new | 5 new messages | 3 people | v3 | 2 patches posted
+  + Reviewed-by: Bob Dev <bob@example.org>
+  + Acked-by: Famous Person <famous@example.org> (sent by troll@example.org)
+
+  Summary (machine-generated):
+    - The series replaces a list walk with a tail pointer, so that
+      adding a widget no longer takes longer as the list grows.
+    - Bob Dev is happy with patch 1.
+
+  Posted by P. Author, Wed 09:12:
+    1/2  mm: add a tail pointer
+    2/2  mm: use the tail pointer
+  Follow-ups:
+    Wed 14:30  Bob Dev  on 1/2 | Reviewed-by
+    Wed 15:00  Troll  Acked-by
+  Read:  https://lore.kernel.org/lkml/cover@x/
+
+------------------------------------------------------------------------
+[RFC] net: a new idea
+  new | 1 new message | 1 person | RFC | 1 patch posted
+  Summary unavailable.
+  Posted by Dana, Wed 20:00
+  Read:  https://lore.kernel.org/lkml/rfc@x/
+
+========================================================================
+DISCUSSIONS (1)
+========================================================================
+mm: why is this slow?
+  continuing | 2 new messages | 2 people
+
+  Summary (machine-generated):
+    - Carol asks why widget lookup got slower.
+    - The author points to the new locking.
+
+  Follow-ups:
+    Wed 13:00  Carol
+    Thu 06:45  P. Author
+  Read:  https://lore.kernel.org/lkml/slow@x/
+
