@@ -141,6 +141,9 @@ of every message. Digests are experimental.
 
 ``kgl pull`` already sends due digests, so you only need this command to
 send digests without delivering anything else, or to send one right now.
+Digests with summaries are finished by the digest worker in the
+background, so this command only collects them (see "Summarized
+Digests" in the configuration docs).
 
 Arguments:
 
@@ -154,6 +157,17 @@ Options:
 * ``-n, --no-update``: Skip feed updates
 * ``--fail-on-feed-error``: Exit with status 3 if any feed failed to
   update. The digests are still sent
+* ``--estimate``: Don't send anything. For each digest, show what the
+  next one would send to its summarizer: how many threads it has, how
+  many need a new summary, how many have one saved already, and how
+  much text would be sent. The model is not called. A digest that is
+  waiting for the worker is shown as it is; otherwise the digest is
+  counted up to now, even if it is not due yet
+* ``--work``: Run the digest worker: summarize and send the digests that
+  are waiting, then exit. ``kgl pull`` starts the worker by itself,
+  unless ``[digests] worker = 'external'`` is set. It does not update or
+  lock feeds, so ``kgl pull`` can run at the same time. If another
+  worker is running, it does nothing
 
 Examples:
 
@@ -162,8 +176,15 @@ Examples:
    # Send any digest that is due
    kgl digest
 
-   # See what the lkml digest looks like right now
+   # See what the lkml digest looks like right now (a summarized
+   # digest arrives later, when the digest worker has finished)
    kgl digest --force lkml-digest
+
+   # How much work would the next summarized digest be?
+   kgl digest --estimate lkml-digest
+
+   # Finish waiting digests (with worker = 'external')
+   kgl digest --work
 
 edit-config
 -----------
@@ -810,7 +831,7 @@ The GUI provides:
 * **Menu options**:
 
   * Sync Now - trigger an immediate sync. This also sends the digests
-    that are due
+    that are due; summarized digests go to the digest worker
   * Yank - fetch a message or thread by message-id or lore.kernel.org URL
   * Authenticate - re-authenticate Gmail targets when tokens expire (appears only when needed)
   * Edit Config - open the configuration file in your preferred editor
@@ -990,3 +1011,34 @@ Enable and start the timer:
 
    systemctl --user enable korgalore.timer
    systemctl --user start korgalore.timer
+
+Summarized Digests and Systemd
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The service above is ``Type=oneshot``. When ``kgl pull`` exits, systemd
+also stops every process it started, and that includes the digest
+worker. So with summarized digests, set ``worker = 'external'`` in the
+``[digests]`` section and give the worker its own service.
+
+Create ``~/.config/systemd/user/korgalore-digest.service``:
+
+.. code-block:: ini
+
+   [Unit]
+   Description=Korgalore digest worker
+
+   [Service]
+   Type=oneshot
+   ExecStart=%h/.local/bin/kgl -l %h/.local/share/korgalore/kgl-digest.log digest --work
+
+Then start it after each pull, by adding this line to the
+``[Service]`` section of ``korgalore.service``:
+
+.. code-block:: ini
+
+   ExecStartPost=systemctl --user --no-block start korgalore-digest.service
+
+``--no-block`` lets the pull finish without waiting for the summaries.
+If the worker is still busy from the last time, systemd doesn't start a
+second one.
+

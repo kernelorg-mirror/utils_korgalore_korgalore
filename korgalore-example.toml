@@ -112,6 +112,29 @@ labels = []  # Labels are ignored for IMAP (single folder delivery)
 # schedule = 'daily'    # or 'weekly', with send_day = 'mon'
 # send_at = '07:00'     # local time
 # send_empty = false    # skip days with no messages
+# summarizer = 'local'  # add a short summary of each thread
+# max_summaries = 50    # the most new summaries per digest
+
+# A language model for digest summaries. "kgl digest --estimate" shows
+# what a digest would send to it, without calling it.
+# [summarizers.local]
+# type = 'openai'       # any OpenAI-compatible server, such as Ollama
+# url = 'http://localhost:11434/v1'
+# model = 'qwen3:32b'
+# max_input_chars = 24000   # per thread
+# timeout = 120
+
+# Or any program that reads the prompt on stdin
+# [summarizers.claude]
+# type = 'command'
+# command = 'claude -p --model sonnet'
+# model = 'sonnet'
+
+# Summarized digests are finished by a background worker. Use 'external'
+# and run "kgl digest --work" yourself when kgl pull runs from a systemd
+# oneshot service, which stops the worker when kgl pull exits.
+# [digests]
+# worker = 'spawn'
 
 # You can also use direct URLs without defining a feed
 # [deliveries.example-direct]

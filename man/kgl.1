@@ -74,9 +74,21 @@ Skip feed updates.
 .TP
 .B \-\-fail\-on\-feed\-error
 Exit with status 3 if any feed failed to update. The digests are still sent.
+.TP
+.B \-\-estimate
+Send nothing. For each digest, show what the next one would send to its
+summarizer: the threads, how many need a new summary, how many have a
+saved one, and how much text would be sent. The model is not called.
+.TP
+.B \-\-work
+Run the digest worker: summarize and send the digests that are waiting,
+then exit. It does not update or lock feeds. \fBkgl pull\fR starts the
+worker by itself unless \fB[digests] worker = 'external'\fR is set.
 .PP
 Without \fIDELIVERY_NAMES\fR, all deliveries with
 \fBmode = 'digest'\fR are checked.
+Digests with a \fBsummarizer\fR are only collected here; the digest
+worker finishes them in the background.
 .SS edit-config
 Open the configuration file in the default editor.
 .PP
@@ -251,7 +263,9 @@ Additional configuration files (merged alphabetically).
 Sender blocking filter.
 .TP
 .I ~/.local/share/korgalore/
-Feed state and tracking data, and digests that are on their way out.
+Feed state and tracking data, waiting digests, saved summaries
+(\fIsummaries/\fR) and the log of a digest worker that korgalore started
+(\fIdigest-worker.log\fR).
 .SH ENVIRONMENT
 .TP
 .B EDITOR

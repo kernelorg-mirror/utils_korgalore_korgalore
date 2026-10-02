@@ -28,18 +28,21 @@ from korgalore.cli import (
     render_digest_job,
     run_due_digests,
     send_digest,
+    summarize_digest_job,
 )
 from korgalore.digest import DigestJob, DigestSchedule
 from korgalore.lei_feed import LeiFeed
 from korgalore.lore_feed import LoreFeed
 from korgalore.maildir_target import MaildirTarget
 from korgalore.pi_feed import PIFeed
+from korgalore.summarizer import CommandSummarizer, OpenAISummarizer, SummaryCache, SummaryRun
 from tests.digest_helpers import (
     DAILY,
     DNAME,
     NOW,
     FlakyTarget,
     InboxRepo,
+    RecordingSummarizer,
     collect,
     delivered,
     digest_text,
@@ -311,6 +314,66 @@ class TestMapDeliveries:
     def test_bad_mode(self) -> None:
         with pytest.raises(ConfigurationError, match='mode'):
             self._map({'mode': 'digests'})
+
+    LOCAL = {'type': 'openai', 'url': 'http://localhost:11434/v1', 'model': 'qwen3:32b'}
+    REMOTE = {'type': 'openai', 'url': 'https://llm.example.org/v1', 'model': 'big'}
+
+    @staticmethod
+    def _map_summarized(
+        summarizers: Dict[str, Any], feed: Any = None, names: Tuple[str, ...] = (DNAME,)
+    ) -> click.Context:
+        ctx = make_ctx({'config': {'targets': {}, 'summarizers': summarizers}, 'targets': {}, 'feeds': {}})
+        if feed is None:
+            feed = MagicMock(feed_key='lkml')
+        details = {'feed': 'lkml', 'target': 'local', 'mode': 'digest', 'summarizer': 'local'}
+        with (
+            patch('korgalore.cli.get_feed_for_delivery', return_value=feed),
+            patch('korgalore.cli.get_target', return_value=_target('local')),
+        ):
+            map_deliveries(ctx, {name: dict(details) for name in names})
+        return ctx
+
+    def test_summarizer(self) -> None:
+        ctx = self._map_summarized({'local': self.LOCAL}, names=(DNAME, 'netdev-digest'))
+        summarizer = ctx.obj['summarizers']['local']
+        assert isinstance(summarizer, OpenAISummarizer)
+        assert summarizer.model == 'qwen3:32b'
+        assert list(ctx.obj['summarizers']) == ['local']
+        assert ctx.obj['digest_schedules'][DNAME].summarizer == 'local'
+
+    def test_plain_digests_need_no_summarizers(self) -> None:
+        assert self._map({'mode': 'digest'}).obj['summarizers'] == {}
+
+    def test_unknown_summarizer(self) -> None:
+        with pytest.raises(ConfigurationError, match="summarizer 'local' is not defined"):
+            self._map_summarized({'other': self.LOCAL})
+
+    def test_bad_summarizer(self) -> None:
+        with pytest.raises(ConfigurationError, match="Summarizer 'local': url"):
+            self._map_summarized({'local': {'type': 'openai', 'model': 'm'}})
+
+    def test_lore_feed_may_use_a_remote_summarizer(self) -> None:
+        ctx = self._map_summarized({'local': self.REMOTE})
+        assert not ctx.obj['summarizers']['local'].is_local
+
+    @pytest.mark.parametrize(
+        'details',
+        [REMOTE, {'type': 'command', 'command': 'llm -m local'}],
+        ids=['remote', 'command'],
+    )
+    def test_lei_feed_needs_a_local_summarizer(self, details: Dict[str, Any]) -> None:
+        # lei can find private mail
+        with pytest.raises(ConfigurationError, match='allow_private_feeds'):
+            self._map_summarized({'local': details}, feed=MagicMock(spec=LeiFeed, feed_key='lei'))
+
+    def test_lei_feed_with_a_local_summarizer(self) -> None:
+        ctx = self._map_summarized({'local': self.LOCAL}, feed=MagicMock(spec=LeiFeed, feed_key='lei'))
+        assert ctx.obj['summarizers']['local'].is_local
+
+    def test_lei_feed_with_allow_private_feeds(self) -> None:
+        details = {'type': 'command', 'command': 'llm -m local', 'allow_private_feeds': True}
+        ctx = self._map_summarized({'local': details}, feed=MagicMock(spec=LeiFeed, feed_key='lei'))
+        assert isinstance(ctx.obj['summarizers']['local'], CommandSummarizer)
 
     def test_digest_keys_need_digest_mode(self) -> None:
         # A typo in mode shouldn't silently deliver every message
@@ -710,6 +773,20 @@ class TestRootLookup:
         text = digest_text(digest)
         assert '\n[PATCH v3 0/7] mm: frobnicate the widgets\n' in text
         assert 'on 2/7' in text
+
+    def test_summarizer_gets_the_cover_subject(
+        self, tmp_path: Path, repo: InboxRepo, no_archive_lookups: MagicMock
+    ) -> None:
+        add_review(repo, 'cover@x', '[PATCH v3 2/7] mm: use the tail pointer')
+        no_archive_lookups.side_effect = None
+        no_archive_lookups.return_value = make_raw('cover@x', '[PATCH v3 0/7] mm: frobnicate the widgets')
+        assert collect(repo)
+        fake = RecordingSummarizer()
+
+        summarize_digest_job(DNAME, DAILY, job_of(repo), SummaryRun(fake, SummaryCache(tmp_path / 'cache')), now=NOW)
+
+        (prompt,) = fake.prompts
+        assert '[PATCH v3 0/7] mm: frobnicate the widgets' in prompt
 
     def test_first_failure_stops_the_lookups(
         self, repo: InboxRepo, maildir: MaildirTarget, no_archive_lookups: MagicMock, caplog: pytest.LogCaptureFixture

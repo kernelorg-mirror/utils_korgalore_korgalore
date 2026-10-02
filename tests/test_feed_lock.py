@@ -15,7 +15,7 @@ import pytest
 from click.testing import CliRunner
 
 from korgalore import FeedLockedError, PublicInboxError
-from korgalore.cli import lock_all_feeds, pull
+from korgalore.cli import digest_cmd, lock_all_feeds, pull
 from korgalore.pi_feed import LOCKED_FEEDS, PIFeed
 from tests.digest_helpers import make_ctx
 
@@ -99,7 +99,7 @@ class TestLockAllFeeds:
 
 
 class TestCommands:
-    """kgl pull prints one line for a busy feed."""
+    """kgl pull and kgl digest print one line for a busy feed."""
 
     @staticmethod
     def _check(result: Any, caplog: pytest.LogCaptureFixture) -> None:
@@ -108,6 +108,17 @@ class TestCommands:
         assert isinstance(result.exception, SystemExit)
         assert 'Traceback' not in result.output
         assert caplog.messages[-1] == f'Error: {BUSY}'
+
+    def test_digest(self, caplog: pytest.LogCaptureFixture) -> None:
+        obj = {'config': {'deliveries': {'d': {'feed': 'git', 'target': 'local', 'mode': 'digest'}}}, 'targets': {}}
+        with (
+            patch('korgalore.cli.map_deliveries'),
+            patch('korgalore.cli.lock_all_feeds', side_effect=BUSY),
+            patch('korgalore.cli.run_digest_estimates') as estimate,
+        ):
+            result = CliRunner().invoke(digest_cmd, ['--estimate'], obj=obj)
+        self._check(result, caplog)
+        estimate.assert_not_called()
 
     def test_pull(self, caplog: pytest.LogCaptureFixture) -> None:
         with patch('korgalore.cli.perform_pull', side_effect=BUSY):

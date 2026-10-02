@@ -28,6 +28,34 @@ Enhancements
     (up to 30 days), so weekly digests and digests after a vacation don't
     lose messages; past that, the digest says that some are missing
 
+* Summarized digests (experimental): ``summarizer = 'NAME'`` adds a
+  short summary of each thread, written by a language model you choose
+
+  - ``[summarizers]`` entries: ``type = 'openai'`` for any
+    OpenAI-compatible server (Ollama, llama.cpp, vLLM, LM Studio, most
+    hosted services), or ``type = 'command'`` for a program such as
+    ``llm`` or ``claude -p``
+  - Facts (counts, versions, trailers) never come from the model;
+    summaries are marked machine-generated and the model is named in the
+    ``X-Korgalore-Digest-Model`` header
+  - Quotes are removed and patches become short notes before a thread
+    is sent; long threads are cut to ``max_input_chars``
+  - Summaries are saved for 30 days, so the next digest sends only the
+    new messages of a thread together with its earlier summary
+  - ``max_summaries`` limits the new summaries per digest, busiest
+    threads first
+  - A summarizer that is down does not stop the digest: threads say
+    "Summary unavailable.", and after 3 failures in a row korgalore
+    stops calling it until the next run
+  - A digest worker summarizes and sends in the background, so
+    ``kgl pull`` is never held up; ``[digests] worker = 'external'``
+    with ``kgl digest --work`` runs it from your own timer
+  - ``kgl digest --estimate`` shows what the next digest would send to
+    its summarizer, without calling it
+  - Lei feeds, which can hold private mail, are refused with a
+    summarizer that is not on your machine unless it sets
+    ``allow_private_feeds = true``
+
 * ``kgl pull --fail-on-feed-error``: exit with status 3 if any feed failed
   to update
 

@@ -13,16 +13,18 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import click
 
-from korgalore.cli import collect_digest, send_digest
+from korgalore.cli import SUMMARY_CACHE_DIR, collect_digest, send_digest
 from korgalore.digest import DigestJob, DigestSchedule
 from korgalore.lore_feed import LoreFeed
 from korgalore.maildir_target import MaildirTarget
-from korgalore.summarizer import DEFAULT_MAX_INPUT_CHARS, SummarizerError
+from korgalore.summarizer import DEFAULT_MAX_INPUT_CHARS, SummarizerError, SummaryCache
 
 UTC = timezone.utc
 # 09:00 UTC, well after a 07:00 send time in any time zone near UTC
 NOW = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
 DAILY = DigestSchedule()
+# Any summarizer name makes the worker send the digest
+SLOW = DigestSchedule(summarizer='local')
 DNAME = 'lkml-digest'
 ALICE = 'Alice <alice@x>'
 BOB = 'Bob <bob@x>'
@@ -220,6 +222,30 @@ def send(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> Op
 
 def collect(repo: InboxRepo, now: datetime = NOW, **kwargs: Any) -> bool:
     return collect_digest(DNAME, repo.feed(), DAILY, job_of(repo), now=now, **kwargs)
+
+
+def worker_ctx(tmp_path: Path, repo: InboxRepo, target: Any, schedule: DigestSchedule = SLOW) -> click.Context:
+    """The context of a kgl run with one digest delivery."""
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir(exist_ok=True)
+    return make_ctx(
+        {
+            'data_dir': data_dir,
+            'deliveries': {DNAME: (repo.feed(), target, ['digests'], None)},
+            'digest_schedules': {DNAME: schedule},
+            'bozofilter': set(),
+        }
+    )
+
+
+def summarized_ctx(tmp_path: Path, repo: InboxRepo, target: Any, fake: 'RecordingSummarizer') -> click.Context:
+    ctx = worker_ctx(tmp_path, repo, target)
+    ctx.obj['summarizers'] = {'local': fake}
+    return ctx
+
+
+def cache_of(ctx: click.Context) -> SummaryCache:
+    return SummaryCache(ctx.obj['data_dir'] / SUMMARY_CACHE_DIR)
 
 
 class RecordingSummarizer:

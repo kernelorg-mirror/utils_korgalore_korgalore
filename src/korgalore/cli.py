@@ -5,6 +5,8 @@ import io
 import logging
 import os
 import re
+import subprocess
+import sys
 import tomllib
 import urllib.parse
 import uuid
@@ -44,6 +46,7 @@ from korgalore.digest import (
     DigestInfo,
     DigestJob,
     DigestSchedule,
+    flocked,
     group_threads,
     render_digest_parts,
     roots_to_look_up,
@@ -65,6 +68,14 @@ from korgalore.maintainers import (
     normalize_subsystem_name,
 )
 from korgalore.pipe_target import PipeTarget
+from korgalore.summarizer import (
+    Summarizer,
+    SummaryCache,
+    SummaryRun,
+    estimate_summaries,
+    estimate_tokens,
+    make_summarizer,
+)
 from korgalore.tracking import (
     TrackingManifest,
     TrackStatus,
@@ -897,6 +908,29 @@ def read_digest_period(
     return DigestPeriod(period_start, messages, pointer, history_start)
 
 
+def summarize_digest_job(
+    delivery_name: str,
+    schedule: DigestSchedule,
+    job: DigestJob,
+    run: SummaryRun,
+    now: Optional[datetime] = None,
+) -> None:
+    """Summarize the threads of a collected job: the summarize stage.
+
+    This is the slow stage, so it runs in the digest worker. Each summary
+    goes into the cache as soon as it is made, so a worker that is
+    stopped halfway does not have to start again.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    msgs = [parse_message(raw) for raw in job.messages()]
+    threads = group_threads(msgs, _job_root_subjects(job, job.load()))
+    summaries = run.summarize_threads(
+        f'Digest {delivery_name}', threads, msgs, now, max_summaries=schedule.max_summaries
+    )
+    job.write_summaries(run.summarizer.model, summaries)
+
+
 def render_digest_job(
     delivery_name: str,
     feed: Union[LeiFeed, LoreFeed],
@@ -904,10 +938,11 @@ def render_digest_job(
     job: DigestJob,
     now: Optional[datetime] = None,
 ) -> None:
-    """Turn a collected job into digest parts: the render stage.
+    """Turn a collected or summarized job into digest parts: the render stage.
 
     Only the job is read, never the feed's git repositories, so this does
-    not need the feed lock.
+    not need the feed lock. A job that skipped the summarize stage makes
+    a plain digest.
     """
     state = job.load()
     try:
@@ -987,10 +1022,13 @@ def finish_digest_job(
     schedule: DigestSchedule,
     job: DigestJob,
     now: Optional[datetime] = None,
+    run: Optional[SummaryRun] = None,
 ) -> List[EmailMessage]:
     """Run the stages that are left in a job, from where it stopped.
 
-    The caller must hold the job lock. The feed lock is not needed.
+    The caller must hold the job lock. The feed lock is not needed. The
+    summarize stage needs run; without it, a collected job makes a plain
+    digest.
 
     Returns:
         The digest parts that were sent.
@@ -1007,6 +1045,8 @@ def finish_digest_job(
         job.clear()
         return []
 
+    if state['stage'] == DigestJob.COLLECTED and run is not None:
+        summarize_digest_job(delivery_name, schedule, job, run, now=now)
     if state['stage'] != DigestJob.RENDERED:
         render_digest_job(delivery_name, feed, schedule, job, now=now)
     return deliver_digest_job(delivery_name, feed, target, labels, subfolder, job)
@@ -1027,7 +1067,7 @@ def send_digest(
 
     A job left from an earlier run goes first and resumes from its last
     finished stage, even when no new digest is due. See DigestJob for the
-    stages. A job that another process is working on is left alone.
+    stages. A job that the digest worker is working on is left alone.
 
     With force, a digest is sent even when it is not due and even when
     there is no activity.
@@ -1042,7 +1082,7 @@ def send_digest(
     job = DigestJob(feed.get_digest_job_dir(delivery_name))
     with job.locked() as have_lock:
         if not have_lock:
-            logger.info('Digest %s: another process is working on it', delivery_name)
+            logger.info('Digest %s: the digest worker is still working on it', delivery_name)
             return []
         if job.exists():
             logger.info('Digest %s: finishing the digest from the last run', delivery_name)
@@ -1054,6 +1094,114 @@ def send_digest(
         return finish_digest_job(delivery_name, feed, target, labels, subfolder, schedule, job, now=now)
 
 
+def queue_digest(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    schedule: DigestSchedule,
+    bozofilter: Optional[Set[str]] = None,
+    force: bool = False,
+    now: Optional[datetime] = None,
+) -> bool:
+    """Collect a digest for the digest worker, when one is due.
+
+    Only the collect stage runs here, under the feed lock. A job that is
+    already waiting, or that the worker is working on, is left alone, so a
+    new digest is collected only after the last one was sent.
+
+    Returns:
+        True when a job is waiting for the worker.
+    """
+    job = DigestJob(feed.get_digest_job_dir(delivery_name))
+    with job.locked() as have_lock:
+        if not have_lock:
+            return True
+        if job.exists():
+            return True
+        job.clear()
+        return collect_digest(delivery_name, feed, schedule, job, bozofilter, force=force, now=now)
+
+
+# The digest worker holds this lock, in the data dir, while it runs
+DIGEST_WORKER_LOCK = 'digest-worker.lock'
+DIGEST_WORKER_LOG = 'digest-worker.log'
+# kgl pull touches this file, in the data dir, when it has collected a
+# digest, so a worker that is about to exit looks once more
+DIGEST_WORKER_POKE = 'digest-worker.poke'
+# Summaries are cached here, in the data dir, and shared by all feeds
+SUMMARY_CACHE_DIR = 'summaries'
+DIGEST_WORKER_MODES = ('spawn', 'external')
+# Workers started by this process. The GUI runs for days, so finished
+# workers must be reaped, or they stay around as zombies.
+_digest_workers: List['subprocess.Popen[bytes]'] = []
+
+
+def get_digest_worker_mode(config: Dict[str, Any]) -> str:
+    """Read how the digest worker is started from the [digests] section."""
+    mode = config.get('digests', {}).get('worker', 'spawn')
+    if mode not in DIGEST_WORKER_MODES:
+        raise ConfigurationError(f'[digests] worker must be one of: {", ".join(DIGEST_WORKER_MODES)} (got {mode!r})')
+    return str(mode)
+
+
+def digest_worker_running(data_dir: Path) -> bool:
+    """True when a digest worker holds the worker lock."""
+    with flocked(data_dir / DIGEST_WORKER_LOCK) as have_lock:
+        return not have_lock
+
+
+def poke_digest_worker(data_dir: Path) -> None:
+    """Tell a running worker that a new job is waiting.
+
+    The worker looks for jobs once more before it exits when this file is
+    there, so a job that kgl pull collects just as the worker finishes its
+    last round is not left until the next pull. It is written before the
+    worker lock is checked: a worker that is still running sees it, and a
+    worker that has exited leaves it for the next one to consume.
+    """
+    (data_dir / DIGEST_WORKER_POKE).touch()
+
+
+def spawn_digest_worker(data_dir: Path, cfgpath: Optional[Path]) -> bool:
+    """Start the digest worker in the background, unless one is running.
+
+    The worker runs as "python -m korgalore digest --work" in its own
+    session, so it keeps running after kgl pull exits, and it logs to
+    digest-worker.log in the data dir.
+
+    Returns:
+        True when a worker was started.
+    """
+    _digest_workers[:] = [proc for proc in _digest_workers if proc.poll() is None]
+    poke_digest_worker(data_dir)
+    if digest_worker_running(data_dir):
+        logger.debug('The digest worker is already running')
+        return False
+    log_path = data_dir / DIGEST_WORKER_LOG
+    cmd = [sys.executable, '-m', 'korgalore']
+    if cfgpath is not None:
+        cmd += ['--cfgfile', str(cfgpath)]
+    cmd += ['--logfile', str(log_path), 'digest', '--work']
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    _digest_workers.append(proc)
+    logger.info('Started the digest worker (pid %d), its log is %s', proc.pid, log_path)
+    return True
+
+
+def start_digest_worker(ctx: click.Context) -> None:
+    """Make sure waiting digest jobs get a worker, the way the config says."""
+    if ctx.obj.get('digest_worker', 'spawn') == 'external':
+        poke_digest_worker(ctx.obj['data_dir'])
+        logger.info('Digests are waiting for "kgl digest --work"')
+        return
+    spawn_digest_worker(ctx.obj['data_dir'], ctx.obj.get('cfgpath'))
+
+
 def run_due_digests(
     ctx: click.Context,
     delivery_names: List[str],
@@ -1062,7 +1210,8 @@ def run_due_digests(
 ) -> Dict[str, List[str]]:
     """Send the digests that are due, logging failures and moving on.
 
-    Feeds must already be locked and updated.
+    Feeds must already be locked and updated. Digests that need the digest
+    worker are only collected here, and the worker is started for them.
 
     Returns:
         A mapping of delivery name to the Message-IDs of the digest parts
@@ -1072,11 +1221,19 @@ def run_due_digests(
     bozo_set = ctx.obj.get('bozofilter', set())
     sent: Dict[str, List[str]] = dict()
     used_targets: Dict[str, Any] = dict()
+    waiting = False
     for dname in delivery_names:
         feed, target, labels, subfolder = ctx.obj['deliveries'][dname]
         if status_callback:
             status_callback(f'Checking digest {format_key_for_display(dname)}...')
         schedule = schedules[dname]
+        if schedule.needs_worker:
+            try:
+                waiting = queue_digest(dname, feed, schedule, bozo_set, force=force) or waiting
+            except Exception as e:
+                logger.error('Could not collect digest %s, will retry on the next run: %s', dname, e)
+                logger.debug('Traceback:', exc_info=True)
+            continue
         try:
             parts = send_digest(dname, feed, target, labels, subfolder, schedule, bozo_set, force=force)
         except AuthenticationError:
@@ -1096,7 +1253,164 @@ def run_due_digests(
     for target in used_targets.values():
         if hasattr(target, 'disconnect'):
             target.disconnect()
+    if waiting:
+        start_digest_worker(ctx)
     return sent
+
+
+def run_digest_worker(ctx: click.Context, delivery_names: List[str]) -> Dict[str, List[str]]:
+    """Finish the waiting digest jobs, one after another, until none are left.
+
+    This is the digest worker. It does not lock or update feeds: jobs
+    already hold everything they need, so kgl pull keeps running while the
+    worker takes its time. Only one worker runs at a time, because a local
+    model handles one request at a time anyway. Jobs that kgl pull
+    collects while the worker runs are picked up too: the worker waits for
+    a job that pull is still collecting, and pull pokes the worker (see
+    poke_digest_worker()) so a job collected during the worker's last
+    round is not missed. A job that fails is left for the next worker, so
+    a target that is down cannot keep this one busy forever.
+
+    Returns:
+        A mapping of delivery name to the Message-IDs of the digest parts
+        sent. Nothing is sent when another worker is running.
+    """
+    schedules: Dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
+    sent: Dict[str, List[str]] = dict()
+    with flocked(ctx.obj['data_dir'] / DIGEST_WORKER_LOCK) as have_lock:
+        if not have_lock:
+            logger.info('Another digest worker is running')
+            return sent
+        used_targets: Dict[str, Any] = dict()
+        failed: Set[str] = set()
+        cache = SummaryCache(ctx.obj['data_dir'] / SUMMARY_CACHE_DIR)
+        summarizers: Dict[str, Summarizer] = ctx.obj.get('summarizers', {})
+        # One run per summarizer, so failures in a row count across digests
+        runs = {name: SummaryRun(summarizer, cache) for name, summarizer in summarizers.items()}
+        poke = ctx.obj['data_dir'] / DIGEST_WORKER_POKE
+        while True:
+            poke.unlink(missing_ok=True)
+            busy = False
+            for dname in delivery_names:
+                if dname in failed:
+                    continue
+                feed, target, labels, subfolder = ctx.obj['deliveries'][dname]
+                job = DigestJob(feed.get_digest_job_dir(dname))
+                # kgl pull holds the job lock only while it collects
+                with job.locked(wait=True):
+                    if not job.exists():
+                        continue
+                    busy = True
+                    used_targets[target.identifier] = target
+                    logger.info('Digest %s: finishing the digest', dname)
+                    schedule = schedules[dname]
+                    run = runs.get(schedule.summarizer) if schedule.summarizer else None
+                    try:
+                        parts = finish_digest_job(dname, feed, target, labels, subfolder, schedule, job, run=run)
+                    except Exception:
+                        # Nobody watches the worker, so keep the traceback in its log
+                        logger.exception('Could not finish digest %s, will retry on the next run', dname)
+                        failed.add(dname)
+                        continue
+                for part in parts:
+                    logger.info('Sent digest %s: %s', dname, part['Subject'])
+                if parts:
+                    sent.setdefault(dname, []).extend(str(part['Message-ID']) for part in parts)
+            if not busy and not poke.exists():
+                break
+
+        for target in used_targets.values():
+            if hasattr(target, 'disconnect'):
+                target.disconnect()
+        removed = cache.prune(datetime.now(timezone.utc))
+        if removed:
+            logger.debug('Removed %d old cached summaries', removed)
+    return sent
+
+
+def estimate_digest(
+    delivery_name: str,
+    feed: Union[LeiFeed, LoreFeed],
+    schedule: DigestSchedule,
+    summarizer: Optional[Summarizer],
+    cache: SummaryCache,
+    bozofilter: Optional[Set[str]] = None,
+    now: Optional[datetime] = None,
+) -> List[str]:
+    """Describe what the next digest would send to its summarizer.
+
+    A waiting job is what the worker summarizes next, so it is used when
+    there is one. Otherwise the messages are read as if the digest ended
+    now. The model is never called and nothing is saved, so this is safe
+    to run at any time. The feed must be locked.
+
+    Returns:
+        The report, one line per item.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    job = DigestJob(feed.get_digest_job_dir(delivery_name))
+    with job.locked() as have_lock:
+        if not have_lock:
+            return [f'Digest {delivery_name}: the digest worker is working on it now']
+        if job.exists():
+            stage = job.load()['stage']
+            if stage != DigestJob.COLLECTED:
+                return [f'Digest {delivery_name}: already summarized, waiting to be sent']
+            raw_msgs = job.messages()
+            when = 'waiting for the digest worker'
+        else:
+            last_sent = feed.load_digest_sent(delivery_name)
+            raw_msgs = read_digest_period(delivery_name, feed, schedule, bozofilter, now, last_sent).messages
+            due = schedule.is_due(last_sent, now)
+            when = 'due now' if due else 'not due yet, counting up to now'
+
+    msgs = [parse_message(raw) for raw in raw_msgs]
+    threads = group_threads(msgs)
+    lines = [
+        f'Digest {delivery_name} ({when})',
+        f'  {len(threads):,} threads, {len(msgs):,} messages',
+    ]
+    if summarizer is None:
+        lines.append('  Plain digest, nothing to summarize')
+        return lines
+
+    where = 'on this machine' if summarizer.is_local else 'NOT on this machine'
+    lines.append(f'  Summarizer {summarizer.name}, model {summarizer.model}, {where}')
+    est = estimate_summaries(summarizer, cache, threads, msgs, schedule.max_summaries)
+    lines.append(
+        f'  No summary needed: {est.not_needed:,}, cached: {est.cached:,}, over max_summaries: {est.over_limit:,}'
+    )
+    lines.append(f'  Model calls: {est.calls:,} ({est.incremental:,} build on an earlier summary)')
+    if est.calls:
+        lines.append(
+            f'  Input: {est.input_chars:,} chars, about {estimate_tokens(est.input_chars):,} tokens; '
+            f'largest prompt {est.largest_chars:,} chars'
+        )
+    if est.cut:
+        lines.append(
+            f'  Cut to max_input_chars ({summarizer.max_input_chars:,}): {est.cut:,} prompts, '
+            f'{est.cut_chars:,} chars left out'
+        )
+    return lines
+
+
+def run_digest_estimates(ctx: click.Context, delivery_names: List[str], now: Optional[datetime] = None) -> None:
+    """Print estimate_digest() for each digest. Feeds must already be locked."""
+    schedules: Dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
+    summarizers: Dict[str, Summarizer] = ctx.obj.get('summarizers', {})
+    bozo_set = ctx.obj.get('bozofilter', set())
+    cache = SummaryCache(ctx.obj['data_dir'] / SUMMARY_CACHE_DIR)
+    for dname in delivery_names:
+        feed = ctx.obj['deliveries'][dname][0]
+        schedule = schedules[dname]
+        summarizer = summarizers[schedule.summarizer] if schedule.summarizer else None
+        try:
+            lines = estimate_digest(dname, feed, schedule, summarizer, cache, bozo_set, now=now)
+        except Exception as e:
+            logger.error('Could not estimate digest %s: %s', dname, e)
+            continue
+        click.echo('\n'.join(lines))
 
 
 def normalize_feed_key(feed_url: str) -> str:
@@ -1238,6 +1552,9 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
     templates: Dict[str, str] = dict()
     # Deliveries with mode = 'digest', and when they send
     schedules: Dict[str, DigestSchedule] = dict()
+    # The [summarizers] entries that digests use
+    summarizers: Dict[str, Summarizer] = dict()
+    summarizer_cfg: Dict[str, Any] = ctx.obj.get('config', {}).get('summarizers', {})
     logger.debug('Mapping deliveries to their feeds and targets')
     # Pre-map deliveries to their feeds and targets for later use.
     for delivery_name, details in deliveries.items():
@@ -1254,6 +1571,22 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
             raise ConfigurationError(f"Delivery '{delivery_name}': mode must be 'message' or 'digest' (got {mode!r})")
         # Map feed
         feed = get_feed_for_delivery(details, ctx)
+        sname = schedules[delivery_name].summarizer if delivery_name in schedules else None
+        if sname is not None:
+            if sname not in summarizers:
+                if not isinstance(summarizer_cfg.get(sname), dict):
+                    raise ConfigurationError(
+                        f"Delivery '{delivery_name}': summarizer '{sname}' is not defined in [summarizers]"
+                    )
+                summarizers[sname] = make_summarizer(sname, summarizer_cfg[sname])
+            summarizer = summarizers[sname]
+            # lei searches can find private mail, which must not leave the machine
+            if isinstance(feed, LeiFeed) and not summarizer.is_local and not summarizer.allow_private_feeds:
+                raise ConfigurationError(
+                    f"Delivery '{delivery_name}': summarizer '{sname}' may send mail off this machine, "
+                    'and lei feeds can hold private mail. Set allow_private_feeds = true in '
+                    f'[summarizers.{sname}] if that is fine.'
+                )
         # Map target
         target_name = details.get('target', '')
         if not target_name:
@@ -1302,6 +1635,9 @@ def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
     ctx.obj['deliveries'] = dmap
     ctx.obj['subfolder_templates'] = templates
     ctx.obj['digest_schedules'] = schedules
+    ctx.obj['summarizers'] = summarizers
+    if schedules:
+        ctx.obj['digest_worker'] = get_digest_worker_mode(ctx.obj.get('config', {}))
 
 
 def refresh_subfolder_templates(ctx: click.Context) -> None:
@@ -1953,12 +2289,20 @@ def pull(
     is_flag=True,
     help='exit with status 3 if any feed failed to update (digests are still sent)',
 )
+@click.option('--work', is_flag=True, help='run the digest worker: finish the waiting digests and exit')
+@click.option(
+    '--estimate',
+    is_flag=True,
+    help='show what the next digests would send to their summarizer, without calling it or sending anything',
+)
 @click.argument('delivery_names', type=str, nargs=-1)
 def digest_cmd(
     ctx: click.Context,
     force: bool,
     no_update: bool,
     fail_on_feed_error: bool,
+    work: bool,
+    estimate: bool,
     delivery_names: Tuple[str, ...],
 ) -> None:
     """Send the digests that are due.
@@ -1967,6 +2311,10 @@ def digest_cmd(
     send them without delivering anything else, or to send one right away
     with --force. With DELIVERY_NAMES, only those digests are checked.
     """
+    if work and force:
+        raise click.UsageError('--work finishes waiting digests, it cannot be used with --force')
+    if estimate and (work or force):
+        raise click.UsageError('--estimate only reports, it cannot be used with --work or --force')
     ctx.obj['failed_feeds'] = []
     cfg = ctx.obj.get('config', {})
     all_deliveries: Dict[str, Any] = cfg.get('deliveries', {})
@@ -1985,6 +2333,14 @@ def digest_cmd(
         return
 
     map_deliveries(ctx, digests)
+    if work:
+        # Jobs hold everything they need, so feeds are not locked or updated
+        try:
+            run_digest_worker(ctx, list(digests))
+        finally:
+            ctx.obj['targets'] = {}
+        return
+
     with abort_if_feed_locked():
         lock_all_feeds(ctx)
     try:
@@ -1992,9 +2348,12 @@ def digest_cmd(
             logger.debug('No-update flag set, skipping feed updates')
         else:
             update_all_feeds(ctx)
-        sent = run_due_digests(ctx, list(digests), force=force)
-        if not sent:
-            logger.info('No digests were due.')
+        if estimate:
+            run_digest_estimates(ctx, list(digests))
+        else:
+            sent = run_due_digests(ctx, list(digests), force=force)
+            if not sent:
+                logger.info('No digests were due.')
     finally:
         unlock_all_feeds(ctx)
         close_requests_session()

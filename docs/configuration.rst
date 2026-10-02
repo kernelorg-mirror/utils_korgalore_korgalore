@@ -747,6 +747,159 @@ How digests are sent:
 * Lei feeds link to ``https://lore.kernel.org/all/``, because lei results
   can come from any list
 
+Summarized Digests
+~~~~~~~~~~~~~~~~~~
+
+A digest can also have a short summary of each thread, written by a
+language model. You choose the model: a local one (with Ollama,
+llama.cpp, vLLM or LM Studio) or a hosted one. To try it, add a
+``[summarizers]`` entry and point the digest at it:
+
+.. code-block:: toml
+
+   [deliveries.lkml-digest]
+   feed = 'lkml'
+   target = 'personal'
+   mode = 'digest'
+   summarizer = 'local'
+   max_summaries = 50    # optional
+
+   [summarizers.local]
+   type = 'openai'
+   url = 'http://localhost:11434/v1'
+   model = 'qwen3:32b'
+
+Before the first real digest, run ``kgl digest --estimate`` to see how
+many threads would be summarized and how much text would be sent. It
+doesn't call the model and doesn't send anything.
+
+Digest parameters for summaries:
+
+* ``summarizer``: The name of a ``[summarizers]`` entry. Without it, the
+  digest has no summaries
+* ``max_summaries``: (Optional) The most new summaries in one digest.
+  Summaries that korgalore made before don't count. The busiest threads
+  (the most new messages) get their summaries first. The other threads
+  are still in the digest, with a note that the limit was reached
+
+Summarizer parameters, for every type:
+
+* ``type``: ``'openai'`` or ``'command'`` (see below)
+* ``max_input_chars``: (Optional) The most characters sent for one
+  thread (default 24000, at least 1000). See "Long threads" below
+* ``timeout``: (Optional) Seconds to wait for one summary (default 120)
+* ``allow_private_feeds``: (Optional) Allow this summarizer for lei feeds
+  (default ``false``). See "Privacy" below
+
+``type = 'openai'`` works with any server that has an OpenAI-compatible
+chat API. This includes Ollama, llama.cpp, vLLM, LM Studio and most
+hosted services:
+
+* ``url``: The API base URL, such as ``'http://localhost:11434/v1'``
+* ``model``: The model name, as the server knows it
+* ``api_key_file``: (Optional) A file with the API key, for servers that
+  need one
+
+``type = 'command'`` runs a program for each thread. The program gets
+the instructions and the thread on stdin, and writes the summary to
+stdout. This works with tools like ``llm`` or ``claude -p``:
+
+* ``command``: The command to run, such as ``'llm -m mistral'``. It is
+  split like a shell command line, but no shell runs it
+* ``model``: (Optional) The model name to record in the digest headers
+  and the summary cache. Without it, the program name is used, such as
+  ``llm``. The full command line is never recorded, since it may hold
+  an API key
+
+.. code-block:: toml
+
+   [summarizers.claude]
+   type = 'command'
+   command = 'claude -p --model sonnet'
+
+What goes into a summary:
+
+* Summaries are marked "machine-generated", and the model name is in the
+  ``X-Korgalore-Digest-Model`` header of the digest email
+* The facts in a digest (message and patch counts, versions, review
+  trailers) never come from the model, so a wrong summary cannot fake a
+  ``Reviewed-by``
+* The model does not see the review trailers in patches and cover
+  letters. A patch often carries them from earlier versions of the
+  series, and the model would report those old reviews as new
+* A new thread that nobody answered gets no summary: its facts already
+  say everything. It is still listed. A new patch series is different:
+  it gets a summary of what it changes and why, even before anybody
+  answers
+* Before a thread is sent, quoted text is removed and each patch is
+  replaced with a short note, such as
+  ``[diff: 42 lines; 2 files: mm/a.c, mm/b.c]``. Models with a reasoning
+  step work too: only the answer goes into the digest
+* **Long threads:** a thread longer than ``max_input_chars`` keeps its
+  first message and its newest ones, and the model is told how many
+  messages in the middle were left out
+* Each summary is saved in ``summaries/`` in the data directory for 30
+  days. A thread that gets new replies sends only the new messages plus
+  its earlier summary, so long threads stay cheap. A different model
+  starts again from the messages
+* If the model fails (it's down, it times out, or it gives an error),
+  the digest is still sent. The thread says "Summary unavailable." and
+  keeps all its facts. After 3 failures in a row, korgalore stops trying
+  until the next run
+
+.. tip::
+   Ollama has a small context window by default, and it cuts longer
+   prompts without an error. The model then sees only part of the
+   thread. korgalore warns you when it notices this. Set
+   ``OLLAMA_CONTEXT_LENGTH`` to at least 8192 for the Ollama server, or
+   lower ``max_input_chars``.
+
+The Digest Worker
+^^^^^^^^^^^^^^^^^
+
+A local model can take a long time to summarize a busy day. So
+``kgl pull`` doesn't wait for it: it only collects the messages of a
+summarized digest, and then starts the **digest worker** in the
+background. The worker summarizes the threads and sends the digest.
+Meanwhile, ``kgl pull`` keeps running as usual. Only one worker runs at
+a time. A worker that korgalore starts writes its log to
+``digest-worker.log`` in the data directory. A worker that you start
+yourself with ``kgl digest --work`` logs like any other ``kgl`` command.
+
+You choose how the worker starts in the ``[digests]`` section:
+
+.. code-block:: toml
+
+   [digests]
+   worker = 'spawn'    # or 'external'
+
+* ``worker``: ``'spawn'`` (the default) starts the worker from
+  ``kgl pull`` and the GUI. ``'external'`` never starts it: you run
+  ``kgl digest --work`` yourself, for example from its own timer
+
+.. warning::
+   If you run ``kgl pull`` from a systemd service with
+   ``Type=oneshot``, systemd stops the worker as soon as ``kgl pull``
+   exits. This is because of the default ``KillMode=control-group``.
+   Use ``worker = 'external'`` and run ``kgl digest --work`` from its
+   own service (see "Automated Pulls" in the usage docs). A stopped
+   worker doesn't lose its work: the next one starts from the saved
+   summaries.
+
+Privacy
+^^^^^^^
+
+Lore lists are public, so their messages can go to any model. A lei
+feed is different: it can include your **private mail**. So korgalore
+refuses to use a lei feed with a summarizer that is not on your
+machine, unless that summarizer sets ``allow_private_feeds = true``.
+An ``openai`` summarizer is on your machine when its URL points to
+``localhost`` (or ``127.0.0.1``). A ``command`` summarizer could send
+the text anywhere, so korgalore never treats it as local.
+
+For any feed, korgalore also logs a warning when it sends threads to a
+summarizer that is not on your machine.
+
 Gmail Labels
 ------------
 
@@ -898,7 +1051,8 @@ This directory contains:
 * Cloned git repositories for each lore mailing list
 * Epoch tracking information
 * Metadata about imported messages
-* Digests on their way out
+* Digests on their way out, saved summaries (``summaries/``) and the
+  log of a digest worker that korgalore started (``digest-worker.log``)
 
 You can override this by setting the ``XDG_DATA_HOME`` environment
 variable, but then korgalore will lose your existing clones, so this is
