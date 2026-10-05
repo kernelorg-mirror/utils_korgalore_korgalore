@@ -22,7 +22,9 @@ def run_search(tmp_path: Path, threads: bool = False) -> Tuple[List[str], Option
     with mock.patch('korgalore.tracking.run_lei_command', return_value=(0, b'')) as mock_lei:
         create_lei_query_search(QUERY, tmp_path / 'lei' / 'search', threads=threads)
     mock_lei.assert_called_once()
-    return mock_lei.call_args.args[0], mock_lei.call_args.kwargs.get('stdin')
+    args: List[str] = mock_lei.call_args.args[0]
+    stdin: Optional[bytes] = mock_lei.call_args.kwargs.get('stdin')
+    return args, stdin
 
 
 class TestCreateLeiQuerySearch:
