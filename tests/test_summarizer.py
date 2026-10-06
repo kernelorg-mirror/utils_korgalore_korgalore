@@ -166,9 +166,9 @@ class TestOpenAI:
             openai(server, session).summarize('x')
 
     def test_timeout(self, server: FakeServer, session: requests.Session) -> None:
-        server.delay = 1.0
+        server.delay = 0.3
         with pytest.raises(SummarizerError, match='could not reach'):
-            openai(server, session, timeout=0.1).summarize('x')
+            openai(server, session, timeout=0.05).summarize('x')
 
     def test_server_down(self, session: requests.Session) -> None:
         fake = FakeServer()
@@ -268,7 +268,7 @@ class TestCommand:
 
     def test_timeout(self) -> None:
         with pytest.raises(SummarizerError, match='longer than'):
-            CommandSummarizer('s', 'sleep 5', timeout=0.2).summarize('x')
+            CommandSummarizer('s', 'sleep 5', timeout=0.05).summarize('x')
 
     def test_empty_output(self) -> None:
         with pytest.raises(SummarizerError, match='empty'):

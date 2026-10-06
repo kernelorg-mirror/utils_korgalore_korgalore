@@ -51,6 +51,7 @@ from tests.digest_helpers import (
     digest_text,
     job_of,
     make_ctx,
+    make_raw,
     send,
     summarized_ctx,
     worker_ctx,
@@ -175,7 +176,7 @@ class TestWorker:
         # kgl pull holds the job lock while it collects
         with job_of(repo).locked():
             worker.start()
-            assert not done.wait(0.3)
+            assert not done.wait(0.1)
             assert delivered(maildir) == []
         worker.join(timeout=30)
         assert done.is_set()
@@ -326,9 +327,16 @@ class TestSummarizedDigest:
     def test_failures_count_across_digests(self, tmp_path: Path, answered: InboxRepo, maildir: MaildirTarget) -> None:
         """One run gives up on a dead summarizer, even across digests."""
         other = InboxRepo(tmp_path / 'netdev')
-        for number in range(FAILURES_MAX):
-            other.add_msg(f'n{number}@x', NOW - timedelta(hours=2))
-            other.add_msg(f'nr{number}@x', NOW - timedelta(hours=1), sender=BOB, irt=f'n{number}@x')
+        other.add_many(
+            [
+                (make_raw(f'{kind}{n}@x', f'[PATCH] n{n}@x', **extra), when, 'm')
+                for n in range(FAILURES_MAX)
+                for kind, when, extra in (
+                    ('n', NOW - timedelta(hours=2), {}),
+                    ('nr', NOW - timedelta(hours=1), {'sender': BOB, 'irt': f'n{n}@x'}),
+                )
+            ]
+        )
         other_feed = other.feed()
         assert collect_digest(
             'netdev-digest', other_feed, DAILY, DigestJob(other_feed.get_digest_job_dir('netdev-digest')), now=NOW

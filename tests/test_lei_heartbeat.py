@@ -47,7 +47,7 @@ class TestReportStillRunning:
         thread.start()
         try:
             # Several intervals' worth of waiting, then stop it.
-            finished.wait(0.1)
+            finished.wait(0.05)
         finally:
             finished.set()
         thread.join(timeout=5)
@@ -104,11 +104,11 @@ class TestRunLeiCommandHeartbeat:
         the command genuinely takes longer than the interval.
         """
         with mock.patch.object(korgalore, 'LEICMD', 'sleep'):
-            with mock.patch.object(korgalore, 'LEI_HEARTBEAT_INTERVAL', 0.05):
-                returncode, _ = run_lei_command(['0.3'])
+            with mock.patch.object(korgalore, 'LEI_HEARTBEAT_INTERVAL', 0.02):
+                returncode, _ = run_lei_command(['0.1'])
 
         assert returncode == 0
-        assert any('Still running lei 0.3' in r.getMessage() for r in korgalore_logs.records)
+        assert any('Still running lei 0.1' in r.getMessage() for r in korgalore_logs.records)
         wait_for_no_heartbeat()
 
     def test_uses_the_interval_set_at_call_time(self) -> None:

@@ -4,17 +4,20 @@ import mailbox
 import os
 import re
 import subprocess
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple
+from unittest.mock import patch
 
 import click
 
 from korgalore.cli import SUMMARY_CACHE_DIR, collect_digest, send_digest
-from korgalore.digest import DigestJob, DigestSchedule
+from korgalore.digest import DigestJob, DigestSchedule, render_digest_parts
 from korgalore.lore_feed import LoreFeed
 from korgalore.maildir_target import MaildirTarget
 from korgalore.summarizer import DEFAULT_MAX_INPUT_CHARS, SummarizerError, SummaryCache
@@ -89,25 +92,37 @@ class InboxRepo:
         return result.stdout.decode().strip()
 
     def add(self, raw: bytes, when: datetime, filename: str = 'm') -> str:
-        blob = self._git('hash-object', '-w', '--stdin', stdin=raw)
-        tree = self._git('mktree', stdin=f'100644 blob {blob}\t{filename}\n'.encode())
-        parent = ['-p', self.head] if self.head else []
-        stamp = when.isoformat()
-        env = {
-            'GIT_AUTHOR_NAME': 'pi',
-            'GIT_AUTHOR_EMAIL': 'pi@localhost',
-            'GIT_COMMITTER_NAME': 'pi',
-            'GIT_COMMITTER_EMAIL': 'pi@localhost',
-            'GIT_AUTHOR_DATE': stamp,
-            'GIT_COMMITTER_DATE': stamp,
-        }
-        commit = self._git('commit-tree', tree, *parent, '-m', 'msg', env=env)
-        self._git('update-ref', 'refs/heads/master', commit)
-        self.head = commit
-        return commit
+        return self.add_many([(raw, when, filename)])[0]
+
+    def add_many(self, items: Sequence[Tuple[bytes, datetime, str]]) -> List[str]:
+        """Commit (raw, when, filename) triples in one git fast-import run.
+
+        Each message is one commit, as public-inbox writes them, but a
+        single git process imports them all. Returns the commit hashes.
+        """
+        stream = bytearray()
+        for mark, (raw, when, filename) in enumerate(items, 1):
+            stamp = f'{int(when.timestamp())} {when.strftime("%z") or "+0000"}'
+            stream += f'commit refs/heads/master\nmark :{mark}\n'.encode()
+            stream += f'author pi <pi@localhost> {stamp}\ncommitter pi <pi@localhost> {stamp}\n'.encode()
+            stream += b'data 3\nmsg\n'
+            if mark == 1 and self.head:
+                stream += f'from {self.head}\n'.encode()
+            stream += b'deleteall\n'
+            stream += f'M 100644 inline {filename}\ndata {len(raw)}\n'.encode() + raw + b'\n'
+        marks = self.gitdir / 'marks'
+        self._git('fast-import', '--quiet', '--date-format=raw', f'--export-marks={marks}', stdin=bytes(stream))
+        commits = [line.split()[1] for line in marks.read_text().splitlines()]
+        marks.unlink()
+        self.head = commits[-1]
+        return commits
 
     def add_msg(self, msgid: str, when: datetime, **kwargs: Any) -> str:
         return self.add(make_raw(msgid, kwargs.pop('subject', f'[PATCH] {msgid}'), **kwargs), when)
+
+    def add_msgs(self, *msgs: Tuple[str, datetime]) -> List[str]:
+        """add_msg for several (msgid, when) pairs, in one git run."""
+        return self.add_many([(make_raw(msgid, f'[PATCH] {msgid}'), when, 'm') for msgid, when in msgs])
 
     def feed(self) -> LoreFeed:
         return LoreFeed('lkml', self.feed_dir, 'https://lore.kernel.org/lkml')
@@ -211,6 +226,19 @@ def job_of(repo: InboxRepo) -> DigestJob:
 def send_parts(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> List[EmailMessage]:
     sched = kwargs.pop('schedule', DAILY)
     return send_digest(DNAME, repo.feed(), target, ['digests'], None, sched, now=now, **kwargs)
+
+
+@contextmanager
+def small_parts(max_size: int = 1) -> Generator[None, None, None]:
+    """Make send_digest split its digest at max_size bytes.
+
+    render_digest_parts binds DIGEST_PART_MAX as a default argument, and
+    the cli calls it without one, so the only way to get several parts
+    out of a handful of threads is to hand the cli a different function.
+    At the default of 1 every thread is a part of its own.
+    """
+    with patch('korgalore.cli.render_digest_parts', partial(render_digest_parts, max_size=max_size)):
+        yield
 
 
 def send(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> Optional[EmailMessage]:

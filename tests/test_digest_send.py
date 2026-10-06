@@ -6,7 +6,6 @@ called. Each "run" builds a new feed object, the same way every kgl run
 does, so no cache can hide a bug.
 """
 
-import functools
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,7 +18,6 @@ from click.testing import CliRunner
 
 import liblore
 from korgalore import AuthenticationError, ConfigurationError, StateError
-from korgalore import digest as digest_mod
 from korgalore.cli import (
     digest_cmd,
     look_up_root_subjects,
@@ -53,6 +51,7 @@ from tests.digest_helpers import (
     part_text,
     send,
     send_parts,
+    small_parts,
 )
 
 UTC = timezone.utc
@@ -544,24 +543,15 @@ class TestDigestCommand:
         env['map'].assert_not_called()
 
 
-@pytest.fixture
-def small_parts() -> Iterator[None]:
-    """Split digests into parts of 4000 bytes, so a few threads are enough."""
-    small = functools.partial(digest_mod.render_digest_parts, max_size=4000)
-    with patch('korgalore.cli.render_digest_parts', small):
-        yield
-
-
-@pytest.mark.usefixtures('small_parts')
 class TestSplitDelivery:
     @staticmethod
     def add_threads(repo: InboxRepo, count: int) -> None:
-        for n in range(count):
-            repo.add_msg(f't{n}@x', NOW - timedelta(hours=8) + timedelta(minutes=n))
+        repo.add_msgs(*((f't{n}@x', NOW - timedelta(hours=8) + timedelta(minutes=n)) for n in range(count)))
 
     def test_parts_are_sent_in_order(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        self.add_threads(repo, 30)
-        parts = send_parts(repo, maildir)
+        self.add_threads(repo, 4)
+        with small_parts():
+            parts = send_parts(repo, maildir)
 
         assert len(parts) > 1
         subjects = [str(msg['Subject']) for msg in delivered(maildir)]
@@ -572,10 +562,10 @@ class TestSplitDelivery:
         assert not job_of(repo).path.exists()
 
     def test_failed_part_is_resumed(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        self.add_threads(repo, 30)
+        self.add_threads(repo, 4)
         flaky = FlakyTarget(maildir, fail_on=[3])
 
-        with pytest.raises(RuntimeError):
+        with small_parts(), pytest.raises(RuntimeError):
             send_parts(repo, flaky)
         assert len(delivered(maildir)) == 2
         # State is not saved until the last part is in
@@ -584,10 +574,12 @@ class TestSplitDelivery:
 
         # A new message arrives before the next run: it waits for the next digest
         repo.add_msg('late@x', NOW + timedelta(minutes=30))
-        rest = send_parts(repo, maildir, now=NOW + timedelta(hours=1))
+        with small_parts():
+            rest = send_parts(repo, maildir, now=NOW + timedelta(hours=1))
 
         everything = delivered(maildir)
         total = int(str(everything[0]['X-Korgalore-Digest-Part']).split('/')[1])
+        assert total == 4
         assert len(rest) == total - 2
         # Every part arrived exactly once, and all of them are one digest
         numbers = sorted(int(str(msg['X-Korgalore-Digest-Part']).split('/')[0]) for msg in everything)
@@ -606,11 +598,12 @@ class TestSplitDelivery:
 
     def test_resume_comes_before_schedule(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
         """Left-over parts go out on the next run, even when no digest is due."""
-        self.add_threads(repo, 30)
-        with pytest.raises(RuntimeError):
-            send_parts(repo, FlakyTarget(maildir, fail_on=[1]))
-        assert delivered(maildir) == []
-        assert len(send_parts(repo, maildir, now=NOW + timedelta(minutes=5))) > 1
+        self.add_threads(repo, 4)
+        with small_parts():
+            with pytest.raises(RuntimeError):
+                send_parts(repo, FlakyTarget(maildir, fail_on=[1]))
+            assert delivered(maildir) == []
+            assert len(send_parts(repo, maildir, now=NOW + timedelta(minutes=5))) == 4
 
     def test_unfinished_job_is_thrown_away(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
         """Without a job file, the job was never finished, so start again."""
