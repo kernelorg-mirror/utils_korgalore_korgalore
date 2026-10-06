@@ -7,13 +7,12 @@ leaves no trace: no job, no saved state, no cached summaries.
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
-from unittest.mock import MagicMock, patch
+from typing import Any, List, Optional
+from unittest.mock import patch
 
 import pytest
-from click.testing import CliRunner
 
-from korgalore.cli import digest_cmd, estimate_digest, run_digest_estimates, summarize_digest_job
+from korgalore.cli import estimate_digest, run_digest_estimates, summarize_digest_job
 from korgalore.digest import DigestSchedule
 from korgalore.maildir_target import MaildirTarget
 from korgalore.summarizer import SummaryCache, SummaryRun
@@ -23,6 +22,7 @@ from tests.digest_helpers import (
     NOW,
     InboxRepo,
     RecordingSummarizer,
+    answered_repo,
     cache_of,
     collect,
     job_of,
@@ -34,13 +34,9 @@ SUMMARIZED = DigestSchedule(summarizer='local')
 
 
 @pytest.fixture
-def repo(tmp_path: Path) -> InboxRepo:
+def repo(repo: InboxRepo) -> InboxRepo:
     """a@x gets an answer; lonely@x does not."""
-    repo = InboxRepo(tmp_path / 'lkml')
-    repo.add_msg('a@x', NOW - timedelta(hours=3))
-    repo.add_msg('r@x', NOW - timedelta(hours=2), sender=BOB, irt='a@x')
-    repo.add_msg('lonely@x', NOW - timedelta(hours=1))
-    return repo
+    return answered_repo(repo)
 
 
 def estimate(
@@ -108,31 +104,51 @@ class TestEstimateDigest:
             lines = estimate(repo, cache, RecordingSummarizer())
         assert lines == [f'Digest {DNAME}: the digest worker is working on it now']
 
-    def test_cached_summaries_cost_nothing(self, repo: InboxRepo, cache: SummaryCache) -> None:
-        cache.store('a@x', 'qwen3:32b', 'from before', ['a@x', 'r@x'], NOW)
-        lines = estimate(repo, cache, RecordingSummarizer())
-
-        assert '  No summary needed: 1, cached: 1, over max_summaries: 0' in lines
-        assert '  Model calls: 0 (0 build on an earlier summary)' in lines
-        assert not any(line.startswith('  Input:') for line in lines)
-
-    def test_summary_instructions(self, repo: InboxRepo, cache: SummaryCache) -> None:
-        """A summary made without the instructions is not counted as cached."""
-        cache.store('a@x', 'qwen3:32b', 'from before', ['a@x', 'r@x'], NOW)
-        schedule = DigestSchedule(summarizer='local', summary_instructions='Tell me if anyone sounds upset.')
+    @pytest.mark.parametrize(
+        ('cached', 'extra_thread', 'schedule', 'counts', 'calls'),
+        [
+            pytest.param(
+                True, False, SUMMARIZED, 'cached: 1, over max_summaries: 0', 0, id='cached-summaries-cost-nothing'
+            ),
+            # A summary made without the instructions is not counted as cached
+            pytest.param(
+                True,
+                False,
+                DigestSchedule(summarizer='local', summary_instructions='Tell me if anyone sounds upset.'),
+                'cached: 0, over max_summaries: 0',
+                1,
+                id='summary-instructions',
+            ),
+            pytest.param(
+                False,
+                True,
+                DigestSchedule(summarizer='local', max_summaries=1),
+                'cached: 0, over max_summaries: 1',
+                1,
+                id='max-summaries',
+            ),
+        ],
+    )
+    def test_summary_counts(
+        self,
+        repo: InboxRepo,
+        cache: SummaryCache,
+        cached: bool,
+        extra_thread: bool,
+        schedule: DigestSchedule,
+        counts: str,
+        calls: int,
+    ) -> None:
+        if cached:
+            cache.store('a@x', 'qwen3:32b', 'from before', ['a@x', 'r@x'], NOW)
+        if extra_thread:
+            repo.add_msg('b@x', NOW - timedelta(minutes=30))
+            repo.add_msg('rb@x', NOW - timedelta(minutes=20), sender=BOB, irt='b@x')
         lines = estimate(repo, cache, RecordingSummarizer(), schedule=schedule)
 
-        assert '  No summary needed: 1, cached: 0, over max_summaries: 0' in lines
-        assert '  Model calls: 1 (0 build on an earlier summary)' in lines
-
-    def test_max_summaries(self, repo: InboxRepo, cache: SummaryCache) -> None:
-        repo.add_msg('b@x', NOW - timedelta(minutes=30))
-        repo.add_msg('rb@x', NOW - timedelta(minutes=20), sender=BOB, irt='b@x')
-        schedule = DigestSchedule(summarizer='local', max_summaries=1)
-        lines = estimate(repo, cache, RecordingSummarizer(), schedule=schedule)
-
-        assert '  No summary needed: 1, cached: 0, over max_summaries: 1' in lines
-        assert '  Model calls: 1 (0 build on an earlier summary)' in lines
+        assert f'  No summary needed: 1, {counts}' in lines
+        assert f'  Model calls: {calls} (0 build on an earlier summary)' in lines
+        assert any(line.startswith('  Input:') for line in lines) == (calls > 0)
 
     def test_remote_summarizer_stands_out(self, repo: InboxRepo, cache: SummaryCache) -> None:
         fake = RecordingSummarizer()
@@ -183,52 +199,3 @@ class TestRunEstimates:
             run_digest_estimates(ctx, [DNAME, 'other'], now=NOW)
         assert est.call_count == 2
         assert 'Could not estimate digest lkml-digest: disk on fire' in caplog.text
-
-
-class TestEstimateCommand:
-    @pytest.fixture
-    def env(self) -> Iterator[Dict[str, MagicMock]]:
-        mocks = {name: MagicMock() for name in ('map', 'lock', 'unlock', 'update', 'estimate', 'due', 'work')}
-        with (
-            patch('korgalore.cli.map_deliveries', mocks['map']),
-            patch('korgalore.cli.lock_all_feeds', mocks['lock']),
-            patch('korgalore.cli.unlock_all_feeds', mocks['unlock']),
-            patch('korgalore.cli.update_all_feeds', mocks['update']),
-            patch('korgalore.cli.run_digest_estimates', mocks['estimate']),
-            patch('korgalore.cli.run_due_digests', mocks['due']),
-            patch('korgalore.cli.run_digest_worker', mocks['work']),
-        ):
-            yield mocks
-
-    @staticmethod
-    def _invoke(*args: str) -> Any:
-        obj = {'config': {'deliveries': {DNAME: {'feed': 'lkml', 'target': 'local', 'mode': 'digest'}}}, 'targets': {}}
-        return CliRunner().invoke(digest_cmd, list(args), obj=obj)
-
-    def test_estimate_sends_nothing(self, env: Dict[str, MagicMock]) -> None:
-        result = self._invoke('--estimate')
-        assert result.exit_code == 0, result.output
-        assert env['estimate'].call_args.args[1] == [DNAME]
-        env['due'].assert_not_called()
-        # Reading the feed needs the lock, like a real digest
-        env['lock'].assert_called_once()
-        env['unlock'].assert_called_once()
-        env['update'].assert_called_once()
-
-    def test_no_update(self, env: Dict[str, MagicMock]) -> None:
-        assert self._invoke('--estimate', '--no-update').exit_code == 0
-        env['update'].assert_not_called()
-        env['estimate'].assert_called_once()
-
-    @pytest.mark.parametrize('other', ['--force', '--work'])
-    def test_estimate_only_reports(self, env: Dict[str, MagicMock], other: str) -> None:
-        result = self._invoke('--estimate', other)
-        assert result.exit_code == 2
-        assert 'only reports' in result.output
-        env['map'].assert_not_called()
-        env['estimate'].assert_not_called()
-        env['due'].assert_not_called()
-        env['work'].assert_not_called()
-
-    def test_estimate_is_listed(self) -> None:
-        assert '--estimate' in CliRunner().invoke(digest_cmd, ['--help']).output

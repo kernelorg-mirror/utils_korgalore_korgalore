@@ -11,7 +11,7 @@ import json
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +19,7 @@ import pytest
 from korgalore import RemoteError, StateError
 from korgalore.cli import digest_history_needs, send_digest, update_all_feeds
 from korgalore.lei_feed import LeiFeed
-from korgalore.lore_feed import HISTORY_MAX, LoreFeed
+from korgalore.lore_feed import LoreFeed
 from korgalore.maildir_target import MaildirTarget
 from korgalore.pi_feed import PIFeed
 from tests.digest_helpers import DAILY, DNAME, NOW, UTC, InboxRepo, ShallowCopy, digest_text, make_ctx
@@ -37,18 +37,18 @@ def write_info(feed_dir: Path, info: Dict[str, Any]) -> LoreFeed:
 
 
 class TestShallowSince:
-    def test_no_digest_uses_the_default(self) -> None:
-        assert LoreFeed.shallow_since(None, NOW) is None
-
-    def test_recent_digest_uses_the_default(self) -> None:
-        assert LoreFeed.shallow_since(NOW - timedelta(days=3), NOW) is None
-
-    def test_old_digest_keeps_its_history(self) -> None:
-        assert LoreFeed.shallow_since(NOW - timedelta(days=10), NOW) == '2026-09-21 09:00:00 +0000'
-
-    def test_very_old_digest_is_capped(self) -> None:
-        assert HISTORY_MAX == timedelta(days=30)
-        assert LoreFeed.shallow_since(NOW - timedelta(days=90), NOW) == '2026-09-01 09:00:00 +0000'
+    @pytest.mark.parametrize(
+        ('days', 'expected'),
+        [
+            pytest.param(None, None, id='no-digest-uses-the-default'),
+            pytest.param(3, None, id='recent-digest-uses-the-default'),
+            pytest.param(10, '2026-09-21 09:00:00 +0000', id='old-digest-keeps-its-history'),
+            pytest.param(90, '2026-09-01 09:00:00 +0000', id='very-old-digest-is-capped'),
+        ],
+    )
+    def test_shallow_since(self, days: Optional[int], expected: Optional[str]) -> None:
+        last_sent = None if days is None else NOW - timedelta(days=days)
+        assert LoreFeed.shallow_since(last_sent, NOW) == expected
 
 
 class TestFetchEpoch:
@@ -64,17 +64,21 @@ class TestFetchEpoch:
                 calls: List[List[str]] = [c.args[1] for c in git.call_args_list]
         return calls
 
-    def test_default_fetch(self, tmp_path: Path) -> None:
-        calls = self.fetch(tmp_path, [(0, b'', b'')])
-        assert calls == [['fetch', 'origin', '--shallow-since=1.week.ago', '--update-shallow']]
-
     def test_default_falls_back_to_depth_one(self, tmp_path: Path) -> None:
         calls = self.fetch(tmp_path, [(128, b'', b'no commits'), (0, b'', b'')])
         assert calls[1] == ['fetch', 'origin', '--depth=1', '--update-shallow']
 
-    def test_digest_keeps_history(self, tmp_path: Path) -> None:
-        calls = self.fetch(tmp_path, [(0, b'', b'')], keep=NOW - timedelta(days=10))
-        assert calls == [['fetch', 'origin', '--shallow-since=2026-09-21 09:00:00 +0000', '--update-shallow']]
+    @pytest.mark.parametrize(
+        ('days', 'since'),
+        [
+            pytest.param(None, '1.week.ago', id='default'),
+            pytest.param(10, '2026-09-21 09:00:00 +0000', id='digest-keeps-history'),
+        ],
+    )
+    def test_fetch_command(self, tmp_path: Path, days: Optional[int], since: str) -> None:
+        keep = None if days is None else NOW - timedelta(days=days)
+        calls = self.fetch(tmp_path, [(0, b'', b'')], keep=keep)
+        assert calls == [['fetch', 'origin', f'--shallow-since={since}', '--update-shallow']]
 
     def test_digest_fallback_never_cuts_history(self, tmp_path: Path) -> None:
         """--depth=1 would throw away what the digest needs, so do a plain fetch."""
@@ -228,31 +232,24 @@ class TestRealHistory:
         assert len(parts) == 1
         return digest_body(parts[0])
 
-    def test_vacation_loses_nothing(self, tmp_path: Path, upstream: InboxRepo) -> None:
+    @pytest.mark.parametrize(
+        'shrink_first', [False, True], ids=['vacation-loses-nothing', 'lost-history-is-fetched-back']
+    )
+    def test_history_is_kept(self, tmp_path: Path, upstream: InboxRepo, shrink_first: bool) -> None:
+        """A feed that already lost history (older korgalore) gets it back."""
         local = self.first_digest(upstream, tmp_path, days_ago=28)
         upstream.add_msg('vacation@x', NOW - timedelta(days=20))
         upstream.add_msg('recent@x', NOW - timedelta(days=3))
+        if shrink_first:
+            local.fetch(since=NOW - timedelta(days=7))
+            feed = local.feed()
+            assert feed.find_history_gap(DNAME, feed.get_latest_commits_for_delivery(DNAME)) is not None
 
         self.fetch_for_digest(local)
 
         text = self.next_digest(local, tmp_path)
         assert 'vacation@x' in text
         assert 'recent@x' in text
-        assert 'Some messages are missing' not in text
-
-    def test_lost_history_is_fetched_back(self, tmp_path: Path, upstream: InboxRepo) -> None:
-        """A feed that already lost history (older korgalore) gets it back."""
-        local = self.first_digest(upstream, tmp_path, days_ago=28)
-        upstream.add_msg('vacation@x', NOW - timedelta(days=20))
-        upstream.add_msg('recent@x', NOW - timedelta(days=3))
-        local.fetch(since=NOW - timedelta(days=7))
-        feed = local.feed()
-        assert feed.find_history_gap(DNAME, feed.get_latest_commits_for_delivery(DNAME)) is not None
-
-        self.fetch_for_digest(local)
-
-        text = self.next_digest(local, tmp_path)
-        assert 'vacation@x' in text
         assert 'Some messages are missing' not in text
 
     def test_very_long_vacation_is_capped(self, tmp_path: Path, upstream: InboxRepo) -> None:
@@ -282,21 +279,40 @@ class TestHistoryGap:
     def upstream(self, tmp_path: Path) -> InboxRepo:
         return InboxRepo(tmp_path / 'upstream')
 
-    def test_gap_is_found(self, tmp_path: Path, upstream: InboxRepo) -> None:
-        # Four weeks of vacation: the cut moves past the pointer
+    @pytest.fixture
+    def gapped(self, tmp_path: Path, upstream: InboxRepo) -> Tuple[ShallowCopy, MaildirTarget, datetime]:
+        """Four weeks of vacation: the cut moves past the pointer.
+
+        Returns the clone, the target of the first digest, and the time of the
+        only message that is still visible.
+        """
         upstream.add_msg('older@x', NOW - timedelta(days=29))
-        pointer = upstream.add_msg('before@x', NOW - timedelta(days=28))
+        upstream.add_msg('before@x', NOW - timedelta(days=28, hours=1))
         local = ShallowCopy(upstream, tmp_path / 'lkml', since=NOW - timedelta(days=35))
-        local.feed().save_delivery_info(DNAME, 0, pointer, digest_sent=NOW - timedelta(days=28))
+        maildir = MaildirTarget('local', str(tmp_path / 'mail'))
+        send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=NOW - timedelta(days=28))
         upstream.add_msg('lost@x', NOW - timedelta(days=20))
         after = NOW - timedelta(days=3)
         upstream.add_msg('kept@x', after)
         local.fetch(since=NOW - timedelta(days=7))
+        return local, maildir, after
 
+    def test_gap_is_found(self, gapped: Tuple[ShallowCopy, MaildirTarget, datetime]) -> None:
+        local, _, after = gapped
         feed = local.feed()
         commits = feed.get_latest_commits_for_delivery(DNAME)
         assert len(commits) == 1  # lost@x is hidden by the cut
         assert feed.find_history_gap(DNAME, commits) == after
+
+    def test_digest_says_messages_are_missing(self, gapped: Tuple[ShallowCopy, MaildirTarget, datetime]) -> None:
+        local, maildir, _ = gapped
+        parts = send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=NOW)
+
+        assert len(parts) == 1
+        text = digest_body(parts[0])
+        assert 'Some messages are missing.' in text
+        assert 'kept@x' in text
+        assert 'lost@x' not in text
 
     def test_cut_right_after_pointer_is_no_gap(self, tmp_path: Path, upstream: InboxRepo) -> None:
         """The first commit after the cut can be the one right after the pointer."""
@@ -313,43 +329,21 @@ class TestHistoryGap:
         assert len(commits) == 1
         assert feed.find_history_gap(DNAME, commits) is None
 
-    def test_pointer_inside_history_is_no_gap(self, tmp_path: Path, upstream: InboxRepo) -> None:
-        upstream.add_msg('old@x', NOW - timedelta(days=6))
-        pointer = upstream.add_msg('before@x', NOW - timedelta(days=2))
-        local = ShallowCopy(upstream, tmp_path / 'lkml', since=NOW - timedelta(days=7))
-        local.feed().save_delivery_info(DNAME, 0, pointer, digest_sent=NOW - timedelta(days=2))
+    @pytest.mark.parametrize('shallow', [True, False], ids=['pointer-inside-history', 'full-clone'])
+    def test_no_gap(self, tmp_path: Path, upstream: InboxRepo, shallow: bool) -> None:
+        age = timedelta(days=2 if shallow else 30)
+        if shallow:
+            upstream.add_msg('old@x', NOW - timedelta(days=6))
+        pointer = upstream.add_msg('before@x', NOW - age)
+        source = ShallowCopy(upstream, tmp_path / 'lkml', since=NOW - timedelta(days=7)) if shallow else upstream
+        source.feed().save_delivery_info(DNAME, 0, pointer, digest_sent=NOW - age)
         upstream.add_msg('next@x', NOW - timedelta(days=1))
-        local.fetch(since=NOW - timedelta(days=7))
+        if isinstance(source, ShallowCopy):
+            source.fetch(since=NOW - timedelta(days=7))
 
-        feed = local.feed()
+        feed = source.feed()
         commits = feed.get_latest_commits_for_delivery(DNAME)
         assert feed.find_history_gap(DNAME, commits) is None
-
-    def test_full_clone_is_no_gap(self, repo: InboxRepo) -> None:
-        pointer = repo.add_msg('a@x', NOW - timedelta(days=30))
-        repo.feed().save_delivery_info(DNAME, 0, pointer, digest_sent=NOW - timedelta(days=30))
-        repo.add_msg('b@x', NOW - timedelta(days=1))
-        feed = repo.feed()
-        assert feed.find_history_gap(DNAME, feed.get_latest_commits_for_delivery(DNAME)) is None
-
-    def test_digest_says_messages_are_missing(self, tmp_path: Path, upstream: InboxRepo) -> None:
-        upstream.add_msg('older@x', NOW - timedelta(days=29))
-        upstream.add_msg('before@x', NOW - timedelta(days=28, hours=1))
-        local = ShallowCopy(upstream, tmp_path / 'lkml', since=NOW - timedelta(days=35))
-        maildir = MaildirTarget('local', str(tmp_path / 'mail'))
-        sent = NOW - timedelta(days=28)
-        send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=sent)
-        upstream.add_msg('lost@x', NOW - timedelta(days=20))
-        upstream.add_msg('kept@x', NOW - timedelta(days=3))
-        local.fetch(since=NOW - timedelta(days=7))
-
-        parts = send_digest(DNAME, local.feed(), maildir, [], None, DAILY, now=NOW)
-
-        assert len(parts) == 1
-        text = digest_body(parts[0])
-        assert 'Some messages are missing.' in text
-        assert 'kept@x' in text
-        assert 'lost@x' not in text
 
     def test_gap_with_no_new_threads_is_still_sent(self, tmp_path: Path, upstream: InboxRepo) -> None:
         """The only news is that something is missing, and that is news."""
@@ -367,3 +361,50 @@ class TestHistoryGap:
 
         assert len(parts) == 1
         assert 'Some messages are missing.' in digest_text(parts[0])
+
+
+class TestDigestState:
+    def test_round_trip_keeps_pointer(self, repo: InboxRepo) -> None:
+        commit = repo.add_msg('a@x', NOW)
+        feed = repo.feed()
+        feed.save_delivery_info(DNAME, 0, commit, digest_sent=NOW)
+
+        info = feed.load_delivery_info(DNAME)
+        assert info['epochs']['0']['last'] == commit
+        assert info['digest'] == {'last_sent': NOW.isoformat()}
+        assert feed.load_digest_sent(DNAME) == NOW
+
+    def test_message_save_keeps_digest_state(self, repo: InboxRepo) -> None:
+        commit = repo.add_msg('a@x', NOW)
+        feed = repo.feed()
+        feed.save_delivery_info(DNAME, 0, commit, digest_sent=NOW)
+        feed.save_delivery_info(DNAME, 0, commit)
+        assert feed.load_digest_sent(DNAME) == NOW
+
+    def test_missing(self, repo: InboxRepo) -> None:
+        assert repo.feed().load_digest_sent('nope') is None
+
+    def test_corrupt(self, repo: InboxRepo) -> None:
+        state = repo.feed_dir / f'korgalore.{DNAME}.info'
+        state.write_text(json.dumps({'epochs': {}, 'digest': {'last_sent': 'yesterday'}}))
+        with pytest.raises(StateError):
+            repo.feed().load_digest_sent(DNAME)
+
+    def test_commits_since(self, repo: InboxRepo) -> None:
+        repo.add_msg('a@x', NOW - timedelta(days=2))
+        second = repo.add_msg('b@x', NOW - timedelta(hours=2))
+        third = repo.add_msg('c@x', NOW - timedelta(hours=1))
+        assert repo.feed().get_commits_since(NOW - timedelta(days=1)) == [(0, second), (0, third)]
+        assert repo.feed().get_commits_since(NOW) == []
+
+    def test_commits_since_empty_repo(self, repo: InboxRepo) -> None:
+        assert repo.feed().get_commits_since(NOW) == []
+
+    def test_commits_since_spans_epochs(self, repo: InboxRepo) -> None:
+        """A list that rolled over to a new epoch inside the window loses nothing."""
+        repo.add_msg('old@x', NOW - timedelta(days=2))
+        last_in_old = repo.add_msg('a@x', NOW - timedelta(hours=3))
+        new_epoch = InboxRepo(repo.feed_dir, epoch=1)
+        first_in_new = new_epoch.add_msg('b@x', NOW - timedelta(hours=2))
+        assert repo.feed().get_commits_since(NOW - timedelta(days=1)) == [(0, last_in_old), (1, first_in_new)]
+        assert repo.feed().get_commits_since(NOW - timedelta(hours=2, minutes=30)) == [(1, first_in_new)]

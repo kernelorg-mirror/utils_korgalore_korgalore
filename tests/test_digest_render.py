@@ -21,8 +21,6 @@ from korgalore.digest import (
     NoSummary,
     Section,
     group_threads,
-    is_bug_report,
-    is_pull_request,
     mid_url,
     render_digest,
     render_digest_parts,
@@ -39,7 +37,7 @@ GOLDEN_DIR = Path(__file__).parent / 'golden'
 UPDATE_GOLDEN = os.environ.get('KGL_UPDATE_GOLDEN') == '1'
 
 TZ = timezone(timedelta(hours=2))
-NOW = datetime(2026, 10, 1, 7, 0, tzinfo=TZ)
+RENDER_NOW = datetime(2026, 10, 1, 7, 0, tzinfo=TZ)
 
 
 def make_info(model: Optional[str] = None) -> DigestInfo:
@@ -48,16 +46,20 @@ def make_info(model: Optional[str] = None) -> DigestInfo:
         feed_name='lkml',
         delivery_name='lkml-digest',
         link_base='https://lore.kernel.org/lkml',
-        period_start=NOW - timedelta(days=1),
-        period_end=NOW,
+        period_start=RENDER_NOW - timedelta(days=1),
+        period_end=RENDER_NOW,
         from_addr='korgalore <digest@example.org>',
         model=model,
         tz=TZ,
     )
 
 
-def sample_threads() -> List[DigestThread]:
-    """One realistic day: a series with reviews, a discussion and an RFC."""
+@pytest.fixture(scope='module')
+def sample() -> List[DigestThread]:
+    """One realistic day: a series with reviews, a discussion and an RFC.
+
+    Rendering does not change threads, so all the tests share these.
+    """
     msgs = [
         mkmsg('cover@x', '[PATCH v3 0/2] mm: frobnicate the widgets', date='Wed, 30 Sep 2026 09:12:00 +0200'),
         mkmsg('p1@x', '[PATCH v3 1/2] mm: add a tail pointer', irt='cover@x', date='Wed, 30 Sep 2026 09:12:01 +0200'),
@@ -134,15 +136,15 @@ def parse_html(doc: str) -> _Collector:
 class TestGolden:
     """Whole-digest output compared with reviewed golden files."""
 
-    def test_plain_text(self) -> None:
+    def test_plain_text(self, sample: List[DigestThread]) -> None:
         """Text part of a plain digest."""
-        check_golden('digest-plain.txt', render_text(make_info(), sample_threads()))
+        check_golden('digest-plain.txt', render_text(make_info(), sample))
 
-    def test_plain_html(self) -> None:
+    def test_plain_html(self, sample: List[DigestThread]) -> None:
         """HTML part of a plain digest."""
-        check_golden('digest-plain.html', render_html(make_info(), sample_threads()))
+        check_golden('digest-plain.html', render_html(make_info(), sample))
 
-    def test_summarized_text(self) -> None:
+    def test_summarized_text(self, sample: List[DigestThread]) -> None:
         """Text part of a summarized digest: a list, an old summary without markers, and one missing."""
         summaries = {
             'cover@x': (
@@ -152,14 +154,14 @@ class TestGolden:
             ),
             'slow@x': 'Carol asks why widget lookup got slower.\nThe author points to the new locking.',
         }
-        check_golden('digest-summarized.txt', render_text(make_info('qwen3:32b'), sample_threads(), summaries))
+        check_golden('digest-summarized.txt', render_text(make_info('qwen3:32b'), sample, summaries))
 
-    def test_summarized_html(self) -> None:
+    def test_summarized_html(self, sample: List[DigestThread]) -> None:
         """HTML part of a summarized digest: the summary sits in its own box."""
         summaries = {
             'cover@x': '- The series replaces a list walk with a tail pointer.\n- Bob Dev is happy with patch 1.',
         }
-        check_golden('digest-summarized.html', render_html(make_info('qwen3:32b'), sample_threads(), summaries))
+        check_golden('digest-summarized.html', render_html(make_info('qwen3:32b'), sample, summaries))
 
 
 class TestSummaryPoints:
@@ -187,24 +189,24 @@ class TestSummaryPoints:
 class TestMidUrl:
     """Tests for mid_url()."""
 
+    BASE = 'https://lore.kernel.org/lkml'
+
     @pytest.mark.parametrize(
-        ('msgid', 'expected'),
+        ('base', 'msgid', 'expected'),
         [
-            ('20261001.1234-1-p@example.org', '20261001.1234-1-p@example.org'),
-            ('a/b@x', 'a%2Fb@x'),
-            ('a?b#c%d@x', 'a%3Fb%23c%25d@x'),
-            ("a!$&'()*+,;=:~b@x", "a!$&'()*+,;=:~b@x"),
-            ('a b"c<d>@x', 'a%20b%22c%3Cd%3E@x'),
-            ('ünï@x', '%C3%BCn%C3%AF@x'),
+            (BASE, '20261001.1234-1-p@example.org', '20261001.1234-1-p@example.org'),
+            (BASE, 'a/b@x', 'a%2Fb@x'),
+            (BASE, 'a?b#c%d@x', 'a%3Fb%23c%25d@x'),
+            (BASE, "a!$&'()*+,;=:~b@x", "a!$&'()*+,;=:~b@x"),
+            (BASE, 'a b"c<d>@x', 'a%20b%22c%3Cd%3E@x'),
+            (BASE, 'ünï@x', '%C3%BCn%C3%AF@x'),
+            # A link base with a trailing slash gives no double slash
+            (BASE + '/', 'a@x', 'a@x'),
         ],
     )
-    def test_escaping_matches_public_inbox(self, msgid: str, expected: str) -> None:
+    def test_escaping_matches_public_inbox(self, base: str, msgid: str, expected: str) -> None:
         """Message-IDs are escaped the way public-inbox expects."""
-        assert mid_url('https://lore.kernel.org/lkml', msgid) == f'https://lore.kernel.org/lkml/{expected}/'
-
-    def test_trailing_slash_on_base(self) -> None:
-        """A link base with a trailing slash gives no double slash."""
-        assert mid_url('https://lore.kernel.org/lkml/', 'a@x') == 'https://lore.kernel.org/lkml/a@x/'
+        assert mid_url(base, msgid) == f'https://lore.kernel.org/lkml/{expected}/'
 
 
 class TestHtmlSafety:
@@ -223,11 +225,14 @@ class TestHtmlSafety:
             ]
         )
 
-    def test_no_injected_markup(self) -> None:
+    @pytest.fixture(scope='module')
+    def evil(self) -> _Collector:
+        """The parsed HTML of a digest in which everything is hostile."""
+        return parse_html(render_html(make_info('m'), self.evil_threads(), {self.EVIL_MSGID: self.EVIL}))
+
+    def test_no_injected_markup(self, evil: _Collector) -> None:
         """Only the tags we write appear, and only links to the archive."""
-        doc = render_html(make_info('m'), self.evil_threads(), {self.EVIL_MSGID: self.EVIL})
-        parsed = parse_html(doc)
-        tags = {tag for tag, _attrs in parsed.tags}
+        tags = {tag for tag, _attrs in evil.tags}
         assert 'script' not in tags
         assert tags <= {
             'html',
@@ -246,14 +251,13 @@ class TestHtmlSafety:
             'li',
             'a',
         }
-        for tag, attrs in parsed.tags:
+        for tag, attrs in evil.tags:
             if tag == 'a':
                 assert (attrs['href'] or '').startswith('https://lore.kernel.org/lkml/')
 
-    def test_evil_text_shown_as_text(self) -> None:
+    def test_evil_text_shown_as_text(self, evil: _Collector) -> None:
         """The hostile strings are still visible to the reader, as plain text."""
-        doc = render_html(make_info('m'), self.evil_threads(), {self.EVIL_MSGID: self.EVIL})
-        text = ''.join(parse_html(doc).text)
+        text = ''.join(evil.text)
         assert '<script>alert(1)</script>' in text
         assert text.count(self.EVIL) >= 3  # subject, author, summary
 
@@ -278,10 +282,9 @@ class TestHtmlSafety:
         assert self.EVIL in text
         assert f'Reviewed-by: {trailer}' in text
 
-    def test_msgid_in_href_is_quoted(self) -> None:
+    def test_msgid_in_href_is_quoted(self, evil: _Collector) -> None:
         """A Message-ID with quotes and brackets gives a correct link."""
-        doc = render_html(make_info(), self.evil_threads())
-        hrefs = [attrs['href'] for tag, attrs in parse_html(doc).tags if tag == 'a']
+        hrefs = [attrs['href'] for tag, attrs in evil.tags if tag == 'a']
         assert 'https://lore.kernel.org/lkml/%22x%20onclick=alert(1)%20&%20%3Cb%22@x/' in hrefs
 
 
@@ -297,11 +300,11 @@ class TestContent:
         assert 'kgl ' not in render_html(make_info(), threads)
 
     @pytest.mark.parametrize('model', [None, 'm'], ids=['plain', 'summarized'])
-    def test_only_summaries_are_machine_generated(self, model: Optional[str]) -> None:
+    def test_only_summaries_are_machine_generated(self, sample: List[DigestThread], model: Optional[str]) -> None:
         """Without a model there is no summary section, and our own notes
         in a summarized digest are never labelled as the model's words."""
         info = make_info(model)
-        threads = sample_threads()
+        threads = sample
         assert 'machine-generated' not in render_text(info, threads)
         assert 'machine-generated' not in render_html(info, threads)
 
@@ -318,43 +321,39 @@ class TestContent:
             pytest.param(NoSummary.NOT_NEEDED, 'Summary unavailable.', 2, id='not-needed'),
         ],
     )
-    def test_summary_notes(self, summary: Union[str, NoSummary], note: str, count: int) -> None:
+    def test_summary_notes(
+        self, sample: List[DigestThread], summary: Union[str, NoSummary], note: str, count: int
+    ) -> None:
         """What a thread shows in place of a summary it does not have."""
         summaries = {'cover@x': summary}
-        assert render_text(make_info('m'), sample_threads(), summaries).count(note) == count
-        assert render_html(make_info('m'), sample_threads(), summaries).count(note) == count
+        assert render_text(make_info('m'), sample, summaries).count(note) == count
+        assert render_html(make_info('m'), sample, summaries).count(note) == count
 
-    def test_summary_shown(self) -> None:
-        """A summary appears in both parts."""
-        summaries = {'cover@x': 'A tidy summary.'}
-        assert 'A tidy summary.' in render_text(make_info('m'), sample_threads(), summaries)
-        assert 'A tidy summary.' in render_html(make_info('m'), sample_threads(), summaries)
-
-    def test_summary_is_a_list(self) -> None:
+    def test_summary_is_a_list(self, sample: List[DigestThread]) -> None:
         """Each point of a summary is a list item, in both parts."""
         long_point = 'The first point is long enough that it must wrap onto a second line of the text part.'
         summaries = {'cover@x': f'- {long_point}\n- Two & more.'}
-        text = render_text(make_info('m'), sample_threads(), summaries)
+        text = render_text(make_info('m'), sample, summaries)
         assert (
             '  Summary (machine-generated):\n'
             '    - The first point is long enough that it must wrap onto a second\n'
             '      line of the text part.\n'
             '    - Two & more.\n'
         ) in text
-        doc = render_html(make_info('m'), sample_threads(), summaries)
+        doc = render_html(make_info('m'), sample, summaries)
         assert f'<li>{long_point}</li>\n<li>Two &amp; more.</li>\n</ul>' in doc
 
-    def test_summary_wrap_keeps_hyphenated_words(self) -> None:
+    def test_summary_wrap_keeps_hyphenated_words(self, sample: List[DigestThread]) -> None:
         """A word like "kernel-mode" or a file name is never split across lines."""
         summaries = {'cover@x': '- Babu Moger proposes adding AMD PLZA support to the resctrl kernel-mode layer.'}
-        text = render_text(make_info('m'), sample_threads(), summaries)
+        text = render_text(make_info('m'), sample, summaries)
         assert '    - Babu Moger proposes adding AMD PLZA support to the resctrl\n      kernel-mode layer.\n' in text
 
-    def test_forged_trailer_warning(self) -> None:
+    def test_forged_trailer_warning(self, sample: List[DigestThread]) -> None:
         """A trailer sent by someone else names the real sender."""
         expected = 'Acked-by: Famous Person <famous@example.org> (sent by troll@example.org)'
-        assert expected in render_text(make_info(), sample_threads())
-        doc = render_html(make_info(), sample_threads())
+        assert expected in render_text(make_info(), sample)
+        doc = render_html(make_info(), sample)
         assert '&#9888; ' + html.escape(expected) in doc
 
     def test_updates_are_capped(self) -> None:
@@ -422,33 +421,51 @@ def patch_series(order: List[int], total: int, prefix: str = 'PATCH v6', cover: 
 class TestPatchList:
     """A series is listed once, in order, not as one update per patch."""
 
-    def test_series_order(self) -> None:
-        text = render_text(make_info(), group_threads(patch_series([1, 3, 2], 3)))
-        assert '  Posted by P. Author, Thu 09:12:\n    1/3  resctrl: step 1\n    2/3  resctrl: step 2\n' in text
-        assert '    3/3  resctrl: step 3\n' in text
+    @pytest.mark.parametrize(
+        ('msgs', 'expected', 'absent'),
+        [
+            # The cover letter is the title, so it is not in the patch list
+            pytest.param(
+                patch_series([1, 3, 2], 3),
+                [
+                    '  Posted by P. Author, Thu 09:12:\n    1/3  resctrl: step 1\n    2/3  resctrl: step 2\n',
+                    '    3/3  resctrl: step 3\n',
+                ],
+                'kernel mode',
+                id='series-order',
+            ),
+            pytest.param(
+                patch_series([10, 2], 18),
+                ['    02/18  resctrl: step 2\n    10/18  resctrl: step 10\n'],
+                'kernel mode',
+                id='counter-width',
+            ),
+            # Without a cover letter, patch 1 is both the title and in the list
+            pytest.param(
+                patch_series([1, 2], 2, cover=False),
+                ['    1/2  resctrl: step 1\n    2/2  resctrl: step 2\n'],
+                '0/2',
+                id='no-cover-keeps-first-patch',
+            ),
+            pytest.param(
+                [mkmsg('a@x', '[PATCH] mm: one fix')],
+                ['  Posted by P. Author, Thu 09:12\n  Read:'],
+                '1/1',
+                id='single-patch',
+            ),
+        ],
+    )
+    def test_patch_list(self, msgs: List[EmailMessage], expected: List[str], absent: str) -> None:
+        text = render_text(make_info(), group_threads(msgs))
+        for part in expected:
+            assert part in text
+        assert absent not in text.split('Posted by')[1]
 
     def test_no_redundant_updates(self) -> None:
         """The author and time are on the "Posted by" line only."""
         text = render_text(make_info(), group_threads(patch_series([1, 2], 2)))
         assert text.count('P. Author') == 1
         assert 'Follow-ups:' not in text
-
-    def test_cover_letter_is_the_title(self) -> None:
-        text = render_text(make_info(), group_threads(patch_series([1, 2], 2)))
-        assert 'kernel mode' not in text.split('Posted by')[1]
-
-    def test_counter_width(self) -> None:
-        text = render_text(make_info(), group_threads(patch_series([10, 2], 18)))
-        assert '    02/18  resctrl: step 2\n    10/18  resctrl: step 10\n' in text
-
-    def test_no_cover_keeps_first_patch(self) -> None:
-        """Without a cover letter, patch 1 is both the title and in the list."""
-        text = render_text(make_info(), group_threads(patch_series([1, 2], 2, cover=False)))
-        assert '    1/2  resctrl: step 1\n    2/2  resctrl: step 2\n' in text
-
-    def test_single_patch(self) -> None:
-        text = render_text(make_info(), group_threads([mkmsg('a@x', '[PATCH] mm: one fix')]))
-        assert '  Posted by P. Author, Thu 09:12\n  Read:' in text
 
     def test_replies_stay_in_updates(self) -> None:
         msgs = patch_series([1], 1, cover=False)
@@ -493,24 +510,24 @@ class TestPatchList:
         assert '  Posted by P. Author, Thu 09:12:\n    resctrl: a fix\n  Follow-ups:\n    Thu 09:12  Carol\n' in text
 
     @pytest.mark.parametrize(
-        'subject, note',
+        'subject, line',
         [
-            ('Re: [PATCH v6 02/18] resctrl: step 2', 'on 02/18'),
-            ('Re: [PATCH v7 02/18] resctrl: step 2', 'on v7 02/18'),
-            ('Re: [PATCH] resctrl: a fix', 'resctrl: a fix'),
-            ('Re: resctrl: kernel mode (was: something)', 'resctrl: kernel mode (was: something)'),
+            ('Re: [PATCH v6 02/18] resctrl: step 2', '    Thu 09:12  Bob  on 02/18\n'),
+            ('Re: [PATCH v7 02/18] resctrl: step 2', '    Thu 09:12  Bob  on v7 02/18\n'),
+            ('Re: [PATCH] resctrl: a fix', '    Thu 09:12  Bob  resctrl: a fix\n'),
+            (
+                'Re: resctrl: kernel mode (was: something)',
+                '    Thu 09:12  Bob  resctrl: kernel mode (was: something)\n',
+            ),
+            # A reply to the title has no note
+            ('Re: [PATCH v6 00/18] resctrl: kernel mode', '    Thu 09:12  Bob\n'),
         ],
+        ids=['patch-number', 'other-version', 'single-patch', 'discussion', 'title'],
     )
-    def test_reply_says_what_it_answers(self, subject: str, note: str) -> None:
+    def test_reply_says_what_it_answers(self, subject: str, line: str) -> None:
         msgs = patch_series([1], 18)
         msgs.append(mkmsg('r@x', subject, irt='cover@x', sender='Bob <bob@example.org>'))
-        text = render_text(make_info(), group_threads(msgs))
-        assert f'    Thu 09:12  Bob  {note}\n' in text
-
-    def test_reply_to_the_title_has_no_note(self) -> None:
-        msgs = patch_series([1], 18)
-        msgs.append(mkmsg('r@x', 'Re: [PATCH v6 00/18] resctrl: kernel mode', irt='cover@x', sender='Bob <bob@x>'))
-        assert '    Thu 09:12  Bob\n' in render_text(make_info(), group_threads(msgs))
+        assert line in render_text(make_info(), group_threads(msgs))
 
     def test_html_links_each_patch(self) -> None:
         doc = render_html(make_info(), group_threads(patch_series([2, 1], 2)))
@@ -522,9 +539,9 @@ class TestPatchList:
 class TestRenderDigest:
     """Tests for the complete email."""
 
-    def test_structure_and_headers(self) -> None:
+    def test_structure_and_headers(self, sample: List[DigestThread]) -> None:
         """The digest is multipart/alternative with our headers."""
-        msg = render_digest(make_info(), sample_threads(), msgid='fixed@example.org', now=NOW)
+        msg = render_digest(make_info(), sample, msgid='fixed@example.org', now=RENDER_NOW)
         assert msg.get_content_type() == 'multipart/alternative'
         assert [part.get_content_type() for part in msg.iter_parts()] == ['text/plain', 'text/html']
         assert msg['Subject'] == '[DIGEST] lkml: 2026-10-01 (3 threads, 8 messages)'
@@ -534,29 +551,20 @@ class TestRenderDigest:
         assert msg['X-Korgalore-Digest'] == 'lkml-digest'
         assert msg['X-Korgalore-Digest-Model'] == 'none'
 
-    def test_model_header(self) -> None:
-        """A summarized digest names its model."""
-        msg = render_digest(make_info('qwen3:32b'), [], now=NOW)
-        assert msg['X-Korgalore-Digest-Model'] == 'qwen3:32b'
+        # A summarized digest names its model, and without a fixed Message-ID
+        # one is made with the From domain
+        summarized = render_digest(make_info('qwen3:32b'), [], now=RENDER_NOW)
+        assert summarized['X-Korgalore-Digest-Model'] == 'qwen3:32b'
+        assert str(summarized['Message-ID']).endswith('@example.org>')
 
-    def test_generated_msgid_uses_from_domain(self) -> None:
-        """Without a fixed Message-ID, one is made with the From domain."""
-        msg = render_digest(make_info(), [], now=NOW)
-        assert str(msg['Message-ID']).endswith('@example.org>')
-
-    def test_parts_match_renderers(self) -> None:
+    def test_parts_match_renderers(self, sample: List[DigestThread]) -> None:
         """The parts hold exactly what render_text() and render_html() return."""
         info = make_info()
-        threads = sample_threads()
-        msg = render_digest(info, threads, now=NOW)
+        threads = sample
+        msg = render_digest(info, threads, now=RENDER_NOW)
         plain, rich = list(msg.iter_parts())
         assert plain.get_content() == render_text(info, threads)
         assert rich.get_content() == render_html(info, threads)
-
-    def test_serializes_to_bytes(self) -> None:
-        """The message can be turned into bytes for a target."""
-        raw = render_digest(make_info(), sample_threads(), now=NOW).as_bytes()
-        assert b'Content-Type: multipart/alternative' in raw
 
 
 def many_threads(count: int) -> List[DigestThread]:
@@ -658,42 +666,6 @@ class TestSections:
         (thread,) = group_threads(msgs)
         assert thread.section is expected
 
-    @pytest.mark.parametrize(
-        ('subject', 'expected'),
-        [
-            ('[GIT PULL] mm fixes', True),
-            ('[GIT PULL v2] mm fixes', True),
-            ('[PULL] drm fixes', True),
-            ('[git,pull] drm fixes', True),
-            ('Re: [GIT PULL] mm fixes', True),
-            ('[PATCH] git: fix pull with rebase', False),
-            ('[PATCH] pull-up resistor driver', False),
-            ('[PATCH v2 pullup] gpio: fix the bias', False),
-            ('Please pull my tree', False),
-        ],
-    )
-    def test_pull_request(self, subject: str, expected: bool) -> None:
-        """Only a "pull" inside the first brackets makes a pull request."""
-        assert is_pull_request(subject) is expected
-
-    @pytest.mark.parametrize(
-        ('subject', 'expected'),
-        [
-            ('[BUG] mm: oops in frob()', True),
-            ('BUG: unable to handle page fault in frob', True),
-            ('kernel BUG_ON hit in mm/widget.c', True),
-            ('Possible bug in the widget code', True),
-            ('Re: two bugs in git rebase', True),
-            ('[Bug 220001] New: frob() hangs', True),
-            ('debugfs: add a widget file', False),
-            ('bugfix release plans', False),
-            ('mm: why is this slow?', False),
-        ],
-    )
-    def test_bug_report(self, subject: str, expected: bool) -> None:
-        """Only "bug" or "bugs" as a word makes a bug report."""
-        assert is_bug_report(subject) is expected
-
     def test_bug_reports_before_discussions(self) -> None:
         """Bug reports come after the patch updates and before the discussions."""
         msgs = [mkmsg('q@x', 'mm: why is this slow?')]
@@ -714,13 +686,13 @@ class TestSections:
         threads = group_threads(msgs)
         assert [thread.root_msgid for thread in threads] == ['new@x', 'old@x', 'q@x']
 
-    def test_headings_count_the_section(self) -> None:
+    def test_headings_count_the_section(self, sample: List[DigestThread]) -> None:
         """Each section that has threads gets one heading, with its count."""
-        text = render_text(make_info(), sample_threads())
+        text = render_text(make_info(), sample)
         assert text.count('=' * 72 + '\nNEW PATCHES AND PULL REQUESTS (2)\n' + '=' * 72 + '\n[PATCH v3') == 1
         assert text.count('=' * 72 + '\nDISCUSSIONS (1)\n' + '=' * 72 + '\nmm: why') == 1
         assert 'UPDATES TO EARLIER PATCHES' not in text
-        doc = render_html(make_info(), sample_threads())
+        doc = render_html(make_info(), sample)
         headings = [tag for tag, _attrs in parse_html(doc).tags if tag == 'h2']
         assert len(headings) == 2
         assert '>New patches and pull requests (2)</h2>' in doc
@@ -731,7 +703,7 @@ class TestSections:
         info = make_info()
         threads = group_threads([mkmsg('a@x', '[PATCH] one'), mkmsg('b@x', '[PATCH] two'), mkmsg('q@x', 'a question')])
         # A cap of 1 byte puts each thread in a part of its own
-        first, second, third = render_digest_parts(info, threads, now=NOW, max_size=1)
+        first, second, third = render_digest_parts(info, threads, now=RENDER_NOW, max_size=1)
         assert '\nNEW PATCHES AND PULL REQUESTS (2)\n' in digest_text(first)
         assert '\nNEW PATCHES AND PULL REQUESTS (2), CONTINUED\n' in digest_text(second)
         assert '>New patches and pull requests (2), continued</h2>' in digest_html(second)
@@ -744,16 +716,12 @@ class TestSections:
         msgs = [mkmsg(f'p{n}@x', f'[PATCH] patch number {n}') for n in range(20)]
         msgs += [mkmsg(f'q{n}@x', f'question number {n}') for n in range(20)]
         threads = group_threads(msgs)
-        for msg in render_digest_parts(info, threads, now=NOW, max_size=3000):
+        for msg in render_digest_parts(info, threads, now=RENDER_NOW, max_size=3000):
             assert len(digest_html(msg).encode()) <= 3000
 
 
 class TestSplit:
     """Big digests are split into numbered parts."""
-
-    def test_small_digest_is_one_part(self) -> None:
-        threads = sample_threads()
-        assert split_threads(make_info(), threads) == [threads]
 
     def test_parts_stay_under_the_cap(self) -> None:
         info = make_info()
@@ -762,7 +730,7 @@ class TestSplit:
         assert len(chunks) > 2
         # Nothing is lost or reordered
         assert [t for chunk in chunks for t in chunk] == threads
-        for msg in render_digest_parts(info, threads, now=NOW, max_size=4000):
+        for msg in render_digest_parts(info, threads, now=RENDER_NOW, max_size=4000):
             assert len(digest_html(msg).encode()) <= 4000
 
     def test_big_thread_gets_its_own_part(self) -> None:
@@ -772,18 +740,26 @@ class TestSplit:
         chunks = split_threads(info, threads, max_size=1)
         assert chunks == [[thread] for thread in threads]
 
-    def test_one_part_is_a_normal_digest(self) -> None:
+    def test_one_part_is_a_normal_digest(self, sample: List[DigestThread]) -> None:
         """When it fits, the digest looks exactly like render_digest() makes it."""
         info = make_info()
-        threads = sample_threads()
-        (msg,) = render_digest_parts(info, threads, now=NOW)
+        threads = sample
+        (msg,) = render_digest_parts(info, threads, now=RENDER_NOW)
         assert msg['Subject'] == '[DIGEST] lkml: 2026-10-01 (3 threads, 8 messages)'
         assert msg['X-Korgalore-Digest-Part'] is None
         assert digest_html(msg) == render_html(info, threads)
 
-    def test_part_headers(self) -> None:
+    @pytest.fixture(scope='module')
+    def thirty(self) -> Tuple[List[DigestThread], List[EmailMessage], List[List[DigestThread]]]:
+        """30 threads in parts of at most 4000 bytes: (threads, parts, chunks)."""
         threads = many_threads(30)
-        parts = render_digest_parts(make_info(), threads, now=NOW, max_size=4000)
+        parts = render_digest_parts(make_info(), threads, now=RENDER_NOW, max_size=4000)
+        return threads, parts, split_threads(make_info(), threads, max_size=4000)
+
+    def test_part_headers(
+        self, thirty: Tuple[List[DigestThread], List[EmailMessage], List[List[DigestThread]]]
+    ) -> None:
+        _, parts, _ = thirty
         total = len(parts)
         first_msgid = parts[0]['Message-ID']
         assert parts[0]['In-Reply-To'] is None
@@ -796,10 +772,8 @@ class TestSplit:
                 assert msg['References'] == first_msgid
         assert len({msg['Message-ID'] for msg in parts}) == total
 
-    def test_part_labels(self) -> None:
-        threads = many_threads(30)
-        parts = render_digest_parts(make_info(), threads, now=NOW, max_size=4000)
-        chunks = split_threads(make_info(), threads, max_size=4000)
+    def test_part_labels(self, thirty: Tuple[List[DigestThread], List[EmailMessage], List[List[DigestThread]]]) -> None:
+        threads, parts, chunks = thirty
         first = 1
         for number, (msg, chunk) in enumerate(zip(parts, chunks, strict=True), start=1):
             text = digest_text(msg)
@@ -818,15 +792,25 @@ class TestGapNotice:
 
     @staticmethod
     def gap_info() -> DigestInfo:
-        return dataclasses.replace(make_info(), history_start=NOW - timedelta(hours=6))
+        return dataclasses.replace(make_info(), history_start=RENDER_NOW - timedelta(hours=6))
 
-    def test_no_notice_without_gap(self) -> None:
-        msg = render_digest(make_info(), sample_threads(), now=NOW)
-        assert 'Some messages are missing' not in digest_text(msg)
-        assert 'Some messages are missing' not in digest_html(msg)
+    @pytest.mark.parametrize(
+        ('gap', 'empty'),
+        [
+            pytest.param(False, False, id='no-gap'),
+            # Even with no threads, missing messages are worth telling about
+            pytest.param(True, True, id='gap-in-empty-digest'),
+        ],
+    )
+    def test_notice(self, sample: List[DigestThread], gap: bool, empty: bool) -> None:
+        info = self.gap_info() if gap else make_info()
+        msg = render_digest(info, [] if empty else sample, now=RENDER_NOW)
+        assert ('Some messages are missing' in digest_text(msg)) is gap
+        assert ('Some messages are missing' in digest_html(msg)) is gap
+        assert ('No activity in this period.' in digest_text(msg)) is empty
 
-    def test_notice_text(self) -> None:
-        msg = render_digest(self.gap_info(), sample_threads(), now=NOW)
+    def test_notice_text(self, sample: List[DigestThread]) -> None:
+        msg = render_digest(self.gap_info(), sample, now=RENDER_NOW)
         text = ' '.join(digest_text(msg).split())
         assert (
             'Some messages are missing. Korgalore only has messages from 2026-10-01 01:00 on, '
@@ -834,21 +818,12 @@ class TestGapNotice:
             'You can find it in the archive: https://lore.kernel.org/lkml/'
         ) in text
         assert '&#9888; Some messages are missing.' in digest_html(msg)
-
-    def test_text_notice_is_wrapped(self) -> None:
-        msg = render_digest(self.gap_info(), sample_threads(), now=NOW)
+        # The notice is wrapped, and the archive link is never broken in two
         assert max(len(line) for line in digest_text(msg).splitlines() if 'missing' in line) <= 72
-        # The archive link is never broken in two
         assert 'https://lore.kernel.org/lkml/' in digest_text(msg).split()
 
     def test_notice_only_in_first_part(self) -> None:
-        parts = render_digest_parts(self.gap_info(), many_threads(30), now=NOW, max_size=4000)
+        parts = render_digest_parts(self.gap_info(), many_threads(30), now=RENDER_NOW, max_size=4000)
         assert len(parts) > 1
         seen = ['Some messages are missing' in digest_text(msg) for msg in parts]
         assert seen == [True] + [False] * (len(parts) - 1)
-
-    def test_notice_in_empty_digest(self) -> None:
-        """Even with no threads, missing messages are worth telling about."""
-        msg = render_digest(self.gap_info(), [], now=NOW)
-        assert 'Some messages are missing' in digest_text(msg)
-        assert 'No activity in this period.' in digest_text(msg)

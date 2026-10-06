@@ -1,6 +1,7 @@
 """Tests for digest threading and thread facts."""
 
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from typing import List
 
 import pytest
@@ -11,7 +12,9 @@ from korgalore.digest import (
     Trailer,
     find_trailers,
     group_threads,
+    is_bug_report,
     is_patch_posting,
+    is_pull_request,
     parse_series,
     strip_reply_prefixes,
 )
@@ -137,18 +140,18 @@ class TestGroupThreads:
         assert thread.is_new
         assert thread.root_msgid == 'a@x'
 
-    def test_duplicate_message_counted_once(self) -> None:
-        """The same Message-ID twice in the period is one update."""
-        thread = only(group_threads([mkmsg('a@x', 'hello'), mkmsg('a@x', 'hello')]))
-        assert len(thread.updates) == 1
-
-    def test_message_without_msgid_skipped(self) -> None:
-        """A message with no Message-ID cannot be linked, so it is left out."""
-        assert group_threads([mkmsg(None, 'hello')]) == []
-
-    def test_empty_input(self) -> None:
-        """No messages means no threads."""
-        assert group_threads([]) == []
+    @pytest.mark.parametrize(
+        ('msgs', 'updates'),
+        [
+            # The same Message-ID twice in the period is one update
+            pytest.param([mkmsg('a@x', 'hello'), mkmsg('a@x', 'hello')], [1], id='duplicate-counted-once'),
+            # A message with no Message-ID cannot be linked, so it is left out
+            pytest.param([mkmsg(None, 'hello')], [], id='no-msgid-skipped'),
+            pytest.param([], [], id='empty'),
+        ],
+    )
+    def test_edge_inputs(self, msgs: List[EmailMessage], updates: List[int]) -> None:
+        assert [len(thread.updates) for thread in group_threads(msgs)] == updates
 
 
 class TestThreadFacts:
@@ -167,15 +170,16 @@ class TestThreadFacts:
         )
         assert thread.participants == [('Ann', 'ann@example.org'), ('Bob', 'bob@example.org')]
 
-    def test_author_without_name(self) -> None:
-        """An author with no display name is shown by address."""
-        thread = only(group_threads([mkmsg('a@x', 'hello', sender='bob@example.org')]))
-        assert thread.updates[0].author_name == 'bob@example.org'
-
-    def test_encoded_author_name(self) -> None:
-        """RFC 2047 encoded names are decoded."""
-        thread = only(group_threads([mkmsg('a@x', 'hello', sender='=?utf-8?q?J=C3=BCrgen?= <j@example.org>')]))
-        assert thread.updates[0].author_name == 'Jürgen'
+    @pytest.mark.parametrize(
+        ('sender', 'expected'),
+        [
+            pytest.param('bob@example.org', 'bob@example.org', id='no-display-name'),
+            pytest.param('=?utf-8?q?J=C3=BCrgen?= <j@example.org>', 'Jürgen', id='rfc2047-decoded'),
+        ],
+    )
+    def test_author_name(self, sender: str, expected: str) -> None:
+        thread = only(group_threads([mkmsg('a@x', 'hello', sender=sender)]))
+        assert thread.updates[0].author_name == expected
 
     def test_patch_count(self) -> None:
         """Patches are counted; replies and the cover letter are not."""
@@ -192,10 +196,8 @@ class TestThreadFacts:
         assert thread.patch_count == 2
         assert thread.series == SeriesInfo(counter=0, expected=2)
 
-    def test_single_patch_counted(self) -> None:
-        """A lone patch has counter 0 too, but it is not a cover letter."""
-        thread = only(group_threads([mkmsg('p@x', '[PATCH] mm: one')]))
-        assert thread.patch_count == 1
+        # A lone patch has counter 0 too, but it is not a cover letter
+        assert only(group_threads([mkmsg('p@x', '[PATCH] mm: one')])).patch_count == 1
 
     def test_reply_trailers_collected(self) -> None:
         """A Reviewed-by in a reply is a new trailer on the thread."""
@@ -264,22 +266,21 @@ class TestFindTrailers:
         names = [trailer.name for trailer in find_trailers(body, 'x@example.org')]
         assert names == ['Reviewed-by', 'Acked-by', 'Tested-by', 'Nacked-by', 'Nacked-by']
 
-    def test_quoted_trailer_ignored(self) -> None:
-        """A quoted trailer belongs to the message being replied to."""
-        assert find_trailers('> Reviewed-by: A <a@example.org>\n', 'x@example.org') == []
-
-    def test_indented_trailer_ignored(self) -> None:
-        """Trailers must start at the beginning of a line."""
-        assert find_trailers('  Reviewed-by: A <a@example.org>\n', 'x@example.org') == []
-
-    def test_other_trailers_ignored(self) -> None:
-        """Signed-off-by and Reported-by are not review trailers."""
-        body = 'Signed-off-by: A <a@example.org>\nReported-by: B <b@example.org>\n'
+    @pytest.mark.parametrize(
+        'body',
+        [
+            pytest.param('> Reviewed-by: A <a@example.org>\n', id='quoted'),
+            pytest.param('  Reviewed-by: A <a@example.org>\n', id='indented'),
+            pytest.param(
+                'Signed-off-by: A <a@example.org>\nReported-by: B <b@example.org>\n',
+                id='not-review-trailers',
+            ),
+            pytest.param('Acked-by: me\n', id='no-address'),
+        ],
+    )
+    def test_ignored(self, body: str) -> None:
+        """Quoted or indented lines, non-review trailers and ones without an address are not trailers."""
         assert find_trailers(body, 'x@example.org') == []
-
-    def test_trailer_without_address_ignored(self) -> None:
-        """Without an email address it is not a real trailer."""
-        assert find_trailers('Acked-by: me\n', 'x@example.org') == []
 
     def test_bare_address(self) -> None:
         """A trailer with only an address is accepted."""
@@ -323,16 +324,17 @@ class TestParseSeries:
         """Subjects without a PATCH or RFC prefix have no series info."""
         assert parse_series(subject) is None
 
-    def test_is_patch_posting(self) -> None:
+    @pytest.mark.parametrize(
+        ('subject', 'expected'),
+        [
+            ('[PATCH 0/3] mm: x', True),
+            ('Re: [PATCH 0/3] mm: x', False),
+            ('mm: x', False),
+        ],
+    )
+    def test_is_patch_posting(self, subject: str, expected: bool) -> None:
         """Patches and cover letters are postings; replies are not."""
-        assert is_patch_posting('[PATCH 0/3] mm: x')
-        assert not is_patch_posting('Re: [PATCH 0/3] mm: x')
-        assert not is_patch_posting('mm: x')
-
-    def test_subsystem_prefix_kept_in_thread_subject(self) -> None:
-        """A subject like "mm: ..." keeps its subsystem prefix."""
-        thread = group_threads([mkmsg('a@x', 'Re: mm: why is this slow?', irt='old@x')])[0]
-        assert thread.subject == 'mm: why is this slow?'
+        assert is_patch_posting(subject) is expected
 
     @pytest.mark.parametrize(
         ('subject', 'expected'),
@@ -350,3 +352,44 @@ class TestParseSeries:
     def test_strip_reply_prefixes(self, subject: str, expected: str) -> None:
         """Reply and forward prefixes are removed; patch prefixes stay."""
         assert strip_reply_prefixes(subject) == expected
+        # A reply without its root gets the stripped subject as the thread subject
+        thread = group_threads([mkmsg('a@x', subject, irt='old@x')])[0]
+        assert thread.subject == expected
+
+
+@pytest.mark.parametrize(
+    ('subject', 'expected'),
+    [
+        ('[GIT PULL] mm fixes', True),
+        ('[GIT PULL v2] mm fixes', True),
+        ('[PULL] drm fixes', True),
+        ('[git,pull] drm fixes', True),
+        ('Re: [GIT PULL] mm fixes', True),
+        ('[PATCH] git: fix pull with rebase', False),
+        ('[PATCH] pull-up resistor driver', False),
+        ('[PATCH v2 pullup] gpio: fix the bias', False),
+        ('Please pull my tree', False),
+    ],
+)
+def test_pull_request(subject: str, expected: bool) -> None:
+    """Only a "pull" inside the first brackets makes a pull request."""
+    assert is_pull_request(subject) is expected
+
+
+@pytest.mark.parametrize(
+    ('subject', 'expected'),
+    [
+        ('[BUG] mm: oops in frob()', True),
+        ('BUG: unable to handle page fault in frob', True),
+        ('kernel BUG_ON hit in mm/widget.c', True),
+        ('Possible bug in the widget code', True),
+        ('Re: two bugs in git rebase', True),
+        ('[Bug 220001] New: frob() hangs', True),
+        ('debugfs: add a widget file', False),
+        ('bugfix release plans', False),
+        ('mm: why is this slow?', False),
+    ],
+)
+def test_bug_report(subject: str, expected: bool) -> None:
+    """Only "bug" or "bugs" as a word makes a bug report."""
+    assert is_bug_report(subject) is expected

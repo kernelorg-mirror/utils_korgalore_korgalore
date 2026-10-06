@@ -10,11 +10,10 @@ import textwrap
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
-from click.testing import CliRunner
 
 from korgalore import ConfigurationError, StateError
 from korgalore import cli as cli_mod
@@ -23,7 +22,6 @@ from korgalore.cli import (
     DIGEST_WORKER_LOG,
     DIGEST_WORKER_POKE,
     collect_digest,
-    digest_cmd,
     get_digest_worker_mode,
     get_xdg_data_dir,
     map_deliveries,
@@ -45,6 +43,7 @@ from tests.digest_helpers import (
     FlakyTarget,
     InboxRepo,
     RecordingSummarizer,
+    answered_repo,
     cache_of,
     collect,
     delivered,
@@ -52,6 +51,7 @@ from tests.digest_helpers import (
     job_of,
     make_ctx,
     make_raw,
+    repo_with_msg,
     send,
     summarized_ctx,
     worker_ctx,
@@ -59,11 +59,9 @@ from tests.digest_helpers import (
 
 
 @pytest.fixture
-def repo(tmp_path: Path) -> InboxRepo:
+def repo(repo: InboxRepo) -> InboxRepo:
     """One message, so every digest has something to send."""
-    repo = InboxRepo(tmp_path / 'lkml')
-    repo.add_msg('a@x', NOW - timedelta(hours=3))
-    return repo
+    return repo_with_msg(repo)
 
 
 class TestJobLock:
@@ -132,9 +130,13 @@ class TestQueueForWorker:
 
 
 class TestWorker:
-    def test_finishes_the_job(self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget) -> None:
+    # A plain digest job is finished too: it is left behind when an inline send failed half-way
+    @pytest.mark.parametrize('schedule', [SLOW, DAILY], ids=['summarized', 'plain'])
+    def test_finishes_the_job(
+        self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget, schedule: DigestSchedule
+    ) -> None:
         assert collect(repo)
-        ctx = worker_ctx(tmp_path, repo, maildir)
+        ctx = worker_ctx(tmp_path, repo, maildir, schedule=schedule)
 
         sent = run_digest_worker(ctx, [DNAME])
 
@@ -142,19 +144,6 @@ class TestWorker:
         assert sent == {DNAME: [str(msg['Message-ID'])]}
         assert not job_of(repo).exists()
         assert repo.feed().load_digest_sent(DNAME) == NOW
-
-    def test_plain_digest_job_is_finished_too(self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        # Left behind when an inline send failed half-way
-        assert collect(repo)
-        ctx = worker_ctx(tmp_path, repo, maildir, schedule=DAILY)
-        assert DNAME in run_digest_worker(ctx, [DNAME])
-        assert len(delivered(maildir)) == 1
-
-    def test_reads_no_git(self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        assert collect(repo)
-        (repo.feed_dir / 'git').rename(tmp_path / 'moved-away')
-        ctx = worker_ctx(tmp_path, repo, maildir)
-        assert DNAME in run_digest_worker(ctx, [DNAME])
 
     def test_no_job_sends_nothing(self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget) -> None:
         ctx = worker_ctx(tmp_path, repo, maildir)
@@ -249,11 +238,8 @@ class TestWorker:
 
 class TestSummarizedDigest:
     @pytest.fixture
-    def answered(self, repo: InboxRepo) -> InboxRepo:
-        """a@x gets an answer; lonely@x does not."""
-        repo.add_msg('r@x', NOW - timedelta(hours=2), sender=BOB, irt='a@x')
-        repo.add_msg('lonely@x', NOW - timedelta(hours=1))
-        return repo
+    def answered(self, tmp_path: Path) -> InboxRepo:
+        return answered_repo(InboxRepo(tmp_path / 'lkml'))
 
     def test_digest_has_summaries(self, tmp_path: Path, answered: InboxRepo, maildir: MaildirTarget) -> None:
         fake = RecordingSummarizer()
@@ -376,10 +362,6 @@ class TestJobSummaries:
         assert state['model'] == 'm'
         assert job.summaries(state) == {'a@x': 'text', 'b@x': NoSummary.BUDGET, 'c@x': NoSummary.NOT_NEEDED}
 
-    def test_collected_job_has_none(self, repo: InboxRepo) -> None:
-        assert collect(repo)
-        assert job_of(repo).summaries(job_of(repo).load()) == {}
-
     @pytest.mark.parametrize('state', [{'no_summary': {'a@x': 'tired'}}, {'summaries': ['a@x']}])
     def test_bad_summaries(self, repo: InboxRepo, state: Dict[str, Any]) -> None:
         with pytest.raises(StateError, match='Bad summaries'):
@@ -452,15 +434,20 @@ class TestSpawn:
 
 
 class TestWorkerConfig:
-    def test_default_is_spawn(self) -> None:
-        assert get_digest_worker_mode({}) == 'spawn'
-
-    def test_external(self) -> None:
-        assert get_digest_worker_mode({'digests': {'worker': 'external'}}) == 'external'
-
-    def test_bad_value(self) -> None:
-        with pytest.raises(ConfigurationError, match='worker'):
-            get_digest_worker_mode({'digests': {'worker': 'thread'}})
+    @pytest.mark.parametrize(
+        ('config', 'expected'),
+        [
+            pytest.param({}, 'spawn', id='default'),
+            pytest.param({'digests': {'worker': 'external'}}, 'external', id='external'),
+            pytest.param({'digests': {'worker': 'thread'}}, None, id='bad-value'),
+        ],
+    )
+    def test_mode(self, config: Dict[str, Any], expected: Optional[str]) -> None:
+        if expected is None:
+            with pytest.raises(ConfigurationError, match='worker'):
+                get_digest_worker_mode(config)
+        else:
+            assert get_digest_worker_mode(config) == expected
 
     def test_mapped_with_digests(self) -> None:
         ctx = make_ctx({'config': {'targets': {}, 'digests': {'worker': 'external'}}, 'targets': {}, 'feeds': {}})
@@ -470,44 +457,3 @@ class TestWorkerConfig:
         ):
             map_deliveries(ctx, {DNAME: {'feed': 'lkml', 'target': 'local', 'mode': 'digest'}})
         assert ctx.obj['digest_worker'] == 'external'
-
-
-class TestWorkCommand:
-    @pytest.fixture
-    def env(self) -> Iterator[Dict[str, MagicMock]]:
-        mocks = {name: MagicMock() for name in ('map', 'lock', 'update', 'work')}
-        with (
-            patch('korgalore.cli.map_deliveries', mocks['map']),
-            patch('korgalore.cli.lock_all_feeds', mocks['lock']),
-            patch('korgalore.cli.update_all_feeds', mocks['update']),
-            patch('korgalore.cli.run_digest_worker', mocks['work']),
-        ):
-            yield mocks
-
-    @staticmethod
-    def _invoke(*args: str) -> Any:
-        obj = {
-            'config': {
-                'deliveries': {
-                    'lkml-all': {'feed': 'lkml', 'target': 'local'},
-                    DNAME: {'feed': 'lkml', 'target': 'local', 'mode': 'digest'},
-                }
-            },
-            'targets': {},
-        }
-        return CliRunner().invoke(digest_cmd, list(args), obj=obj)
-
-    def test_work_takes_no_feed_locks(self, env: Dict[str, MagicMock]) -> None:
-        result = self._invoke('--work')
-        assert result.exit_code == 0, result.output
-        assert env['work'].call_args.args[1] == [DNAME]
-        env['lock'].assert_not_called()
-        env['update'].assert_not_called()
-
-    def test_work_with_force_is_refused(self, env: Dict[str, MagicMock]) -> None:
-        result = self._invoke('--work', '--force')
-        assert result.exit_code == 2
-        env['work'].assert_not_called()
-
-    def test_work_is_listed(self) -> None:
-        assert '--work' in CliRunner().invoke(digest_cmd, ['--help']).output

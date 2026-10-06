@@ -4,19 +4,20 @@ import mailbox
 import os
 import re
 import subprocess
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from contextlib import ExitStack, contextmanager
+from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import click
+from click.testing import CliRunner, Result
 
-from korgalore.cli import SUMMARY_CACHE_DIR, collect_digest, send_digest
+from korgalore.cli import SUMMARY_CACHE_DIR, collect_digest, digest_cmd, send_digest
 from korgalore.digest import DigestJob, DigestSchedule, render_digest_parts
 from korgalore.lore_feed import LoreFeed
 from korgalore.maildir_target import MaildirTarget
@@ -318,3 +319,49 @@ class FlakyTarget:
         if self.calls in self.fail_on:
             raise RuntimeError('server said no')
         return self.maildir.import_message(raw, **kwargs)
+
+
+def repo_with_msg(repo: InboxRepo) -> InboxRepo:
+    """One message, so every digest has something to send."""
+    repo.add_msg('a@x', NOW - timedelta(hours=3))
+    return repo
+
+
+def answered_repo(repo: InboxRepo) -> InboxRepo:
+    """a@x gets an answer; lonely@x does not."""
+    repo.add_many(
+        [
+            (make_raw('a@x', '[PATCH] a@x'), NOW - timedelta(hours=3), 'm'),
+            (make_raw('r@x', '[PATCH] r@x', sender=BOB, irt='a@x'), NOW - timedelta(hours=2), 'm'),
+            (make_raw('lonely@x', '[PATCH] lonely@x'), NOW - timedelta(hours=1), 'm'),
+        ]
+    )
+    return repo
+
+
+# Short names for the functions in korgalore.cli that kgl digest calls
+DIGEST_CLI_FUNCTIONS = {
+    'map': 'map_deliveries',
+    'lock': 'lock_all_feeds',
+    'unlock': 'unlock_all_feeds',
+    'update': 'update_all_feeds',
+    'estimate': 'run_digest_estimates',
+    'due': 'run_due_digests',
+    'work': 'run_digest_worker',
+    'close': 'close_requests_session',
+}
+
+
+@contextmanager
+def digest_cli_env(*names: str) -> Generator[Dict[str, MagicMock], None, None]:
+    """Replace the named korgalore.cli functions with mocks, and yield them by short name."""
+    mocks = {name: MagicMock() for name in names}
+    with ExitStack() as stack:
+        for name, mock in mocks.items():
+            stack.enter_context(patch(f'korgalore.cli.{DIGEST_CLI_FUNCTIONS[name]}', mock))
+        yield mocks
+
+
+def invoke_digest(obj: Dict[str, Any], *args: str) -> Result:
+    """Run "kgl digest" with the given ctx.obj."""
+    return CliRunner().invoke(digest_cmd, list(args), obj=obj)

@@ -7,6 +7,7 @@ import pytest
 from liblore.utils import msg_get_payload
 
 from korgalore.digest import MARKER_MAX_FILES, shrink_thread, strip_diffs, strip_review_trailers
+from tests.digest_helpers import mkmsg
 
 FORMAT_PATCH = """\
 The widget frobnicator walks the whole list on every call. Keep a
@@ -70,18 +71,15 @@ def make_msg(
     body: str, subject: str = '[PATCH] mm: widget', charset: Optional[str] = None, raw_body: Optional[bytes] = None
 ) -> EmailMessage:
     """Build a simple text/plain message."""
-    msg = EmailMessage()
-    msg['From'] = 'P. Author <p@example.org>'
+    msg = mkmsg('20261001.1@example.org', subject, body)
     msg['To'] = 'linux-mm@kvack.org'
-    msg['Subject'] = subject
-    msg['Message-ID'] = '<20261001.1@example.org>'
     msg['X-Mailer'] = 'git-send-email 2.47.0'
     if raw_body is not None:
+        del msg['Content-Type']
+        del msg['Content-Transfer-Encoding']
         msg.set_payload(raw_body)
         msg['Content-Type'] = f'text/plain; charset="{charset}"'
         msg['Content-Transfer-Encoding'] = '8bit'
-    else:
-        msg.set_content(body)
     return msg
 
 
@@ -119,107 +117,91 @@ class TestStripDiffs:
         """Bodies without a diff pass through, newlines and all."""
         assert strip_diffs(body) == body
 
-    def test_inline_patch_keeps_text_after(self) -> None:
-        """Text written after an inline patch is kept."""
-        body = (
-            'Something like this?\n'
-            '\n'
-            'diff --git a/mm/widget.c b/mm/widget.c\n'
-            '--- a/mm/widget.c\n'
-            '+++ b/mm/widget.c\n'
-            '@@ -1,2 +1,2 @@\n'
-            '-old\n'
-            '+new\n'
-            '\n'
-            'Then we can drop the lock below.\n'
-        )
-        result = strip_diffs(body)
-        assert result == (
-            'Something like this?\n\n[diff: 6 lines; 1 file: mm/widget.c]\n\nThen we can drop the lock below.\n'
-        )
-
-    def test_empty_context_line_inside_hunk(self) -> None:
-        """An empty line inside a hunk does not end the diff."""
-        body = 'diff --git a/x.c b/x.c\n--- a/x.c\n+++ b/x.c\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n'
-        assert strip_diffs(body) == '[diff: 8 lines; 1 file: x.c]\n'
-
-    def test_patch_without_separator(self) -> None:
-        """A patch with no "---" line and no diffstat is still found."""
-        body = (
-            'Fix the thing.\n'
-            '\n'
-            'Signed-off-by: P. Author <p@example.org>\n'
-            'diff --git a/x.c b/x.c\n'
-            '--- a/x.c\n'
-            '+++ b/x.c\n'
-            '@@ -1 +1 @@\n'
-            '-a\n'
-            '+b\n'
-        )
-        result = strip_diffs(body)
-        assert result == ('Fix the thing.\n\nSigned-off-by: P. Author <p@example.org>\n[diff: 6 lines; 1 file: x.c]\n')
-
-    def test_plain_unified_diff(self) -> None:
-        """A diff -u style patch without a "diff" header line is found."""
-        body = 'Try this:\n--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-a\n+b\n'
-        assert strip_diffs(body) == 'Try this:\n[diff: 5 lines; 1 file: x.c]\n'
-
-    def test_quilt_index_diff(self) -> None:
-        """A quilt-style patch starting with "Index:" is found."""
-        body = (
-            'Index: linux/x.c\n'
-            '===================================================================\n'
-            '--- linux.orig/x.c\n'
-            '+++ linux/x.c\n'
-            '@@ -1 +1 @@\n'
-            '-a\n'
-            '+b\n'
-        )
-        assert strip_diffs(body) == '[diff: 7 lines; 1 file: linux/x.c]\n'
-
-    def test_deleted_and_renamed_files(self) -> None:
-        """Deleted files use their old name and renames use their new name."""
-        body = (
-            'diff --git a/old.c b/old.c\n'
-            'deleted file mode 100644\n'
-            'index 1234567..0000000\n'
-            '--- a/old.c\n'
-            '+++ /dev/null\n'
-            '@@ -1 +0,0 @@\n'
-            '-gone\n'
-            'diff --git a/before.c b/after.c\n'
-            'similarity index 100%\n'
-            'rename from before.c\n'
-            'rename to after.c\n'
-        )
-        assert strip_diffs(body) == '[diff: 11 lines; 2 files: old.c, after.c]\n'
-
-    def test_deleted_file_without_git_header(self) -> None:
-        """Without a "diff --git" line, a deleted file still gets its old name."""
-        body = '--- a/old.c\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n'
-        assert strip_diffs(body) == '[diff: 4 lines; 1 file: old.c]\n'
-
-    def test_binary_patch(self) -> None:
-        """Base85 data of a binary patch is part of the diff."""
-        body = (
-            'diff --git a/logo.png b/logo.png\n'
-            'new file mode 100644\n'
-            'index 0000000..1234567\n'
-            'GIT binary patch\n'
-            'literal 12\n'
-            'TcmZ?wbhEHbWMp7q_{zWl\n'
-            '\n'
-            'literal 0\n'
-            'HcmV?d00001\n'
-            '\n'
-            'Looks good to me.\n'
-        )
-        assert strip_diffs(body) == ('[diff: 9 lines; 1 file: logo.png]\n\nLooks good to me.\n')
-
-    def test_two_diffs_with_text_between(self) -> None:
-        """Each diff gets its own marker and the text between them stays."""
-        body = 'First:\ndiff --git a/a.c b/a.c\n-x\n+y\nSecond:\ndiff --git a/b.c b/b.c\n-x\n+y\n'
-        assert strip_diffs(body) == ('First:\n[diff: 3 lines; 1 file: a.c]\nSecond:\n[diff: 3 lines; 1 file: b.c]\n')
+    @pytest.mark.parametrize(
+        ('body', 'expected'),
+        [
+            pytest.param(
+                'Something like this?\n\n'
+                'diff --git a/mm/widget.c b/mm/widget.c\n--- a/mm/widget.c\n+++ b/mm/widget.c\n'
+                '@@ -1,2 +1,2 @@\n-old\n+new\n\n'
+                'Then we can drop the lock below.\n',
+                'Something like this?\n\n[diff: 6 lines; 1 file: mm/widget.c]\n\nThen we can drop the lock below.\n',
+                id='inline-patch-keeps-text-after',
+            ),
+            pytest.param(
+                'diff --git a/x.c b/x.c\n--- a/x.c\n+++ b/x.c\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n',
+                '[diff: 8 lines; 1 file: x.c]\n',
+                id='empty-context-line-inside-hunk',
+            ),
+            pytest.param(
+                'Fix the thing.\n\n'
+                'Signed-off-by: P. Author <p@example.org>\n'
+                'diff --git a/x.c b/x.c\n--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-a\n+b\n',
+                'Fix the thing.\n\nSigned-off-by: P. Author <p@example.org>\n[diff: 6 lines; 1 file: x.c]\n',
+                id='patch-without-separator',
+            ),
+            pytest.param(
+                'Try this:\n--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-a\n+b\n',
+                'Try this:\n[diff: 5 lines; 1 file: x.c]\n',
+                id='plain-unified-diff',
+            ),
+            pytest.param(
+                'Index: linux/x.c\n'
+                '===================================================================\n'
+                '--- linux.orig/x.c\n+++ linux/x.c\n@@ -1 +1 @@\n-a\n+b\n',
+                '[diff: 7 lines; 1 file: linux/x.c]\n',
+                id='quilt-index-diff',
+            ),
+            # Deleted files use their old name and renames use their new name
+            pytest.param(
+                'diff --git a/old.c b/old.c\n'
+                'deleted file mode 100644\n'
+                'index 1234567..0000000\n'
+                '--- a/old.c\n'
+                '+++ /dev/null\n'
+                '@@ -1 +0,0 @@\n'
+                '-gone\n'
+                'diff --git a/before.c b/after.c\n'
+                'similarity index 100%\n'
+                'rename from before.c\n'
+                'rename to after.c\n',
+                '[diff: 11 lines; 2 files: old.c, after.c]\n',
+                id='deleted-and-renamed-files',
+            ),
+            # Without a "diff --git" line, a deleted file still gets its old name
+            pytest.param(
+                '--- a/old.c\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n',
+                '[diff: 4 lines; 1 file: old.c]\n',
+                id='deleted-file-without-git-header',
+            ),
+            # Base85 data of a binary patch is part of the diff
+            pytest.param(
+                'diff --git a/logo.png b/logo.png\n'
+                'new file mode 100644\n'
+                'index 0000000..1234567\n'
+                'GIT binary patch\n'
+                'literal 12\n'
+                'TcmZ?wbhEHbWMp7q_{zWl\n'
+                '\n'
+                'literal 0\n'
+                'HcmV?d00001\n'
+                '\n'
+                'Looks good to me.\n',
+                '[diff: 9 lines; 1 file: logo.png]\n\nLooks good to me.\n',
+                id='binary-patch',
+            ),
+            # Each diff gets its own marker and the text between them stays
+            pytest.param(
+                'First:\ndiff --git a/a.c b/a.c\n-x\n+y\nSecond:\ndiff --git a/b.c b/b.c\n-x\n+y\n',
+                'First:\n[diff: 3 lines; 1 file: a.c]\nSecond:\n[diff: 3 lines; 1 file: b.c]\n',
+                id='two-diffs-with-text-between',
+            ),
+            # A body without a final newline does not gain one
+            pytest.param('diff --git a/x b/x\n+y', '[diff: 2 lines; 1 file: x]', id='no-trailing-newline'),
+        ],
+    )
+    def test_diff_replaced_by_marker(self, body: str, expected: str) -> None:
+        assert strip_diffs(body) == expected
 
     def test_marker_limits_file_list(self) -> None:
         """Long file lists are cut off with "and N more"."""
@@ -230,10 +212,6 @@ class TestStripDiffs:
         assert f'{count} files: ' in result
         assert f'f{MARKER_MAX_FILES - 1}.c, and {extra} more]' in result
         assert f'f{MARKER_MAX_FILES}.c' not in result
-
-    def test_no_trailing_newline(self) -> None:
-        """A body without a final newline does not gain one."""
-        assert strip_diffs('diff --git a/x b/x\n+y') == '[diff: 2 lines; 1 file: x]'
 
 
 class TestStripReviewTrailers:
@@ -266,12 +244,15 @@ class TestShrinkThread:
     """Tests for shrink_thread()."""
 
     def test_patch_is_stripped_and_footer_dropped(self) -> None:
-        """Diffs are replaced and the git version footer is removed."""
+        """Diffs are replaced, the git footer goes, and unneeded headers too."""
         result = shrink_thread([make_msg(FORMAT_PATCH)])
         assert len(result) == 1
         body = msg_get_payload(result[0], strip_signature=False)
         assert '[diff: 14 lines; 1 file: mm/widget.c]' in body
         assert '2.47.0' not in body
+        # minimize_thread() still removes headers we do not need
+        assert result[0]['Subject'] == '[PATCH] mm: widget'
+        assert result[0]['X-Mailer'] is None
 
     def test_patch_loses_review_trailers(self) -> None:
         """Trailers carried from older versions do not reach the model."""
@@ -287,23 +268,28 @@ class TestShrinkThread:
         result = shrink_thread([make_msg(body, subject='[PATCH v2 0/2] mm: widgets')])
         assert msg_get_payload(result[0]) == 'This series reworks the widgets.\n\n'
 
-    def test_reply_keeps_review_trailers(self) -> None:
-        """A reviewer's own trailer stays: it is part of what they said."""
-        body = 'Looks good.\n\nReviewed-by: A. Reviewer <a@example.org>\n'
-        result = shrink_thread([make_msg(body, subject='Re: [PATCH v2 1/2] mm: widget')])
-        assert 'Reviewed-by: A. Reviewer <a@example.org>' in msg_get_payload(result[0])
-
-    def test_discussion_keeps_trailer_lines(self) -> None:
-        """Only patches and cover letters lose them."""
-        body = 'Is this how to write it?\nAcked-by: Some One <s@example.org>\n'
-        result = shrink_thread([make_msg(body, subject='How do trailers work?')])
-        assert 'Acked-by: Some One' in msg_get_payload(result[0])
-
-    def test_extra_headers_dropped(self) -> None:
-        """minimize_thread() still removes headers we do not need."""
-        result = shrink_thread([make_msg(FORMAT_PATCH)])
-        assert result[0]['Subject'] == '[PATCH] mm: widget'
-        assert result[0]['X-Mailer'] is None
+    @pytest.mark.parametrize(
+        ('body', 'subject', 'kept'),
+        [
+            # A reviewer's own trailer stays: it is part of what they said
+            pytest.param(
+                'Looks good.\n\nReviewed-by: A. Reviewer <a@example.org>\n',
+                'Re: [PATCH v2 1/2] mm: widget',
+                'Reviewed-by: A. Reviewer <a@example.org>',
+                id='reply',
+            ),
+            # Only patches and cover letters lose them
+            pytest.param(
+                'Is this how to write it?\nAcked-by: Some One <s@example.org>\n',
+                'How do trailers work?',
+                'Acked-by: Some One',
+                id='discussion',
+            ),
+        ],
+    )
+    def test_trailers_kept(self, body: str, subject: str, kept: str) -> None:
+        result = shrink_thread([make_msg(body, subject=subject)])
+        assert kept in msg_get_payload(result[0])
 
     def test_deep_quotes_dropped(self) -> None:
         """Quotes of quotes are removed by minimize_thread()."""

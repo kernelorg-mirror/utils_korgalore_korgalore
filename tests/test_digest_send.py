@@ -1,4 +1,4 @@
-"""Tests for sending digests: state, scheduling, and the hooks in pull.
+"""Tests for sending digests: state, scheduling, splitting and the job stages.
 
 The send_digest tests use a real public-inbox style git repository and a
 real maildir, so they check what ends up on disk, not which mocks were
@@ -7,33 +7,21 @@ does, so no cache can hide a bug.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Tuple
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock
 
-import click
 import pytest
-from click.testing import CliRunner
 
 import liblore
-from korgalore import AuthenticationError, ConfigurationError, StateError
-from korgalore.cli import (
-    digest_cmd,
-    look_up_root_subjects,
-    map_deliveries,
-    perform_pull,
-    render_digest_job,
-    run_due_digests,
-    send_digest,
-    summarize_digest_job,
-)
+from korgalore import StateError
+from korgalore.cli import look_up_root_subjects, render_digest_job, run_digest_worker, send_digest, summarize_digest_job
 from korgalore.digest import DigestJob, DigestSchedule
 from korgalore.lei_feed import LeiFeed
 from korgalore.lore_feed import LoreFeed
 from korgalore.maildir_target import MaildirTarget
-from korgalore.pi_feed import PIFeed
-from korgalore.summarizer import CommandSummarizer, OpenAISummarizer, SummaryCache, SummaryRun
+from korgalore.summarizer import SummaryCache, SummaryRun
 from tests.digest_helpers import (
     DAILY,
     DNAME,
@@ -45,16 +33,14 @@ from tests.digest_helpers import (
     delivered,
     digest_text,
     job_of,
-    make_ctx,
     make_raw,
     mkmsg,
     part_text,
     send,
     send_parts,
     small_parts,
+    worker_ctx,
 )
-
-UTC = timezone.utc
 
 
 class TestSendDigest:
@@ -127,18 +113,15 @@ class TestSendDigest:
         # Recorded as sent, so we don't check again until the next slot
         assert repo.feed().load_digest_sent(DNAME) == tomorrow
 
-    def test_send_empty(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        repo.add_msg('a@x', NOW - timedelta(days=3))
-        digest = send(repo, maildir, schedule=DigestSchedule(send_empty=True))
-        assert digest is not None
-        assert len(delivered(maildir)) == 1
-
     def test_empty_feed(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
         assert send(repo, maildir) is None
         assert repo.feed().load_digest_sent(DNAME) == NOW
         assert not repo.feed().has_delivery_pointer(DNAME)
 
-    def test_empty_feed_send_empty_sends_once(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
+    @pytest.mark.parametrize('old_message', [False, True], ids=['empty-feed', 'nothing-in-the-period'])
+    def test_send_empty_sends_once(self, repo: InboxRepo, maildir: MaildirTarget, old_message: bool) -> None:
+        if old_message:
+            repo.add_msg('a@x', NOW - timedelta(days=3))
         sched = DigestSchedule(send_empty=True)
         assert send(repo, maildir, schedule=sched) is not None
         assert send(repo, maildir, now=NOW + timedelta(minutes=10), schedule=sched) is None
@@ -157,37 +140,37 @@ class TestSendDigest:
         assert 'old@x' not in text
         assert repo.feed().has_delivery_pointer(DNAME)
 
-    def test_force_when_not_due(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
+    @pytest.mark.parametrize('new_message', [True, False], ids=['new-message', 'empty-digest'])
+    def test_force_when_not_due(self, repo: InboxRepo, maildir: MaildirTarget, new_message: bool) -> None:
         repo.add_msg('a@x', NOW - timedelta(hours=1))
         send(repo, maildir)
         later = NOW + timedelta(hours=1)
-        repo.add_msg('b@x', later - timedelta(minutes=5))
+        if new_message:
+            repo.add_msg('b@x', later - timedelta(minutes=5))
 
         digest = send(repo, maildir, now=later, force=True)
 
         assert digest is not None
-        assert 'b@x' in digest_text(digest)
+        if new_message:
+            assert 'b@x' in digest_text(digest)
+        assert len(delivered(maildir)) == 2
         assert repo.feed().load_digest_sent(DNAME) == later
 
-    def test_force_sends_empty_digest(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        repo.add_msg('a@x', NOW - timedelta(hours=1))
-        send(repo, maildir)
-        assert send(repo, maildir, now=NOW + timedelta(hours=1), force=True) is not None
-        assert len(delivered(maildir)) == 2
-
-    def test_bozofilter(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        repo.add_msg('nice@x', NOW - timedelta(hours=2))
+    @pytest.mark.parametrize('nice_message', [True, False], ids=['bozo-dropped', 'only-bozos-is-empty'])
+    def test_bozofilter(self, repo: InboxRepo, maildir: MaildirTarget, nice_message: bool) -> None:
+        if nice_message:
+            repo.add_msg('nice@x', NOW - timedelta(hours=2))
         repo.add_msg('bozo@x', NOW - timedelta(hours=1), sender='Bozo <bozo@example.com>')
 
-        text = digest_text(send(repo, maildir, bozofilter={'bozo@example.com'}))
+        digest = send(repo, maildir, bozofilter={'bozo@example.com'})
 
-        assert 'nice@x' in text
-        assert 'bozo@x' not in text
-
-    def test_only_bozos_is_empty(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        repo.add_msg('bozo@x', NOW - timedelta(hours=1), sender='Bozo <bozo@example.com>')
-        assert send(repo, maildir, bozofilter={'bozo@example.com'}) is None
-        assert delivered(maildir) == []
+        if nice_message:
+            text = digest_text(digest)
+            assert 'nice@x' in text
+            assert 'bozo@x' not in text
+        else:
+            assert digest is None
+            assert delivered(maildir) == []
 
     def test_deleted_message_is_skipped(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
         repo.add_msg('a@x', NOW - timedelta(hours=2))
@@ -245,311 +228,14 @@ class TestSendDigest:
         assert send(repo, maildir) is not None
 
 
-def _target(identifier: str) -> MagicMock:
-    target = MagicMock()
-    target.identifier = identifier
-    return target
-
-
-class TestRunDueDigests:
-    @staticmethod
-    def _obj(targets: Dict[str, MagicMock]) -> Dict[str, Any]:
-        return {
-            'deliveries': {name: (MagicMock(feed_key=name), t, [], None) for name, t in targets.items()},
-            'digest_schedules': {name: DAILY for name in targets},
-            'bozofilter': {'bozo@example.com'},
-        }
-
-    def test_failure_does_not_stop_others(self) -> None:
-        obj = self._obj({'bad': _target('t1'), 'good': _target('t2')})
-        good_digest = {'Subject': 'lkml digest', 'Message-ID': '<d@x>'}
-
-        def fake_send(dname: str, *args: Any, **kwargs: Any) -> Any:
-            if dname == 'bad':
-                raise RuntimeError('boom')
-            return [good_digest]
-
-        with patch('korgalore.cli.send_digest', side_effect=fake_send) as mock_send:
-            sent = run_due_digests(make_ctx(obj), ['bad', 'good'], force=True)
-
-        assert sent == {'good': ['<d@x>']}
-        # Every target used gets disconnected, even after a failure
-        for _, target, _, _ in obj['deliveries'].values():
-            target.disconnect.assert_called_once()
-        assert mock_send.call_args.kwargs == {'force': True}
-        assert mock_send.call_args.args[6] == {'bozo@example.com'}
-
-    def test_not_due_is_not_reported(self) -> None:
-        obj = self._obj({'quiet': _target('t1')})
-        with patch('korgalore.cli.send_digest', return_value=[]):
-            assert run_due_digests(make_ctx(obj), ['quiet']) == {}
-
-    def test_auth_error_goes_to_caller(self) -> None:
-        obj = self._obj({'gmail': _target('t1')})
-        error = AuthenticationError('expired', target_id='t1')
-        with patch('korgalore.cli.send_digest', side_effect=error), pytest.raises(AuthenticationError):
-            run_due_digests(make_ctx(obj), ['gmail'])
-
-
-class TestMapDeliveries:
-    @staticmethod
-    def _map(details: Dict[str, Any]) -> click.Context:
-        ctx = make_ctx({'config': {'targets': {}}, 'targets': {}, 'feeds': {}})
-        with (
-            patch('korgalore.cli.get_feed_for_delivery', return_value=MagicMock(feed_key='lkml')),
-            patch('korgalore.cli.get_target', return_value=_target('local')),
-        ):
-            map_deliveries(ctx, {DNAME: {'feed': 'lkml', 'target': 'local', **details}})
-        return ctx
-
-    def test_message_is_default(self) -> None:
-        assert self._map({}).obj['digest_schedules'] == {}
-
-    def test_digest(self) -> None:
-        ctx = self._map({'mode': 'digest', 'schedule': 'weekly'})
-        assert ctx.obj['digest_schedules'] == {DNAME: DigestSchedule(schedule='weekly')}
-        assert DNAME in ctx.obj['deliveries']
-
-    def test_bad_mode(self) -> None:
-        with pytest.raises(ConfigurationError, match='mode'):
-            self._map({'mode': 'digests'})
-
-    LOCAL = {'type': 'openai', 'url': 'http://localhost:11434/v1', 'model': 'qwen3:32b'}
-    REMOTE = {'type': 'openai', 'url': 'https://llm.example.org/v1', 'model': 'big'}
-
-    @staticmethod
-    def _map_summarized(
-        summarizers: Dict[str, Any], feed: Any = None, names: Tuple[str, ...] = (DNAME,)
-    ) -> click.Context:
-        ctx = make_ctx({'config': {'targets': {}, 'summarizers': summarizers}, 'targets': {}, 'feeds': {}})
-        if feed is None:
-            feed = MagicMock(feed_key='lkml')
-        details = {'feed': 'lkml', 'target': 'local', 'mode': 'digest', 'summarizer': 'local'}
-        with (
-            patch('korgalore.cli.get_feed_for_delivery', return_value=feed),
-            patch('korgalore.cli.get_target', return_value=_target('local')),
-        ):
-            map_deliveries(ctx, {name: dict(details) for name in names})
-        return ctx
-
-    def test_summarizer(self) -> None:
-        ctx = self._map_summarized({'local': self.LOCAL}, names=(DNAME, 'netdev-digest'))
-        summarizer = ctx.obj['summarizers']['local']
-        assert isinstance(summarizer, OpenAISummarizer)
-        assert summarizer.model == 'qwen3:32b'
-        assert list(ctx.obj['summarizers']) == ['local']
-        assert ctx.obj['digest_schedules'][DNAME].summarizer == 'local'
-
-    def test_plain_digests_need_no_summarizers(self) -> None:
-        assert self._map({'mode': 'digest'}).obj['summarizers'] == {}
-
-    def test_unknown_summarizer(self) -> None:
-        with pytest.raises(ConfigurationError, match="summarizer 'local' is not defined"):
-            self._map_summarized({'other': self.LOCAL})
-
-    def test_bad_summarizer(self) -> None:
-        with pytest.raises(ConfigurationError, match="Summarizer 'local': url"):
-            self._map_summarized({'local': {'type': 'openai', 'model': 'm'}})
-
-    def test_lore_feed_may_use_a_remote_summarizer(self) -> None:
-        ctx = self._map_summarized({'local': self.REMOTE})
-        assert not ctx.obj['summarizers']['local'].is_local
-
-    @pytest.mark.parametrize(
-        'details',
-        [REMOTE, {'type': 'command', 'command': 'llm -m local'}],
-        ids=['remote', 'command'],
-    )
-    def test_lei_feed_needs_a_local_summarizer(self, details: Dict[str, Any]) -> None:
-        # lei can find private mail
-        with pytest.raises(ConfigurationError, match='allow_private_feeds'):
-            self._map_summarized({'local': details}, feed=MagicMock(spec=LeiFeed, feed_key='lei'))
-
-    def test_lei_feed_with_a_local_summarizer(self) -> None:
-        ctx = self._map_summarized({'local': self.LOCAL}, feed=MagicMock(spec=LeiFeed, feed_key='lei'))
-        assert ctx.obj['summarizers']['local'].is_local
-
-    def test_lei_feed_with_allow_private_feeds(self) -> None:
-        details = {'type': 'command', 'command': 'llm -m local', 'allow_private_feeds': True}
-        ctx = self._map_summarized({'local': details}, feed=MagicMock(spec=LeiFeed, feed_key='lei'))
-        assert isinstance(ctx.obj['summarizers']['local'], CommandSummarizer)
-
-    def test_digest_keys_need_digest_mode(self) -> None:
-        # A typo in mode shouldn't silently deliver every message
-        with pytest.raises(ConfigurationError, match='send_at'):
-            self._map({'send_at': '07:00'})
-
-
-def _pull_obj() -> Dict[str, Any]:
-    feed = MagicMock(feed_key='lkml')
-    feed.update_feed.return_value = PIFeed.STATUS_UPDATED
-    feed.STATUS_UPDATED = PIFeed.STATUS_UPDATED
-    feed.STATUS_INITIALIZED = PIFeed.STATUS_INITIALIZED
-    feed.STATUS_NOCHANGE = PIFeed.STATUS_NOCHANGE
-    feed.get_latest_commits_for_delivery.return_value = [(0, 'abc')]
-    target = _target('local')
-    return {
-        'config': {'deliveries': {'lkml-all': {}, DNAME: {'mode': 'digest'}}},
-        'feeds': {'lkml': feed},
-        'deliveries': {'lkml-all': (feed, target, [], None), DNAME: (feed, target, [], None)},
-        'digest_schedules': {DNAME: DAILY},
-        'targets': {},
-        'bozofilter': set(),
-        'hide_bar': True,
-    }
-
-
-@pytest.fixture
-def pull_env() -> Iterator[Tuple[MagicMock, MagicMock]]:
-    """Stub out mapping, locking and tracking; yield (deliver_commit, run_due_digests)."""
-    deliver = MagicMock(return_value='<m@x>')
-    digests = MagicMock(return_value={DNAME: ['<digest-1@x>', '<digest-2@x>']})
-    with (
-        patch('korgalore.cli.map_deliveries'),
-        patch('korgalore.cli.map_tracked_threads'),
-        patch('korgalore.cli.lock_all_feeds'),
-        patch('korgalore.cli.unlock_all_feeds') as unlock,
-        patch('korgalore.cli.retry_all_failed_deliveries'),
-        patch('korgalore.cli.update_tracked_thread_activity'),
-        patch('korgalore.cli.close_requests_session'),
-        patch('korgalore.cli.deliver_commit', deliver),
-        patch('korgalore.cli.run_due_digests', digests),
-    ):
-        digests.unlock = unlock
-        yield deliver, digests
-
-
-class TestPullHook:
-    def test_digest_not_delivered_per_message(self, pull_env: Tuple[MagicMock, MagicMock]) -> None:
-        deliver, digests = pull_env
-        changes, msgids = perform_pull(make_ctx(_pull_obj()), no_update=False, force=False, delivery_name=None)
-
-        assert [c.args[0] for c in deliver.call_args_list] == ['lkml-all']
-        assert digests.call_args.args[1] == [DNAME]
-        # A digest in two parts counts as two delivered messages
-        assert changes == {'lkml-all': 1, DNAME: 2}
-        assert msgids == {'<m@x>', '<digest-1@x>', '<digest-2@x>'}
-
-    def test_force_still_skips_digest_messages(self, pull_env: Tuple[MagicMock, MagicMock]) -> None:
-        deliver, _ = pull_env
-        perform_pull(make_ctx(_pull_obj()), no_update=True, force=True, delivery_name=None)
-        assert [c.args[0] for c in deliver.call_args_list] == ['lkml-all']
-
-    def test_digests_checked_without_updates(self, pull_env: Tuple[MagicMock, MagicMock]) -> None:
-        # A digest can be due on a quiet day, when no feed has news
-        deliver, digests = pull_env
-        obj = _pull_obj()
-        obj['feeds']['lkml'].update_feed.return_value = PIFeed.STATUS_NOCHANGE
-
-        changes, _ = perform_pull(make_ctx(obj), no_update=False, force=False, delivery_name=None)
-
-        deliver.assert_not_called()
-        digests.assert_called_once()
-        assert changes == {DNAME: 2}
-
-    def test_auth_error_unlocks(self, pull_env: Tuple[MagicMock, MagicMock]) -> None:
-        _, digests = pull_env
-        digests.side_effect = AuthenticationError('expired', target_id='local')
-        with pytest.raises(AuthenticationError):
-            perform_pull(make_ctx(_pull_obj()), no_update=True, force=False, delivery_name=None)
-        digests.unlock.assert_called_once()
-
-
-class TestDigestCommand:
-    @staticmethod
-    def _obj() -> Dict[str, Any]:
-        return {
-            'config': {
-                'deliveries': {
-                    'lkml-all': {'feed': 'lkml', 'target': 'local'},
-                    DNAME: {'feed': 'lkml', 'target': 'local', 'mode': 'digest'},
-                    'netdev-digest': {'feed': 'netdev', 'target': 'local', 'mode': 'digest'},
-                }
-            },
-            'targets': {},
-            'hide_bar': True,
-        }
-
-    @pytest.fixture
-    def env(self) -> Iterator[Dict[str, MagicMock]]:
-        def fake_update(ctx: click.Context, **kwargs: Any) -> Tuple[List[str], List[str]]:
-            ctx.obj['failed_feeds'] = ['netdev']
-            return [], []
-
-        mocks = {
-            'map': MagicMock(),
-            'update': MagicMock(side_effect=fake_update),
-            'run': MagicMock(return_value={}),
-            'unlock': MagicMock(),
-        }
-        with (
-            patch('korgalore.cli.map_deliveries', mocks['map']),
-            patch('korgalore.cli.lock_all_feeds'),
-            patch('korgalore.cli.unlock_all_feeds', mocks['unlock']),
-            patch('korgalore.cli.update_all_feeds', mocks['update']),
-            patch('korgalore.cli.run_due_digests', mocks['run']),
-            patch('korgalore.cli.close_requests_session'),
-        ):
-            yield mocks
-
-    def _invoke(self, *args: str) -> Any:
-        return CliRunner().invoke(digest_cmd, list(args), obj=self._obj())
-
-    def test_runs_only_digests(self, env: Dict[str, MagicMock]) -> None:
-        result = self._invoke()
-        assert result.exit_code == 0, result.output
-        assert list(env['map'].call_args.args[1]) == [DNAME, 'netdev-digest']
-        assert env['run'].call_args.args[1] == [DNAME, 'netdev-digest']
-        assert env['run'].call_args.kwargs == {'force': False}
-        env['update'].assert_called_once()
-        env['unlock'].assert_called_once()
-
-    def test_named_and_forced(self, env: Dict[str, MagicMock]) -> None:
-        result = self._invoke('--force', '--no-update', DNAME)
-        assert result.exit_code == 0, result.output
-        assert env['run'].call_args.args[1] == [DNAME]
-        assert env['run'].call_args.kwargs == {'force': True}
-        env['update'].assert_not_called()
-
-    def test_unknown_delivery(self, env: Dict[str, MagicMock]) -> None:
-        result = self._invoke('nope')
-        assert result.exit_code != 0
-        env['run'].assert_not_called()
-
-    def test_message_delivery_refused(self, env: Dict[str, MagicMock]) -> None:
-        result = self._invoke('lkml-all')
-        assert result.exit_code != 0
-        env['run'].assert_not_called()
-
-    def test_fail_on_feed_error(self, env: Dict[str, MagicMock]) -> None:
-        assert self._invoke().exit_code == 0
-        result = self._invoke('--fail-on-feed-error')
-        assert result.exit_code == 3
-        # The digests were still sent
-        assert env['run'].call_count == 2
-
-    def test_unlocks_on_error(self, env: Dict[str, MagicMock]) -> None:
-        env['run'].side_effect = AuthenticationError('expired', target_id='local')
-        result = self._invoke()
-        assert result.exit_code != 0
-        env['unlock'].assert_called_once()
-
-    def test_no_digests_configured(self, env: Dict[str, MagicMock]) -> None:
-        obj = self._obj()
-        del obj['config']['deliveries'][DNAME]
-        del obj['config']['deliveries']['netdev-digest']
-        result = CliRunner().invoke(digest_cmd, [], obj=obj)
-        assert result.exit_code == 0
-        env['map'].assert_not_called()
+def add_threads(repo: InboxRepo, count: int) -> None:
+    """count one-message threads, all inside the first digest period."""
+    repo.add_msgs(*((f't{n}@x', NOW - timedelta(hours=8) + timedelta(minutes=n)) for n in range(count)))
 
 
 class TestSplitDelivery:
-    @staticmethod
-    def add_threads(repo: InboxRepo, count: int) -> None:
-        repo.add_msgs(*((f't{n}@x', NOW - timedelta(hours=8) + timedelta(minutes=n)) for n in range(count)))
-
     def test_parts_are_sent_in_order(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        self.add_threads(repo, 4)
+        add_threads(repo, 4)
         with small_parts():
             parts = send_parts(repo, maildir)
 
@@ -562,7 +248,7 @@ class TestSplitDelivery:
         assert not job_of(repo).path.exists()
 
     def test_failed_part_is_resumed(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        self.add_threads(repo, 4)
+        add_threads(repo, 4)
         flaky = FlakyTarget(maildir, fail_on=[3])
 
         with small_parts(), pytest.raises(RuntimeError):
@@ -598,28 +284,16 @@ class TestSplitDelivery:
 
     def test_resume_comes_before_schedule(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
         """Left-over parts go out on the next run, even when no digest is due."""
-        self.add_threads(repo, 4)
+        add_threads(repo, 4)
         with small_parts():
             with pytest.raises(RuntimeError):
                 send_parts(repo, FlakyTarget(maildir, fail_on=[1]))
             assert delivered(maildir) == []
             assert len(send_parts(repo, maildir, now=NOW + timedelta(minutes=5))) == 4
 
-    def test_unfinished_job_is_thrown_away(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        """Without a job file, the job was never finished, so start again."""
-        self.add_threads(repo, 3)
-        job = job_of(repo)
-        job.parts_dir.mkdir(parents=True)
-        (job.parts_dir / '0001.eml').write_bytes(b'Subject: half-written\n\n')
-
-        (digest,) = send_parts(repo, maildir)
-
-        assert 'half-written' not in str(digest['Subject'])
-        assert [str(msg['Subject']) for msg in delivered(maildir)] == [str(digest['Subject'])]
-
     def test_job_already_delivered(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
         """We stopped after saving state but before removing the job."""
-        self.add_threads(repo, 3)
+        add_threads(repo, 3)
         send_parts(repo, maildir)
         job = job_of(repo)
         job.create([], {'period_end': NOW.isoformat(), 'pointer': None})
@@ -659,6 +333,8 @@ class TestJobStages:
         assert len(job.messages()) == 2
         assert state['pointer']['entry']['last'] == top
         assert state['pointer']['entry']['msgid'] == '<b@x>'
+        # Nothing has been summarized yet
+        assert job.summaries(state) == {}
         assert state['period_end'] == NOW.isoformat()
         # Nothing is saved until the digest is delivered
         assert repo.feed().load_digest_sent(DNAME) is None
@@ -671,7 +347,10 @@ class TestJobStages:
         assert not job_of(repo).path.exists()
         assert repo.feed().load_digest_sent(DNAME) == NOW
 
-    def test_later_stages_read_no_git(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
+    @pytest.mark.parametrize('via_worker', [False, True], ids=['send', 'worker'])
+    def test_later_stages_read_no_git(
+        self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget, via_worker: bool
+    ) -> None:
         """After collect, the feed repositories are not needed at all.
 
         This is what lets a slow stage run without holding the feed lock,
@@ -681,9 +360,11 @@ class TestJobStages:
         assert collect(repo)
         repo.feed_dir.joinpath('git').rename(repo.feed_dir / 'git-away')
 
-        digest = send(repo, maildir, now=NOW + timedelta(minutes=5))
-
-        assert digest is not None
+        if via_worker:
+            assert DNAME in run_digest_worker(worker_ctx(tmp_path, repo, maildir), [DNAME])
+        else:
+            assert send(repo, maildir, now=NOW + timedelta(minutes=5)) is not None
+        [digest] = delivered(maildir)
         assert 'a@x' in digest_text(digest)
         repo.feed_dir.joinpath('git-away').rename(repo.feed_dir / 'git')
         feed = repo.feed()
@@ -718,17 +399,28 @@ class TestJobStages:
         assert len(job.pending()) == 1
         assert not job.messages_dir.exists()
 
-    def test_unfinished_render_is_done_again(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
-        """A render that stopped half way left parts, but the job is still collected."""
-        repo.add_msg('a@x', NOW - timedelta(hours=3))
-        assert collect(repo)
+    @pytest.mark.parametrize(
+        ('collected', 'part'),
+        [
+            # Without a job file, the job was never finished, so start again
+            pytest.param(False, '0001', id='no-job-file'),
+            # A render that stopped half way left parts, but the job is still collected
+            pytest.param(True, '0007', id='collected'),
+        ],
+    )
+    def test_half_written_parts_are_thrown_away(
+        self, repo: InboxRepo, maildir: MaildirTarget, collected: bool, part: str
+    ) -> None:
+        add_threads(repo, 3)
+        if collected:
+            assert collect(repo)
         job = job_of(repo)
-        job.parts_dir.mkdir()
-        (job.parts_dir / '0007.eml').write_bytes(b'Subject: half-written\n\n')
+        job.parts_dir.mkdir(parents=True, exist_ok=True)
+        (job.parts_dir / f'{part}.eml').write_bytes(b'Subject: half-written\n\n')
 
-        digest = send(repo, maildir, now=NOW + timedelta(minutes=5))
+        (digest,) = send_parts(repo, maildir, now=NOW + timedelta(minutes=5))
 
-        assert digest is not None
+        assert 'half-written' not in str(digest['Subject'])
         assert [str(msg['Subject']) for msg in delivered(maildir)] == [str(digest['Subject'])]
 
     def test_bozofilter_is_applied_at_collect(self, repo: InboxRepo) -> None:
@@ -752,7 +444,7 @@ class TestRootLookup:
     """The collect stage looks up the cover letters of continuing series."""
 
     def test_digest_is_named_after_the_cover(
-        self, repo: InboxRepo, maildir: MaildirTarget, no_archive_lookups: MagicMock
+        self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget, no_archive_lookups: MagicMock
     ) -> None:
         add_review(repo, 'cover@x', '[PATCH v3 2/7] mm: use the tail pointer')
         no_archive_lookups.side_effect = None
@@ -761,25 +453,16 @@ class TestRootLookup:
         assert collect(repo)
         assert job_of(repo).load()['root_subjects'] == {'cover@x': '[PATCH v3 0/7] mm: frobnicate the widgets'}
         no_archive_lookups.assert_called_once_with('cover@x')
+        # The summarizer is told the cover subject too
+        fake = RecordingSummarizer()
+        summarize_digest_job(DNAME, DAILY, job_of(repo), SummaryRun(fake, SummaryCache(tmp_path / 'cache')), now=NOW)
+        (prompt,) = fake.prompts
+        assert '[PATCH v3 0/7] mm: frobnicate the widgets' in prompt
         digest = send(repo, maildir)
 
         text = digest_text(digest)
         assert '\n[PATCH v3 0/7] mm: frobnicate the widgets\n' in text
         assert 'on 2/7' in text
-
-    def test_summarizer_gets_the_cover_subject(
-        self, tmp_path: Path, repo: InboxRepo, no_archive_lookups: MagicMock
-    ) -> None:
-        add_review(repo, 'cover@x', '[PATCH v3 2/7] mm: use the tail pointer')
-        no_archive_lookups.side_effect = None
-        no_archive_lookups.return_value = make_raw('cover@x', '[PATCH v3 0/7] mm: frobnicate the widgets')
-        assert collect(repo)
-        fake = RecordingSummarizer()
-
-        summarize_digest_job(DNAME, DAILY, job_of(repo), SummaryRun(fake, SummaryCache(tmp_path / 'cache')), now=NOW)
-
-        (prompt,) = fake.prompts
-        assert '[PATCH v3 0/7] mm: frobnicate the widgets' in prompt
 
     def test_first_failure_stops_the_lookups(
         self, repo: InboxRepo, maildir: MaildirTarget, no_archive_lookups: MagicMock, caplog: pytest.LogCaptureFixture
