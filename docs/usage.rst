@@ -133,7 +133,7 @@ digest
 
 Send the digests that are due. A digest is a delivery with
 ``mode = 'digest'``: it sends one summary email per day or week instead
-of every message. Digests are experimental; see :doc:`digests`.
+of every message. Digests are in beta; see :doc:`digests`.
 
 .. code-block:: bash
 

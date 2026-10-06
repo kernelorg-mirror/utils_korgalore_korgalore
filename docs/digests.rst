@@ -2,7 +2,7 @@ Digests
 =======
 
 .. warning::
-   Digests are **experimental**. The configuration, the email format
+   Digests are in **beta**. The configuration, the email format
    and the defaults may change in a future release. Please tell us what
    works and what doesn't at tools@kernel.org.
 
@@ -14,7 +14,7 @@ whole thread into your mailbox with one command.
 
 A digest can also have a short **summary** of each thread, written by a
 language model that you choose. This part is optional, and it is the
-most experimental part.
+part that is still experimental.
 
 This page shows how to set up digests and what to do when something goes
 wrong. All the configuration keys are listed in "Digest Deliveries" and

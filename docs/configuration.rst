@@ -674,7 +674,7 @@ Digest Deliveries
 ~~~~~~~~~~~~~~~~~
 
 .. warning::
-   Digests are experimental, and these keys may change. See
+   Digests are in beta, and these keys may change. See
    :doc:`digests` for a walkthrough and for troubleshooting.
 
 A digest delivery doesn't put every message in your inbox. Instead, it

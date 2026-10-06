@@ -12,7 +12,7 @@ Enhancements
 
 * GUI: Add "About" dialog showing version, description, website, and license
 
-* Digest deliveries (experimental): ``mode = 'digest'`` sends one
+* Digest deliveries (beta): ``mode = 'digest'`` sends one
   summary email per day or week instead of every message. See the new
   "Digests" page in the docs
 
