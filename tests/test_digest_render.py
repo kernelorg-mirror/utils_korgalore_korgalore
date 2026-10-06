@@ -527,7 +527,7 @@ class TestRenderDigest:
         msg = render_digest(make_info(), sample_threads(), msgid='fixed@example.org', now=NOW)
         assert msg.get_content_type() == 'multipart/alternative'
         assert [part.get_content_type() for part in msg.iter_parts()] == ['text/plain', 'text/html']
-        assert msg['Subject'] == '[digest] lkml: 2026-10-01 (3 threads, 8 messages)'
+        assert msg['Subject'] == '[DIGEST] lkml: 2026-10-01 (3 threads, 8 messages)'
         assert msg['From'] == 'korgalore <digest@example.org>'
         assert msg['Message-ID'] == '<fixed@example.org>'
         assert msg['Date'] == 'Thu, 01 Oct 2026 07:00:00 +0200'
@@ -777,7 +777,7 @@ class TestSplit:
         info = make_info()
         threads = sample_threads()
         (msg,) = render_digest_parts(info, threads, now=NOW)
-        assert msg['Subject'] == '[digest] lkml: 2026-10-01 (3 threads, 8 messages)'
+        assert msg['Subject'] == '[DIGEST] lkml: 2026-10-01 (3 threads, 8 messages)'
         assert msg['X-Korgalore-Digest-Part'] is None
         assert digest_html(msg) == render_html(info, threads)
 

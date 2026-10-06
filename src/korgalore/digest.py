@@ -1208,7 +1208,7 @@ def split_threads(
 
 def _digest_subject(info: DigestInfo, threads: Sequence[DigestThread], part: Optional[DigestPart]) -> str:
     messages = sum(len(thread.updates) for thread in threads)
-    prefix = f'[DIGEST {part.number}/{part.total}]' if part else '[digest]'
+    prefix = f'[DIGEST {part.number}/{part.total}]' if part else '[DIGEST]'
     return (
         f'{prefix} {info.feed_name}: {info.period_end:%Y-%m-%d} '
         f'({_plural(len(threads), "thread")}, {_plural(messages, "message")})'
