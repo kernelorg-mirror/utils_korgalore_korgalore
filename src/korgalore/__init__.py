@@ -12,7 +12,7 @@ import requests
 import liblore
 from liblore import LoreNode
 
-__version__ = '0.7-dev'
+__version__ = '0.7.0'
 __author__ = 'Konstantin Ryabitsev'
 __email__ = 'konstantin@linuxfoundation.org'
 __user_agent__ = f'korgalore/{__version__}'
