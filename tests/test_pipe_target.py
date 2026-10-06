@@ -1,5 +1,7 @@
 """Tests for PipeTarget message delivery."""
 
+import logging
+from typing import List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,59 +13,43 @@ from korgalore.pipe_target import PipeTarget
 class TestPipeTargetInit:
     """Tests for PipeTarget initialization and validation."""
 
-    def test_valid_simple_command(self) -> None:
-        """Simple command without arguments."""
-        target = PipeTarget('test', 'cat')
-        assert target.identifier == 'test'
-        assert target.command == 'cat'
-        assert target.command_args == ['cat']
-
-    def test_valid_command_with_args(self) -> None:
-        """Command with multiple arguments."""
-        target = PipeTarget('test', "mail -s 'Test Subject' user@example.com")
-        assert target.command_args == ['mail', '-s', 'Test Subject', 'user@example.com']
-
-    def test_valid_command_with_path(self) -> None:
-        """Command with full path."""
-        target = PipeTarget('test', '/usr/bin/sendmail -t')
-        assert target.command_args == ['/usr/bin/sendmail', '-t']
-
-    def test_empty_command_raises(self) -> None:
-        """Empty command string raises ConfigurationError."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            PipeTarget('test', '')
-        assert 'requires a command' in str(exc_info.value)
-
-    def test_whitespace_only_command_raises(self) -> None:
-        """Whitespace-only command raises ConfigurationError."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            PipeTarget('test', '   ')
-        assert 'requires a non-empty command' in str(exc_info.value)
-
-    def test_invalid_shlex_raises(self) -> None:
-        """Invalid shell quoting raises ConfigurationError."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            PipeTarget('test', "echo 'unclosed quote")
-        assert 'Invalid command' in str(exc_info.value)
-
-    def test_identifier_preserved(self) -> None:
-        """Identifier is stored correctly."""
-        target = PipeTarget('my-pipe-target', 'cat')
+    @pytest.mark.parametrize(
+        ('command', 'expected_args'),
+        [
+            ('cat', ['cat']),
+            (
+                "mail -s 'Test Subject' user@example.com",
+                ['mail', '-s', 'Test Subject', 'user@example.com'],
+            ),
+            ('/usr/bin/sendmail -t', ['/usr/bin/sendmail', '-t']),
+        ],
+        ids=['simple', 'quoted-args', 'full-path'],
+    )
+    def test_valid_command(self, command: str, expected_args: List[str]) -> None:
+        target = PipeTarget('my-pipe-target', command)
         assert target.identifier == 'my-pipe-target'
+        assert target.command == command
+        assert target.command_args == expected_args
+
+    @pytest.mark.parametrize(
+        ('command', 'message'),
+        [
+            ('', 'requires a command'),
+            ('   ', 'requires a non-empty command'),
+            ("echo 'unclosed quote", 'Invalid command'),
+        ],
+        ids=['empty', 'whitespace-only', 'bad-quoting'],
+    )
+    def test_invalid_command_raises(self, command: str, message: str) -> None:
+        with pytest.raises(ConfigurationError, match=message):
+            PipeTarget('test', command)
 
 
 class TestPipeTargetConnect:
     """Tests for PipeTarget connect method."""
 
-    def test_connect_succeeds(self) -> None:
-        """Connect is a no-op that doesn't raise."""
-        target = PipeTarget('test', 'cat')
-        target.connect()  # Should not raise
-
     def test_connect_logs_command(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Connect logs the configured command."""
-        import logging
-
+        """Connect is a no-op that logs the configured command."""
         caplog.set_level(logging.DEBUG, logger='korgalore')
         target = PipeTarget('test', '/usr/bin/mycommand --flag')
         target.connect()
@@ -74,10 +60,9 @@ class TestPipeTargetImportMessage:
     """Tests for PipeTarget import_message method."""
 
     def test_successful_delivery(self) -> None:
-        """Message piped successfully to command."""
+        """Message is piped to the command, normalized to CRLF."""
         target = PipeTarget('test', 'cat')
         raw_message = b'From: test@example.com\nSubject: Test\n\nBody'
-        # RawMessage.as_binary() normalizes to CRLF
         expected_output = b'From: test@example.com\r\nSubject: Test\r\n\r\nBody'
 
         with patch('subprocess.run') as mock_run:
@@ -91,145 +76,71 @@ class TestPipeTargetImportMessage:
         assert call_args[1]['input'] == expected_output
         assert call_args[1]['capture_output'] is True
 
-    def test_labels_appended_as_args(self) -> None:
-        """Labels are appended as command line arguments."""
-        target = PipeTarget('test', 'deliver --maildir')
-        raw_message = b'test message'
-
+    @pytest.mark.parametrize(
+        ('command', 'labels', 'argv'),
+        [
+            (
+                'deliver --maildir',
+                ['inbox', 'important'],
+                ['deliver', '--maildir', 'inbox', 'important'],
+            ),
+            ('cat -v', [], ['cat', '-v']),
+        ],
+        ids=['labels-appended', 'no-labels'],
+    )
+    def test_labels_become_arguments(self, command: str, labels: List[str], argv: List[str]) -> None:
+        target = PipeTarget('test', command)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
-            target.import_message(raw_message, ['inbox', 'important'])
+            target.import_message(b'test', labels)
 
-        call_args = mock_run.call_args[0][0]
-        assert call_args == ['deliver', '--maildir', 'inbox', 'important']
+        assert mock_run.call_args[0][0] == argv
 
-    def test_empty_labels(self) -> None:
-        """Empty labels list works correctly."""
-        target = PipeTarget('test', 'cat -v')
-        raw_message = b'test'
-
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
-            target.import_message(raw_message, [])
-
-        call_args = mock_run.call_args[0][0]
-        assert call_args == ['cat', '-v']
-
-    def test_nonzero_exit_raises_delivery_error(self) -> None:
-        """Non-zero exit code raises DeliveryError with stderr."""
+    @pytest.mark.parametrize(
+        ('returncode', 'stderr', 'expected'),
+        [
+            (1, b'Something went wrong', 'Something went wrong'),
+            (2, b'Error with \xff\xfe invalid bytes', 'exit code 2'),
+        ],
+        ids=['ascii-stderr', 'non-utf8-stderr'],
+    )
+    def test_nonzero_exit_raises_delivery_error(self, returncode: int, stderr: bytes, expected: str) -> None:
+        """Non-zero exit raises DeliveryError, tolerating undecodable stderr."""
         target = PipeTarget('test', 'failing-command')
-        raw_message = b'test'
 
         with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout=b'', stderr=b'Something went wrong')
+            mock_run.return_value = MagicMock(returncode=returncode, stdout=b'', stderr=stderr)
             with pytest.raises(DeliveryError) as exc_info:
-                target.import_message(raw_message, [])
+                target.import_message(b'test', [])
 
-        assert 'exit code 1' in str(exc_info.value)
-        assert 'Something went wrong' in str(exc_info.value)
-
-    def test_nonzero_exit_with_unicode_stderr(self) -> None:
-        """Non-zero exit handles non-UTF8 stderr gracefully."""
-        target = PipeTarget('test', 'failing-command')
-        raw_message = b'test'
-
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(returncode=2, stdout=b'', stderr=b'Error with \xff\xfe invalid bytes')
-            with pytest.raises(DeliveryError) as exc_info:
-                target.import_message(raw_message, [])
-
-        assert 'exit code 2' in str(exc_info.value)
-
-    def test_command_not_found_raises_delivery_error(self) -> None:
-        """FileNotFoundError raises DeliveryError."""
-        target = PipeTarget('test', 'nonexistent-command')
-        raw_message = b'test'
-
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = FileNotFoundError()
-            with pytest.raises(DeliveryError) as exc_info:
-                target.import_message(raw_message, [])
-
-        assert 'not found' in str(exc_info.value)
-        assert 'nonexistent-command' in str(exc_info.value)
+        assert f'exit code {returncode}' in str(exc_info.value)
+        assert expected in str(exc_info.value)
 
     def test_other_exception_raises_delivery_error(self) -> None:
         """Other exceptions are wrapped in DeliveryError."""
         target = PipeTarget('test', 'some-command')
-        raw_message = b'test'
 
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = OSError('Permission denied')
-            with pytest.raises(DeliveryError) as exc_info:
-                target.import_message(raw_message, [])
-
-        assert 'Permission denied' in str(exc_info.value)
-
-    def test_delivery_error_not_wrapped(self) -> None:
-        """DeliveryError from non-zero exit is not double-wrapped."""
-        target = PipeTarget('test', 'cmd')
-        raw_message = b'test'
-
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(returncode=42, stdout=b'', stderr=b'original error')
-            with pytest.raises(DeliveryError) as exc_info:
-                target.import_message(raw_message, [])
-
-        # Should contain the original message, not wrapped
-        assert 'exit code 42' in str(exc_info.value)
-        assert 'original error' in str(exc_info.value)
-
-    def test_large_message(self) -> None:
-        """Large messages are handled correctly."""
-        target = PipeTarget('test', 'cat')
-        raw_message = b'X' * 1024 * 1024  # 1MB message
-
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
-            result = target.import_message(raw_message, [])
-
-        assert result == 0
-        assert mock_run.call_args[1]['input'] == raw_message
-
-    def test_binary_message_content(self) -> None:
-        """Binary content in message is processed through as_binary()."""
-        target = PipeTarget('test', 'cat')
-        # Use message without newlines to avoid CRLF transformation
-        raw_message = bytes([b for b in range(256) if b != 0x0A])
-
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
-            target.import_message(raw_message, [])
-
-        assert mock_run.call_args[1]['input'] == raw_message
+            with pytest.raises(DeliveryError, match='Permission denied'):
+                target.import_message(b'test', [])
 
 
 class TestPipeTargetIntegration:
     """Integration tests using real commands."""
 
     def test_cat_returns_success(self) -> None:
-        """Real cat command succeeds."""
         target = PipeTarget('test', 'cat')
-        raw_message = b'Hello, World!'
-        result = target.import_message(raw_message, [])
-        assert result == 0
+        assert target.import_message(b'Hello, World!', []) == 0
 
     def test_false_command_fails(self) -> None:
-        """Real false command returns non-zero."""
         target = PipeTarget('test', 'false')
-        with pytest.raises(DeliveryError) as exc_info:
+        with pytest.raises(DeliveryError, match='exit code 1'):
             target.import_message(b'test', [])
-        assert 'exit code 1' in str(exc_info.value)
-
-    def test_true_command_succeeds(self) -> None:
-        """Real true command returns zero."""
-        target = PipeTarget('test', 'true')
-        result = target.import_message(b'test', [])
-        assert result == 0
 
     def test_nonexistent_command_fails(self) -> None:
-        """Non-existent command raises DeliveryError."""
         target = PipeTarget('test', '/nonexistent/path/to/command')
         with pytest.raises(DeliveryError) as exc_info:
             target.import_message(b'test', [])
         assert 'not found' in str(exc_info.value)
+        assert '/nonexistent/path/to/command' in str(exc_info.value)

@@ -1,7 +1,7 @@
 """Tests for JmapTarget message delivery."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Iterator, List, Optional, Type
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +9,9 @@ import requests
 
 from korgalore import ConfigurationError, RemoteError
 from korgalore.jmap_target import JmapTarget
+from korgalore.message import RawMessage
+
+SERVER = 'https://api.example.com'
 
 # Sample JMAP session response
 SAMPLE_SESSION = {
@@ -35,47 +38,102 @@ SAMPLE_MAILBOXES_RESPONSE = {
     ]
 }
 
+MAILBOX_MAP = {'inbox': 'mb-1', 'sent': 'mb-2', 'archive': 'mb-3'}
+
+
+def make_target(**kwargs: Any) -> JmapTarget:
+    """A JmapTarget with a bearer token, overridable per test."""
+    params: Dict[str, Any] = {
+        'identifier': 'test',
+        'server': SERVER,
+        'username': 'user@example.com',
+        'token': 'token',
+    }
+    params.update(kwargs)
+    return JmapTarget(**params)
+
+
+def json_response(payload: Dict[str, Any]) -> MagicMock:
+    """A requests response whose .json() is the given payload."""
+    response = MagicMock()
+    response.json.return_value = payload
+    return response
+
+
+def upload_response(blob_id: str = 'blob-123') -> MagicMock:
+    return json_response({'blobId': blob_id})
+
+
+def import_response(result: Dict[str, Any]) -> MagicMock:
+    """An Email/import response for the single email 'msg1'."""
+    return json_response({'methodResponses': [['Email/import', result, 'call-0']]})
+
+
+def created(email_id: str = 'email-456') -> MagicMock:
+    return import_response({'created': {'msg1': {'id': email_id}}})
+
+
+def query_response(ids: List[str]) -> MagicMock:
+    return json_response({'methodResponses': [['Email/query', {'ids': ids}, 'call-0']]})
+
+
+@pytest.fixture
+def mock_post() -> Iterator[MagicMock]:
+    post = MagicMock()
+    with patch('korgalore.jmap_target.requests.post', post):
+        yield post
+
+
+@pytest.fixture
+def jmap() -> JmapTarget:
+    """A target with session state pre-populated, as after connect()."""
+    target = make_target()
+    target.session = SAMPLE_SESSION
+    target.account_id = 'acc-123'
+    target.api_url = 'https://api.example.com/jmap/api/'
+    target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
+    return target
+
+
+@pytest.fixture
+def jmap_mailboxes(jmap: JmapTarget) -> JmapTarget:
+    """Like `jmap`, with the mailbox cache pre-populated."""
+    jmap._mailbox_map = dict(MAILBOX_MAP)
+    return jmap
+
 
 class TestJmapTargetInit:
     """Tests for JmapTarget initialization."""
 
-    def test_valid_config_with_token(self) -> None:
-        """Valid configuration with direct token."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='secret_token'
-        )
+    @pytest.mark.parametrize(
+        ('kwargs', 'timeout'),
+        [({}, 60), ({'server': SERVER + '/', 'timeout': 120}, 120)],
+        ids=['defaults', 'trailing-slash-and-custom-timeout'],
+    )
+    def test_valid_config_with_token(self, kwargs: Dict[str, Any], timeout: int) -> None:
+        target = make_target(token='secret_token', **kwargs)
         assert target.identifier == 'test'
-        assert target.server == 'https://api.example.com'
+        assert target.server == SERVER  # trailing slash stripped
         assert target.username == 'user@example.com'
         assert target.token == 'secret_token'
-        assert target.timeout == 60
+        assert target.timeout == timeout
+        # Session state is only filled in by connect()
+        assert target.session is None
+        assert target.account_id is None
+        assert target.api_url is None
+        assert target.upload_url is None
 
-    def test_server_trailing_slash_stripped(self) -> None:
-        """Trailing slash on server URL is stripped."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com/', username='user@example.com', token='token'
-        )
-        assert target.server == 'https://api.example.com'
-
-    def test_valid_config_with_token_file(self, tmp_path: Path) -> None:
-        """Valid configuration with token file."""
+    @pytest.mark.parametrize(
+        ('content', 'expected'),
+        [('file_token\n', 'file_token'), ('  token_with_spaces  \n\n', 'token_with_spaces')],
+        ids=['plain', 'whitespace-stripped'],
+    )
+    def test_valid_config_with_token_file(self, tmp_path: Path, content: str, expected: str) -> None:
         token_file = tmp_path / 'token.txt'
-        token_file.write_text('file_token\n')
+        token_file.write_text(content)
 
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token_file=str(token_file)
-        )
-        assert target.token == 'file_token'
-
-    def test_token_file_strips_whitespace(self, tmp_path: Path) -> None:
-        """Token file content is stripped of whitespace."""
-        token_file = tmp_path / 'token.txt'
-        token_file.write_text('  token_with_spaces  \n\n')
-
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token_file=str(token_file)
-        )
-        assert target.token == 'token_with_spaces'
+        target = make_target(token=None, token_file=str(token_file))
+        assert target.token == expected
 
     def test_token_file_with_tilde(self, tmp_path: Path) -> None:
         """Token file path with tilde is expanded."""
@@ -83,66 +141,40 @@ class TestJmapTargetInit:
         token_file.write_text('secret')
 
         with patch.object(Path, 'expanduser', return_value=token_file):
-            target = JmapTarget(
-                identifier='test',
-                server='https://api.example.com',
-                username='user@example.com',
-                token_file='~/token.txt',
-            )
+            target = make_target(token=None, token_file='~/token.txt')
         assert target.token == 'secret'
 
-    def test_custom_timeout(self) -> None:
-        """Custom timeout can be specified."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token', timeout=120
-        )
-        assert target.timeout == 120
+    def test_token_takes_precedence_over_file(self, tmp_path: Path) -> None:
+        token_file = tmp_path / 'token.txt'
+        token_file.write_text('file_token')
 
-    def test_missing_token_raises(self) -> None:
-        """Missing both token and token_file raises ConfigurationError."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            JmapTarget(identifier='test', server='https://api.example.com', username='user@example.com')
-        assert 'No token or token_file specified' in str(exc_info.value)
+        target = make_target(token='direct_token', token_file=str(token_file))
+        assert target.token == 'direct_token'
 
-    def test_nonexistent_token_file_raises(self) -> None:
-        """Non-existent token file raises ConfigurationError."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            JmapTarget(
-                identifier='test',
-                server='https://api.example.com',
-                username='user@example.com',
-                token_file='/nonexistent/path/token.txt',
-            )
-        assert 'Token file not found' in str(exc_info.value)
-
-    def test_session_not_initialized(self) -> None:
-        """Session state is None before connect()."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        assert target.session is None
-        assert target.account_id is None
-        assert target.api_url is None
-        assert target.upload_url is None
-
-    def test_default_labels(self) -> None:
-        """Default labels is INBOX."""
-        assert JmapTarget.DEFAULT_LABELS == ['INBOX']
+    @pytest.mark.parametrize(
+        ('kwargs', 'message'),
+        [
+            ({'token': None}, 'No token or token_file specified'),
+            ({'token': None, 'token_file': '/nonexistent/path/token.txt'}, 'Token file not found'),
+        ],
+        ids=['no-token', 'missing-token-file'],
+    )
+    def test_invalid_config_raises(self, kwargs: Dict[str, Any], message: str) -> None:
+        with pytest.raises(ConfigurationError, match=message):
+            make_target(**kwargs)
 
 
 class TestJmapTargetConnect:
     """Tests for JmapTarget connect method."""
 
     @patch('korgalore.jmap_target.requests.get')
-    def test_connect_success(self, mock_get: MagicMock) -> None:
-        """Successful session discovery."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_SESSION
-        mock_get.return_value = mock_response
+    def test_connect_success_once(self, mock_get: MagicMock) -> None:
+        """Session discovery fills in the session state, and repeated calls don't reconnect."""
+        mock_get.return_value = json_response(SAMPLE_SESSION)
 
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='secret_token'
-        )
+        target = make_target(token='secret_token')
+        target.connect()
+        target.connect()
         target.connect()
 
         mock_get.assert_called_once_with(
@@ -152,632 +184,263 @@ class TestJmapTargetConnect:
         assert target.api_url == 'https://api.example.com/jmap/api/'
         assert target.upload_url == 'https://api.example.com/jmap/upload/acc-123/'
 
+    @pytest.mark.parametrize(
+        ('session', 'error', 'message'),
+        [
+            (None, RemoteError, 'Failed to discover JMAP session'),
+            ({'uploadUrl': 'https://api.example.com/upload/{accountId}/'}, RemoteError, 'missing apiUrl or uploadUrl'),
+            ({'apiUrl': 'https://api.example.com/api/'}, RemoteError, 'missing apiUrl or uploadUrl'),
+            (
+                {
+                    'apiUrl': 'https://api.example.com/api/',
+                    'uploadUrl': 'https://api.example.com/upload/{accountId}/',
+                    'accounts': {'acc-999': {'name': 'different@example.com'}},
+                },
+                ConfigurationError,
+                'Account not found',
+            ),
+        ],
+        ids=['request-failure', 'missing-api-url', 'missing-upload-url', 'account-not-found'],
+    )
     @patch('korgalore.jmap_target.requests.get')
-    def test_connect_idempotent(self, mock_get: MagicMock) -> None:
-        """Multiple connect() calls don't reconnect."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_SESSION
-        mock_get.return_value = mock_response
+    def test_connect_failures(
+        self,
+        mock_get: MagicMock,
+        session: Optional[Dict[str, Any]],
+        error: Type[Exception],
+        message: str,
+    ) -> None:
+        if session is None:
+            mock_get.side_effect = requests.RequestException('Connection refused')
+        else:
+            mock_get.return_value = json_response(session)
 
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.connect()
-        target.connect()
-        target.connect()
-
-        assert mock_get.call_count == 1
-
-    @patch('korgalore.jmap_target.requests.get')
-    def test_connect_request_failure(self, mock_get: MagicMock) -> None:
-        """Request failure raises RemoteError."""
-        mock_get.side_effect = requests.RequestException('Connection refused')
-
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-
-        with pytest.raises(RemoteError) as exc_info:
-            target.connect()
-        assert 'Failed to discover JMAP session' in str(exc_info.value)
-
-    @patch('korgalore.jmap_target.requests.get')
-    def test_connect_missing_api_url(self, mock_get: MagicMock) -> None:
-        """Missing apiUrl in session raises RemoteError."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {'uploadUrl': 'https://api.example.com/upload/{accountId}/'}
-        mock_get.return_value = mock_response
-
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-
-        with pytest.raises(RemoteError) as exc_info:
-            target.connect()
-        assert 'missing apiUrl or uploadUrl' in str(exc_info.value)
-
-    @patch('korgalore.jmap_target.requests.get')
-    def test_connect_missing_upload_url(self, mock_get: MagicMock) -> None:
-        """Missing uploadUrl in session raises RemoteError."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {'apiUrl': 'https://api.example.com/api/'}
-        mock_get.return_value = mock_response
-
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-
-        with pytest.raises(RemoteError) as exc_info:
-            target.connect()
-        assert 'missing apiUrl or uploadUrl' in str(exc_info.value)
-
-    @patch('korgalore.jmap_target.requests.get')
-    def test_connect_account_not_found(self, mock_get: MagicMock) -> None:
-        """Account not found raises ConfigurationError."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            'apiUrl': 'https://api.example.com/api/',
-            'uploadUrl': 'https://api.example.com/upload/{accountId}/',
-            'accounts': {'acc-999': {'name': 'different@example.com'}},
-        }
-        mock_get.return_value = mock_response
-
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-
-        with pytest.raises(ConfigurationError) as exc_info:
-            target.connect()
-        assert 'Account not found' in str(exc_info.value)
+        with pytest.raises(error, match=message):
+            make_target().connect()
 
 
 class TestJmapTargetUploadBlob:
     """Tests for JmapTarget _upload_blob method."""
 
-    def _create_connected_target(self) -> JmapTarget:
-        """Create a target with session state pre-populated."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-        return target
+    def test_upload_success(self, jmap: JmapTarget, mock_post: MagicMock) -> None:
+        mock_post.return_value = upload_response('blob-abc123')
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_upload_success(self, mock_post: MagicMock) -> None:
-        """Successful blob upload."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {'blobId': 'blob-abc123'}
-        mock_post.return_value = mock_response
+        assert jmap._upload_blob(b'Test message content') == 'blob-abc123'
 
-        target = self._create_connected_target()
-        blob_id = target._upload_blob(b'Test message content')
-
-        assert blob_id == 'blob-abc123'
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args[1]
         assert call_kwargs['data'] == b'Test message content'
         assert call_kwargs['headers']['Content-Type'] == 'message/rfc822'
         assert 'Bearer token' in call_kwargs['headers']['Authorization']
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_upload_request_failure(self, mock_post: MagicMock) -> None:
-        """Upload request failure raises RemoteError."""
-        mock_post.side_effect = requests.RequestException('Upload failed')
+    @pytest.mark.parametrize(
+        ('post_kwargs', 'message'),
+        [
+            ({'side_effect': requests.RequestException('Upload failed')}, 'Failed to upload message blob'),
+            ({'return_value': json_response({'size': 100})}, 'No blobId in upload response'),
+        ],
+        ids=['request-failure', 'missing-blob-id'],
+    )
+    def test_upload_failures(
+        self, jmap: JmapTarget, mock_post: MagicMock, post_kwargs: Dict[str, Any], message: str
+    ) -> None:
+        mock_post.configure_mock(**post_kwargs)
 
-        target = self._create_connected_target()
-
-        with pytest.raises(RemoteError) as exc_info:
-            target._upload_blob(b'Test')
-        assert 'Failed to upload message blob' in str(exc_info.value)
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_upload_missing_blob_id(self, mock_post: MagicMock) -> None:
-        """Missing blobId in response raises RemoteError."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {'size': 100}  # No blobId
-        mock_post.return_value = mock_response
-
-        target = self._create_connected_target()
-
-        with pytest.raises(RemoteError) as exc_info:
-            target._upload_blob(b'Test')
-        assert 'No blobId in upload response' in str(exc_info.value)
+        with pytest.raises(RemoteError, match=message):
+            jmap._upload_blob(b'Test')
 
 
-class TestJmapTargetListMailboxes:
-    """Tests for JmapTarget list_mailboxes method."""
+class TestJmapTargetMailboxes:
+    """Tests for list_mailboxes, list_labels and translate_folders."""
 
-    def _create_connected_target(self) -> JmapTarget:
-        """Create a target with session state pre-populated."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-        return target
+    def test_list_mailboxes_and_labels(self, jmap: JmapTarget, mock_post: MagicMock) -> None:
+        mock_post.return_value = json_response(SAMPLE_MAILBOXES_RESPONSE)
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_list_mailboxes_success(self, mock_post: MagicMock) -> None:
-        """Successful mailbox listing."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_MAILBOXES_RESPONSE
-        mock_post.return_value = mock_response
+        assert jmap.list_mailboxes() == [
+            {'id': 'mb-1', 'name': 'Inbox', 'role': 'inbox'},
+            {'id': 'mb-2', 'name': 'Sent', 'role': 'sent'},
+            {'id': 'mb-3', 'name': 'Archive', 'role': ''},
+        ]
+        assert jmap.list_labels() == [
+            {'name': 'Inbox', 'id': 'mb-1'},
+            {'name': 'Sent', 'id': 'mb-2'},
+            {'name': 'Archive', 'id': 'mb-3'},
+        ]
 
-        target = self._create_connected_target()
-        mailboxes = target.list_mailboxes()
-
-        assert len(mailboxes) == 3
-        assert mailboxes[0] == {'id': 'mb-1', 'name': 'Inbox', 'role': 'inbox'}
-        assert mailboxes[1] == {'id': 'mb-2', 'name': 'Sent', 'role': 'sent'}
-        assert mailboxes[2] == {'id': 'mb-3', 'name': 'Archive', 'role': ''}
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_list_mailboxes_request_failure(self, mock_post: MagicMock) -> None:
-        """Request failure raises RemoteError."""
+    def test_list_mailboxes_request_failure(self, jmap: JmapTarget, mock_post: MagicMock) -> None:
         mock_post.side_effect = requests.RequestException('API error')
 
-        target = self._create_connected_target()
+        with pytest.raises(RemoteError, match='Failed to list mailboxes'):
+            jmap.list_mailboxes()
 
-        with pytest.raises(RemoteError) as exc_info:
-            target.list_mailboxes()
-        assert 'Failed to list mailboxes' in str(exc_info.value)
+    @pytest.mark.parametrize(
+        'folders',
+        [['inbox', 'sent', 'archive'], ['INBOX', 'Sent', 'ARCHIVE']],
+        ids=['exact', 'case-insensitive'],
+    )
+    def test_translate_folders(self, jmap_mailboxes: JmapTarget, folders: List[str]) -> None:
+        assert jmap_mailboxes.translate_folders(folders) == ['mb-1', 'mb-2', 'mb-3']
 
-
-class TestJmapTargetTranslateFolders:
-    """Tests for JmapTarget translate_folders method."""
-
-    def _create_connected_target_with_mailboxes(self) -> JmapTarget:
-        """Create a target with mailbox cache pre-populated."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-        # Pre-populate mailbox cache
-        target._mailbox_map = {'inbox': 'mb-1', 'sent': 'mb-2', 'archive': 'mb-3'}
-        return target
-
-    def test_translate_single_folder(self) -> None:
-        """Translate single folder name."""
-        target = self._create_connected_target_with_mailboxes()
-        result = target.translate_folders(['inbox'])
-        assert result == ['mb-1']
-
-    def test_translate_multiple_folders(self) -> None:
-        """Translate multiple folder names."""
-        target = self._create_connected_target_with_mailboxes()
-        result = target.translate_folders(['inbox', 'sent', 'archive'])
-        assert result == ['mb-1', 'mb-2', 'mb-3']
-
-    def test_translate_case_insensitive(self) -> None:
-        """Folder translation is case-insensitive."""
-        target = self._create_connected_target_with_mailboxes()
-        result = target.translate_folders(['INBOX', 'Sent', 'ARCHIVE'])
-        assert result == ['mb-1', 'mb-2', 'mb-3']
-
-    def test_translate_unknown_folder_raises(self) -> None:
-        """Unknown folder raises ConfigurationError."""
-        target = self._create_connected_target_with_mailboxes()
-
+    def test_translate_unknown_folder_raises(self, jmap_mailboxes: JmapTarget) -> None:
         with pytest.raises(ConfigurationError) as exc_info:
-            target.translate_folders(['nonexistent'])
+            jmap_mailboxes.translate_folders(['nonexistent'])
         assert 'not found' in str(exc_info.value)
         assert 'nonexistent' in str(exc_info.value)
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_translate_lazy_loads_mailboxes(self, mock_post: MagicMock) -> None:
-        """Mailbox map is lazy-loaded on first translation."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_MAILBOXES_RESPONSE
-        mock_post.return_value = mock_response
+    def test_translate_lazy_loads_mailboxes(self, jmap: JmapTarget, mock_post: MagicMock) -> None:
+        """Mailbox map is lazy-loaded on first translation, matching by role or name."""
+        mock_post.return_value = json_response(SAMPLE_MAILBOXES_RESPONSE)
 
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-
-        assert target._mailbox_map is None
-        result = target.translate_folders(['inbox'])
-        assert result == ['mb-1']
+        assert jmap._mailbox_map is None
+        assert jmap.translate_folders(['inbox', 'sent']) == ['mb-1', 'mb-2']
         # Read into a fresh local: the assert above narrowed the attribute to
         # None, and the checkers cannot see translate_folders() populate it.
-        populated: Any = target._mailbox_map
+        populated: Any = jmap._mailbox_map
         assert populated is not None
 
 
 class TestJmapTargetImportMessage:
     """Tests for JmapTarget import_message method."""
 
-    def _create_connected_target_with_mailboxes(self) -> JmapTarget:
-        """Create a fully configured target."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-        target._mailbox_map = {'inbox': 'mb-1', 'sent': 'mb-2', 'archive': 'mb-3'}
-        return target
+    def test_import_success(self, jmap_mailboxes: JmapTarget, mock_post: MagicMock) -> None:
+        """Message is uploaded with CRLF line endings, then imported."""
+        mock_post.side_effect = [upload_response(), created()]
+        raw_message = b'From: a@b.com\nTo: c@d.com\n\nBody\nLine2'
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_success(self, mock_post: MagicMock) -> None:
-        """Successful message import."""
-        # First call: upload blob, Second call: import email
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [['Email/import', {'created': {'msg1': {'id': 'email-456'}}}, 'call-0']]
-        }
-
-        mock_post.side_effect = [upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-        result = target.import_message(b'From: test@example.com\r\n\r\nBody', ['inbox'])
+        result = jmap_mailboxes.import_message(raw_message, ['inbox'])
 
         assert result == {'id': 'email-456'}
         assert mock_post.call_count == 2
+        uploaded = mock_post.call_args_list[0][1]['data']
+        assert uploaded == b'From: a@b.com\r\nTo: c@d.com\r\n\r\nBody\r\nLine2'
+        assert uploaded == RawMessage(raw_message).as_bytes()
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_crlf_normalization(self, mock_post: MagicMock) -> None:
-        """Unix line endings are normalized to CRLF before upload."""
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
+    @pytest.mark.parametrize(
+        ('labels', 'expected_ids'),
+        [
+            ([], {'mb-1': True}),
+            (['inbox', 'archive'], {'mb-1': True, 'mb-3': True}),
+        ],
+        ids=['default-to-inbox', 'multiple-folders'],
+    )
+    def test_import_mailbox_ids(
+        self,
+        jmap_mailboxes: JmapTarget,
+        mock_post: MagicMock,
+        labels: List[str],
+        expected_ids: Dict[str, bool],
+    ) -> None:
+        mock_post.side_effect = [upload_response(), created()]
 
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [['Email/import', {'created': {'msg1': {'id': 'email-456'}}}, 'call-0']]
-        }
+        jmap_mailboxes.import_message(b'Test', labels)
 
-        mock_post.side_effect = [upload_response, import_response]
+        request_body = mock_post.call_args_list[1][1]['json']
+        assert request_body['methodCalls'][0][1]['emails']['msg1']['mailboxIds'] == expected_ids
 
-        target = self._create_connected_target_with_mailboxes()
-        target.import_message(b'From: a@b.com\nTo: c@d.com\n\nBody\nLine2', ['inbox'])
+    def test_import_already_exists(self, jmap_mailboxes: JmapTarget, mock_post: MagicMock) -> None:
+        mock_post.side_effect = [
+            upload_response(),
+            import_response({'notCreated': {'msg1': {'type': 'alreadyExists', 'existingId': 'existing-789'}}}),
+        ]
 
-        # Check the upload call
-        upload_call = mock_post.call_args_list[0]
-        uploaded_data = upload_call[1]['data']
-        assert uploaded_data == b'From: a@b.com\r\nTo: c@d.com\r\n\r\nBody\r\nLine2'
+        assert jmap_mailboxes.import_message(b'Test', ['inbox']) == {'id': 'existing-789'}
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_default_to_inbox(self, mock_post: MagicMock) -> None:
-        """Empty labels defaults to inbox."""
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
+    @pytest.mark.parametrize(
+        ('import_result', 'message'),
+        [
+            (
+                import_response({'notCreated': {'msg1': {'type': 'invalidEmail', 'description': 'Bad message'}}}),
+                'Email/import failed',
+            ),
+            (json_response({'methodResponses': []}), 'Unexpected JMAP response'),
+            (requests.RequestException('Network error'), 'Failed to import message'),
+        ],
+        ids=['not-created', 'unexpected-response', 'request-failure'],
+    )
+    def test_import_failures(
+        self, jmap_mailboxes: JmapTarget, mock_post: MagicMock, import_result: Any, message: str
+    ) -> None:
+        mock_post.side_effect = [upload_response(), import_result]
 
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [['Email/import', {'created': {'msg1': {'id': 'email-456'}}}, 'call-0']]
-        }
-
-        mock_post.side_effect = [upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-        target.import_message(b'Test', [])  # Empty labels
-
-        # Check the import call mailboxIds
-        import_call = mock_post.call_args_list[1]
-        request_body = import_call[1]['json']
-        mailbox_ids = request_body['methodCalls'][0][1]['emails']['msg1']['mailboxIds']
-        assert mailbox_ids == {'mb-1': True}  # inbox
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_multiple_folders(self, mock_post: MagicMock) -> None:
-        """Message can be imported to multiple folders."""
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [['Email/import', {'created': {'msg1': {'id': 'email-456'}}}, 'call-0']]
-        }
-
-        mock_post.side_effect = [upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-        target.import_message(b'Test', ['inbox', 'archive'])
-
-        import_call = mock_post.call_args_list[1]
-        request_body = import_call[1]['json']
-        mailbox_ids = request_body['methodCalls'][0][1]['emails']['msg1']['mailboxIds']
-        assert mailbox_ids == {'mb-1': True, 'mb-3': True}
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_already_exists(self, mock_post: MagicMock) -> None:
-        """Already-existing message is handled gracefully."""
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [
-                [
-                    'Email/import',
-                    {'notCreated': {'msg1': {'type': 'alreadyExists', 'existingId': 'existing-789'}}},
-                    'call-0',
-                ]
-            ]
-        }
-
-        mock_post.side_effect = [upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-        result = target.import_message(b'Test', ['inbox'])
-
-        assert result == {'id': 'existing-789'}
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_failure(self, mock_post: MagicMock) -> None:
-        """Import failure raises RemoteError."""
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [
-                [
-                    'Email/import',
-                    {'notCreated': {'msg1': {'type': 'invalidEmail', 'description': 'Bad message'}}},
-                    'call-0',
-                ]
-            ]
-        }
-
-        mock_post.side_effect = [upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-
-        with pytest.raises(RemoteError) as exc_info:
-            target.import_message(b'Test', ['inbox'])
-        assert 'Email/import failed' in str(exc_info.value)
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_unexpected_response(self, mock_post: MagicMock) -> None:
-        """Unexpected response raises RemoteError."""
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': []  # Empty responses
-        }
-
-        mock_post.side_effect = [upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-
-        with pytest.raises(RemoteError) as exc_info:
-            target.import_message(b'Test', ['inbox'])
-        assert 'Unexpected JMAP response' in str(exc_info.value)
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_request_failure(self, mock_post: MagicMock) -> None:
-        """Request failure during import raises RemoteError."""
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        mock_post.side_effect = [upload_response, requests.RequestException('Network error')]
-
-        target = self._create_connected_target_with_mailboxes()
-
-        with pytest.raises(RemoteError) as exc_info:
-            target.import_message(b'Test', ['inbox'])
-        assert 'Failed to import message' in str(exc_info.value)
-
-
-class TestJmapTargetListLabels:
-    """Tests for JmapTarget list_labels method."""
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_list_labels(self, mock_post: MagicMock) -> None:
-        """list_labels returns name and id for each mailbox."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_MAILBOXES_RESPONSE
-        mock_post.return_value = mock_response
-
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-
-        labels = target.list_labels()
-
-        assert len(labels) == 3
-        assert labels[0] == {'name': 'Inbox', 'id': 'mb-1'}
-        assert labels[1] == {'name': 'Sent', 'id': 'mb-2'}
-        assert labels[2] == {'name': 'Archive', 'id': 'mb-3'}
-
-
-class TestJmapTargetEdgeCases:
-    """Edge case tests."""
-
-    def test_token_takes_precedence_over_file(self, tmp_path: Path) -> None:
-        """Direct token takes precedence over token_file."""
-        token_file = tmp_path / 'token.txt'
-        token_file.write_text('file_token')
-
-        target = JmapTarget(
-            identifier='test',
-            server='https://api.example.com',
-            username='user@example.com',
-            token='direct_token',
-            token_file=str(token_file),
-        )
-        assert target.token == 'direct_token'
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_mailbox_role_mapping(self, mock_post: MagicMock) -> None:
-        """Mailboxes can be found by role as well as name."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_MAILBOXES_RESPONSE
-        mock_post.return_value = mock_response
-
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-
-        # Use role names instead of folder names
-        result = target.translate_folders(['inbox', 'sent'])
-        assert result == ['mb-1', 'mb-2']
+        with pytest.raises(RemoteError, match=message):
+            jmap_mailboxes.import_message(b'Test', ['inbox'])
 
 
 class TestJmapTargetDeduplication:
     """Tests for JMAP message deduplication by Message-ID."""
 
-    def _create_connected_target_with_mailboxes(self) -> JmapTarget:
-        """Create a fully configured target."""
-        target = JmapTarget(
-            identifier='test', server='https://api.example.com', username='user@example.com', token='token'
-        )
-        target.session = SAMPLE_SESSION
-        target.account_id = 'acc-123'
-        target.api_url = 'https://api.example.com/jmap/api/'
-        target.upload_url = 'https://api.example.com/jmap/upload/acc-123/'
-        target._mailbox_map = {'inbox': 'mb-1', 'sent': 'mb-2', 'archive': 'mb-3'}
-        return target
+    @pytest.mark.parametrize(
+        ('ids', 'mailboxes', 'expected', 'expected_filter'),
+        [
+            (
+                ['existing-email-id'],
+                ['mb-1'],
+                True,
+                {'header': ['Message-ID', '<test@example.com>'], 'inMailbox': 'mb-1'},
+            ),
+            ([], ['mb-1'], False, {'header': ['Message-ID', '<test@example.com>'], 'inMailbox': 'mb-1'}),
+            (
+                [],
+                ['mb-1', 'mb-2'],
+                False,
+                {
+                    'operator': 'OR',
+                    'conditions': [
+                        {'header': ['Message-ID', '<test@example.com>'], 'inMailbox': 'mb-1'},
+                        {'header': ['Message-ID', '<test@example.com>'], 'inMailbox': 'mb-2'},
+                    ],
+                },
+            ),
+        ],
+        ids=['found', 'not-found', 'multiple-mailboxes-use-or'],
+    )
+    def test_check_message_exists(
+        self,
+        jmap_mailboxes: JmapTarget,
+        mock_post: MagicMock,
+        ids: List[str],
+        mailboxes: List[str],
+        expected: bool,
+        expected_filter: Dict[str, Any],
+    ) -> None:
+        mock_post.return_value = query_response(ids)
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_check_message_exists_found(self, mock_post: MagicMock) -> None:
-        """Returns True when message exists in mailbox."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            'methodResponses': [['Email/query', {'ids': ['existing-email-id']}, 'call-0']]
-        }
-        mock_post.return_value = mock_response
+        assert jmap_mailboxes._check_message_exists('<test@example.com>', mailboxes) is expected
 
-        target = self._create_connected_target_with_mailboxes()
-        exists = target._check_message_exists('<test@example.com>', ['mb-1'])
+        assert mock_post.call_args[1]['json']['methodCalls'][0][1]['filter'] == expected_filter
 
-        assert exists is True
-        # Verify the query filter
-        call_args = mock_post.call_args[1]['json']
-        assert call_args['methodCalls'][0][1]['filter'] == {
-            'header': ['Message-ID', '<test@example.com>'],
-            'inMailbox': 'mb-1',
-        }
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_check_message_exists_not_found(self, mock_post: MagicMock) -> None:
-        """Returns False when message does not exist."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {'methodResponses': [['Email/query', {'ids': []}, 'call-0']]}
-        mock_post.return_value = mock_response
-
-        target = self._create_connected_target_with_mailboxes()
-        exists = target._check_message_exists('<test@example.com>', ['mb-1'])
-
-        assert exists is False
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_check_message_exists_multiple_mailboxes(self, mock_post: MagicMock) -> None:
-        """Uses OR filter when checking multiple mailboxes."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {'methodResponses': [['Email/query', {'ids': []}, 'call-0']]}
-        mock_post.return_value = mock_response
-
-        target = self._create_connected_target_with_mailboxes()
-        target._check_message_exists('<test@example.com>', ['mb-1', 'mb-2'])
-
-        call_args = mock_post.call_args[1]['json']
-        query_filter = call_args['methodCalls'][0][1]['filter']
-        assert query_filter['operator'] == 'OR'
-        assert len(query_filter['conditions']) == 2
-        assert query_filter['conditions'][0] == {'header': ['Message-ID', '<test@example.com>'], 'inMailbox': 'mb-1'}
-        assert query_filter['conditions'][1] == {'header': ['Message-ID', '<test@example.com>'], 'inMailbox': 'mb-2'}
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_check_message_exists_error_returns_false(self, mock_post: MagicMock) -> None:
-        """Returns False on network error (fail-open)."""
+    def test_check_message_exists_error_returns_false(self, jmap_mailboxes: JmapTarget, mock_post: MagicMock) -> None:
+        """Fail-open on network error."""
         mock_post.side_effect = requests.RequestException('Network error')
 
-        target = self._create_connected_target_with_mailboxes()
-        exists = target._check_message_exists('<test@example.com>', ['mb-1'])
+        assert jmap_mailboxes._check_message_exists('<test@example.com>', ['mb-1']) is False
 
-        assert exists is False
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_skips_duplicate(self, mock_post: MagicMock) -> None:
-        """Import is skipped when message already exists in target mailbox."""
-        # First call: Email/query returns existing message
-        query_response = MagicMock()
-        query_response.json.return_value = {'methodResponses': [['Email/query', {'ids': ['existing-id']}, 'call-0']]}
-        mock_post.return_value = query_response
-
-        target = self._create_connected_target_with_mailboxes()
+    @pytest.mark.parametrize(
+        ('existing_ids', 'skipped'),
+        [(['existing-id'], True), ([], False)],
+        ids=['duplicate-skipped', 'not-duplicate-imported'],
+    )
+    def test_import_dedup(
+        self, jmap_mailboxes: JmapTarget, mock_post: MagicMock, existing_ids: List[str], skipped: bool
+    ) -> None:
+        mock_post.side_effect = [query_response(existing_ids), upload_response(), created('new-email-id')]
         raw_message = b'From: test@example.com\r\nMessage-ID: <dup@example.com>\r\n\r\nBody'
 
-        result = target.import_message(raw_message, ['inbox'])
+        result = jmap_mailboxes.import_message(raw_message, ['inbox'])
 
-        # Should return skipped result without uploading
-        assert result.get('skipped') is True
-        # Only one call (the query), no upload or import
-        assert mock_post.call_count == 1
+        if skipped:
+            assert result.get('skipped') is True
+            # Only the query: no upload or import
+            assert mock_post.call_count == 1
+        else:
+            assert result == {'id': 'new-email-id'}
+            assert mock_post.call_count == 3  # query + upload + import
 
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_proceeds_when_not_duplicate(self, mock_post: MagicMock) -> None:
-        """Import proceeds normally when message does not exist."""
-        # First call: Email/query returns no matches
-        query_response = MagicMock()
-        query_response.json.return_value = {'methodResponses': [['Email/query', {'ids': []}, 'call-0']]}
+    def test_import_proceeds_without_message_id(self, jmap_mailboxes: JmapTarget, mock_post: MagicMock) -> None:
+        """No dedup query when Message-ID is missing."""
+        mock_post.side_effect = [upload_response(), created('new-email-id')]
 
-        # Second call: blob upload
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        # Third call: Email/import
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [['Email/import', {'created': {'msg1': {'id': 'new-email-id'}}}, 'call-0']]
-        }
-
-        mock_post.side_effect = [query_response, upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-        raw_message = b'From: test@example.com\r\nMessage-ID: <new@example.com>\r\n\r\nBody'
-
-        result = target.import_message(raw_message, ['inbox'])
+        result = jmap_mailboxes.import_message(b'From: test@example.com\r\n\r\nBody', ['inbox'])
 
         assert result == {'id': 'new-email-id'}
-        assert mock_post.call_count == 3  # query + upload + import
-
-    @patch('korgalore.jmap_target.requests.post')
-    def test_import_proceeds_without_message_id(self, mock_post: MagicMock) -> None:
-        """Import proceeds without dedup check when Message-ID is missing."""
-        # Only upload and import calls, no query
-        upload_response = MagicMock()
-        upload_response.json.return_value = {'blobId': 'blob-123'}
-
-        import_response = MagicMock()
-        import_response.json.return_value = {
-            'methodResponses': [['Email/import', {'created': {'msg1': {'id': 'new-email-id'}}}, 'call-0']]
-        }
-
-        mock_post.side_effect = [upload_response, import_response]
-
-        target = self._create_connected_target_with_mailboxes()
-        # Message without Message-ID header
-        raw_message = b'From: test@example.com\r\n\r\nBody'
-
-        result = target.import_message(raw_message, ['inbox'])
-
-        assert result == {'id': 'new-email-id'}
-        assert mock_post.call_count == 2  # upload + import only, no query
+        assert mock_post.call_count == 2  # upload + import only
