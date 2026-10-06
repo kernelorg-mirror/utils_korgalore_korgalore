@@ -1,7 +1,7 @@
 """Tests for CLI configuration loading and merging."""
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import click
 import pytest
@@ -13,29 +13,24 @@ from korgalore.cli import find_tracked_subsystem_config, load_config, merge_conf
 class TestMergeConfig:
     """Tests for merge_config function."""
 
-    def test_merge_targets(self) -> None:
-        """Merges targets section from extra into base."""
-        base: Dict[str, Any] = {'targets': {'existing': {'type': 'gmail'}}}
-        extra: Dict[str, Any] = {'targets': {'new': {'type': 'maildir'}}}
-        merge_config(base, extra)
-        assert 'existing' in base['targets']
-        assert 'new' in base['targets']
-
-    def test_merge_feeds(self) -> None:
-        """Merges feeds section from extra into base."""
-        base: Dict[str, Any] = {'feeds': {'feed1': {'url': 'https://example.com/1'}}}
-        extra: Dict[str, Any] = {'feeds': {'feed2': {'url': 'https://example.com/2'}}}
-        merge_config(base, extra)
-        assert 'feed1' in base['feeds']
-        assert 'feed2' in base['feeds']
-
-    def test_merge_deliveries(self) -> None:
-        """Merges deliveries section from extra into base."""
-        base: Dict[str, Any] = {'deliveries': {'delivery1': {'feed': 'feed1', 'target': 'target1'}}}
-        extra: Dict[str, Any] = {'deliveries': {'delivery2': {'feed': 'feed2', 'target': 'target2'}}}
-        merge_config(base, extra)
-        assert 'delivery1' in base['deliveries']
-        assert 'delivery2' in base['deliveries']
+    @pytest.mark.parametrize(
+        ('section', 'old', 'new'),
+        [
+            ('targets', {'existing': {'type': 'gmail'}}, {'new': {'type': 'maildir'}}),
+            ('feeds', {'feed1': {'url': 'https://example.com/1'}}, {'feed2': {'url': 'https://example.com/2'}}),
+            (
+                'deliveries',
+                {'delivery1': {'feed': 'feed1', 'target': 'target1'}},
+                {'delivery2': {'feed': 'feed2', 'target': 'target2'}},
+            ),
+        ],
+        ids=['targets', 'feeds', 'deliveries'],
+    )
+    def test_merge_section(self, section: str, old: Dict[str, Any], new: Dict[str, Any]) -> None:
+        """Merges a section from extra into base, keeping base's own entries."""
+        base: Dict[str, Any] = {section: dict(old)}
+        merge_config(base, {section: new})
+        assert base[section] == {**old, **new}
 
     def test_merge_gui_replaces(self) -> None:
         """GUI section is replaced, not merged."""
@@ -95,10 +90,13 @@ class TestMergeConfig:
 class TestLoadConfigWithConfD:
     """Tests for load_config with conf.d support."""
 
-    def test_load_config_basic(self, tmp_path: Path) -> None:
-        """Loads basic config without conf.d."""
+    @pytest.mark.parametrize('make_conf_d', [False, True], ids=['no-conf-d', 'empty-conf-d'])
+    def test_load_config_basic(self, tmp_path: Path, make_conf_d: bool) -> None:
+        """Loads basic config when conf.d is absent or empty."""
         config_file = tmp_path / 'korgalore.toml'
         config_file.write_text("[targets.personal]\ntype = 'gmail'\ncredentials = 'creds.json'\n")
+        if make_conf_d:
+            (tmp_path / 'conf.d').mkdir()
         config = load_config(config_file)
         assert 'targets' in config
         assert 'personal' in config['targets']
@@ -147,27 +145,6 @@ class TestLoadConfigWithConfD:
         config = load_config(config_file)
         # 02_second.toml loads after 01_first.toml, overwrites
         assert config['feeds']['test']['url'] == 'second'
-
-    def test_load_config_no_conf_d_directory(self, tmp_path: Path) -> None:
-        """Works correctly when conf.d directory doesn't exist."""
-        config_file = tmp_path / 'korgalore.toml'
-        config_file.write_text("[targets.personal]\ntype = 'gmail'\n")
-        # No conf.d directory created
-
-        config = load_config(config_file)
-        assert 'personal' in config['targets']
-
-    def test_load_config_empty_conf_d(self, tmp_path: Path) -> None:
-        """Works correctly with empty conf.d directory."""
-        config_file = tmp_path / 'korgalore.toml'
-        config_file.write_text("[targets.personal]\ntype = 'gmail'\n")
-
-        # Create empty conf.d
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir()
-
-        config = load_config(config_file)
-        assert 'personal' in config['targets']
 
     def test_load_config_conf_d_only_toml_files(self, tmp_path: Path) -> None:
         """Only .toml files in conf.d are loaded."""
@@ -276,25 +253,26 @@ class TestFindTrackedSubsystemConfig:
 class TestResolveTargetName:
     """Tests for resolve_target_name, the shared --target default helper."""
 
-    def test_explicit_known_target_passes_through(self) -> None:
-        """A configured target name is returned unchanged."""
-        targets: Dict[str, Any] = {'first': {}, 'second': {}}
-        assert resolve_target_name('second', targets) == 'second'
+    @pytest.mark.parametrize(
+        ('name', 'targets', 'expected'),
+        [
+            ('second', {'first': {}, 'second': {}}, 'second'),
+            (None, {'first': {}, 'second': {}}, 'first'),
+        ],
+        ids=['explicit-known-passes-through', 'omitted-uses-first-configured'],
+    )
+    def test_resolves(self, name: Optional[str], targets: Dict[str, Any], expected: str) -> None:
+        assert resolve_target_name(name, targets) == expected
 
-    def test_omitted_target_uses_first_configured(self) -> None:
-        """None falls back to the first target in configuration order."""
-        targets: Dict[str, Any] = {'first': {}, 'second': {}}
-        assert resolve_target_name(None, targets) == 'first'
+    @pytest.mark.parametrize(
+        ('name', 'targets'),
+        [('nope', {'first': {}}), (None, {})],
+        ids=['unknown-target', 'no-targets-configured'],
+    )
+    def test_aborts(self, name: Optional[str], targets: Dict[str, Any]) -> None:
+        """An unconfigured target is a user error; with no targets there is no default.
 
-    def test_unknown_target_aborts(self) -> None:
-        """An explicit but unconfigured target is a user error."""
-        with pytest.raises(click.Abort):
-            resolve_target_name('nope', {'first': {}})
-
-    def test_no_targets_configured_aborts(self) -> None:
-        """With nothing configured there is no default to fall back to.
-
-        This used to raise IndexError from list(targets.keys())[0].
+        The empty case used to raise IndexError from list(targets.keys())[0].
         """
         with pytest.raises(click.Abort):
-            resolve_target_name(None, {})
+            resolve_target_name(name, targets)

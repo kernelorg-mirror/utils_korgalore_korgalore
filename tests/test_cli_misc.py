@@ -1,4 +1,6 @@
-"""Tests for progress bar suppression across Click versions.
+"""Miscellaneous CLI helper tests: key display and progress bar suppression.
+
+Progress bar suppression across Click versions:
 
 korgalore hides its progress bars by handing Click a throwaway stream rather
 than by passing ``hidden=True``, which only exists in Click 8.3.0 and newer.
@@ -8,11 +10,43 @@ noise into somebody's debug log.
 """
 
 import io
+from typing import Optional
 
 import click
 import pytest
 
+from korgalore import format_key_for_display
 from korgalore.cli import progress_file
+
+
+@pytest.mark.parametrize(
+    ('key', 'expected'),
+    [
+        ('lei:/home/user/foo/bar/queryname', 'lei:queryname'),
+        ('lei:queryname', 'lei:queryname'),
+        ('lei:/', 'lei:'),
+        ('lei:/path/to/query/', 'lei:query'),
+        # Lore keys are already normalized to the list name
+        ('lkml', 'lkml'),
+        ('ksummit', 'ksummit'),
+        ('my-delivery', 'my-delivery'),
+        ('https://example.com/feed', 'https://example.com/feed'),
+        (None, ''),
+    ],
+    ids=[
+        'lei-path',
+        'lei-short',
+        'lei-empty-component',
+        'lei-trailing-slash',
+        'lore-lkml',
+        'lore-ksummit',
+        'other-name',
+        'other-url',
+        'none',
+    ],
+)
+def test_format_key_for_display(key: Optional[str], expected: str) -> None:
+    assert format_key_for_display(key) == expected
 
 
 def test_progress_file_visible() -> None:
@@ -30,7 +64,8 @@ def test_progress_file_hidden() -> None:
 def test_hidden_bar_writes_nothing_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     items = list(range(5))
     seen = []
-    with click.progressbar(items, label='Hiding', show_pos=True, file=progress_file(True)) as bar:
+    stream = progress_file(True)
+    with click.progressbar(items, label='Hiding', show_pos=True, file=stream) as bar:
         for item in bar:
             seen.append(item)
 
@@ -39,14 +74,7 @@ def test_hidden_bar_writes_nothing_to_stdout(capsys: pytest.CaptureFixture[str])
     captured = capsys.readouterr()
     assert captured.out == ''
     assert captured.err == ''
-
-
-def test_hidden_bar_swallows_the_label() -> None:
     # Click's non-terminal path echoes the label once. Directing it at our own
     # stream is what keeps it off the user's terminal, so check it landed here.
-    stream = io.StringIO()
-    with click.progressbar(range(3), label='Hiding', file=stream) as bar:
-        for _ in bar:
-            pass
-
+    assert isinstance(stream, io.StringIO)
     assert 'Hiding' in stream.getvalue()
