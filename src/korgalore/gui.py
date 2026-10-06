@@ -402,6 +402,7 @@ class KorgaloreApp:
             self.update_status(f'Yank failed: {e}', 'dialog-error-symbolic')
         except Exception as e:
             logger.error('Yank failed: %s', str(e))
+            logger.debug('Traceback:', exc_info=True)
             self.update_status(f'Yank failed: {e}', 'dialog-error-symbolic')
 
     def on_edit_config(self, source: Any) -> None:
@@ -437,6 +438,7 @@ class KorgaloreApp:
                 self.update_status(f'Config error: {error_msg}', 'dialog-warning-symbolic')
         except Exception as e:
             logger.error('Failed to open config file: %s', str(e))
+            logger.debug('Traceback:', exc_info=True)
 
     def on_edit_bozofilter(self, source: Any) -> None:
         """Open the bozofilter file in the user's preferred editor."""
@@ -456,6 +458,7 @@ class KorgaloreApp:
             logger.info('Bozofilter reloaded successfully.')
         except Exception as e:
             logger.error('Failed to edit bozofilter: %s', str(e))
+            logger.debug('Traceback:', exc_info=True)
 
     def on_about(self, source: Any) -> None:
         """Show the About dialog."""
@@ -555,6 +558,7 @@ class KorgaloreApp:
             logger.info('Sync cancelled')
         except Exception as e:
             logger.error('Sync failed: %s', str(e))
+            logger.debug('Traceback:', exc_info=True)
             self.update_status(f'Error: {e}', 'dialog-error-symbolic')
         finally:
             self.is_syncing = False
@@ -630,6 +634,7 @@ class KorgaloreApp:
 
         except Exception as e:
             logger.error('Re-authentication failed: %s', str(e))
+            logger.debug('Traceback:', exc_info=True)
             self.update_status(f'Auth failed: {target_id}', 'dialog-error-symbolic')
         finally:
             GLib.idle_add(lambda: self.item_auth.set_sensitive(True))

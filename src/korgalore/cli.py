@@ -619,6 +619,7 @@ def load_config(cfgfile: Path) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error('Error loading config: %s', str(e))
+        logger.debug('Traceback:', exc_info=True)
         raise click.Abort() from e
 
 
@@ -1413,6 +1414,7 @@ def run_digest_estimates(ctx: click.Context, delivery_names: List[str], now: Opt
             lines = estimate_digest(dname, feed, schedule, summarizer, cache, bozo_set, now=now)
         except Exception as e:
             logger.error('Could not estimate digest %s: %s', dname, e)
+            logger.debug('Traceback:', exc_info=True)
             continue
         click.echo('\n'.join(lines))
 
