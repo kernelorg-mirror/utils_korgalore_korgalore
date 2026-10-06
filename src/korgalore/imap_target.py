@@ -101,7 +101,7 @@ class ImapTarget:
                 password_path = Path(password_file).expanduser()
                 if not password_path.exists():
                     raise ConfigurationError(f'Password file not found: {password_file}')
-                with open(password_path) as f:
+                with password_path.open() as f:
                     self.password = f.read().strip()
             else:
                 raise ConfigurationError(f'No password or password_file specified for IMAP target: {identifier}')

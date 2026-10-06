@@ -17,7 +17,6 @@ import hashlib
 import ipaddress
 import json
 import logging
-import os
 import re
 import shlex
 import subprocess
@@ -495,7 +494,7 @@ class SummaryCache:
         self.path.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(f'{target.name}.tmp')
         tmp.write_text(json.dumps({'root': root, 'entries': entries}, indent=2))
-        os.replace(tmp, target)
+        tmp.replace(target)
 
     @staticmethod
     def _same_kind(entry: Mapping[str, Any], model: str, instructions: str | None) -> bool:

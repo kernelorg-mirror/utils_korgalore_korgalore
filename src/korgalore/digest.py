@@ -4,7 +4,6 @@ import email.utils
 import html
 import json
 import logging
-import os
 import re
 import shutil
 import textwrap
@@ -1305,7 +1304,7 @@ def flocked(lock_path: Path, wait: bool = False) -> Generator[bool, None, None]:
     one, and the GUI runs pulls in threads.
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, 'w') as lockfh:
+    with lock_path.open('w') as lockfh:
         try:
             flock(lockfh, LOCK_EX if wait else LOCK_EX | LOCK_NB)
         except BlockingIOError:
@@ -1363,7 +1362,7 @@ class DigestJob:
     def _save(self, state: dict[str, Any]) -> None:
         tmp = self.path / f'{self.JOB_FILE}.tmp'
         tmp.write_text(json.dumps(state, indent=2))
-        os.replace(tmp, self.path / self.JOB_FILE)
+        tmp.replace(self.path / self.JOB_FILE)
 
     def create(self, messages: Sequence[bytes], state: dict[str, Any]) -> None:
         """Start a new job with these raw messages, replacing any old one."""

@@ -556,7 +556,7 @@ def validate_config_file(cfgpath: Path) -> tuple[bool, str]:
         return False, f'Configuration file not found: {cfgpath}'
 
     try:
-        with open(cfgpath, 'rb') as cf:
+        with cfgpath.open('rb') as cf:
             tomllib.load(cf)
         return True, ''
     except tomllib.TOMLDecodeError as e:
@@ -591,7 +591,7 @@ def load_config(cfgfile: Path) -> dict[str, Any]:
     try:
         logger.debug('Loading config from %s', str(cfgfile))
 
-        with open(cfgfile, 'rb') as cf:
+        with cfgfile.open('rb') as cf:
             config = tomllib.load(cf)
 
         # Backward compatibility: convert 'sources' to 'deliveries'
@@ -605,7 +605,7 @@ def load_config(cfgfile: Path) -> dict[str, Any]:
         if conf_d.is_dir():
             for toml_file in sorted(conf_d.glob('*.toml')):
                 logger.debug('Loading additional config from %s', toml_file.name)
-                with open(toml_file, 'rb') as cf:
+                with toml_file.open('rb') as cf:
                     extra = tomllib.load(cf)
                 merge_config(config, extra)
 
@@ -2950,7 +2950,7 @@ def subscribe_list(ctx: click.Context, paused: bool) -> None:
 
         # Parse the TOML to get details
         try:
-            with open(filepath, 'rb') as f:
+            with filepath.open('rb') as f:
                 sub_config = tomllib.load(f)
             feeds = sub_config.get('feeds', {})
             deliveries = sub_config.get('deliveries', {})

@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from google.auth.exceptions import RefreshError
@@ -56,8 +57,8 @@ class GmailTarget:
         self.service: Any | None = None
         self._label_map: dict[str, str] | None = None
         # Store expanded paths for potential re-authentication
-        self._credentials_file = os.path.expandvars(os.path.expanduser(credentials_file))
-        self._token_file = os.path.expandvars(os.path.expanduser(token_file))
+        self._credentials_file = Path(os.path.expandvars(credentials_file)).expanduser()
+        self._token_file = Path(os.path.expandvars(token_file)).expanduser()
         self._needs_auth = False
         self._interactive = interactive
         self._load_credentials()
@@ -73,8 +74,8 @@ class GmailTarget:
             AuthenticationError: If token is expired/revoked and re-auth is needed.
         """
         # The file token.json stores the user's access and refresh tokens
-        if os.path.exists(self._token_file):
-            self.creds = Credentials.from_authorized_user_file(self._token_file, SCOPES)  # type: ignore
+        if self._token_file.exists():
+            self.creds = Credentials.from_authorized_user_file(str(self._token_file), SCOPES)  # type: ignore
 
         # If there are no (valid) credentials available, let the user log in
         if not self.creds or not self.creds.valid:
@@ -83,10 +84,9 @@ class GmailTarget:
                     self.creds.refresh(Request())  # type: ignore
                 except RefreshError as e:
                     logger.warning('Gmail token for %s has expired or been revoked.', self.identifier)
-                    invalid_token_file = self._token_file + '.invalid'
-                    if os.path.exists(invalid_token_file):
-                        os.remove(invalid_token_file)
-                    os.rename(self._token_file, invalid_token_file)
+                    invalid_token_file = self._token_file.with_name(f'{self._token_file.name}.invalid')
+                    invalid_token_file.unlink(missing_ok=True)
+                    self._token_file.rename(invalid_token_file)
                     self._needs_auth = True
                     if not self._interactive:
                         # In non-interactive mode, just return - caller will check needs_auth
@@ -96,7 +96,7 @@ class GmailTarget:
                         target_id=self.identifier,
                         target_type='gmail',
                     ) from e
-            elif os.path.exists(self._credentials_file):
+            elif self._credentials_file.exists():
                 if not self._interactive:
                     # In non-interactive mode (GUI), don't run OAuth flow
                     # Just mark as needing auth and return - caller will check needs_auth
@@ -104,7 +104,7 @@ class GmailTarget:
                     return
                 logger.critical('Log in to Gmail account for %s', self.identifier)
 
-                flow = InstalledAppFlow.from_client_secrets_file(self._credentials_file, SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(str(self._credentials_file), SCOPES)
                 self.creds = flow.run_local_server(port=0)
             else:
                 raise ConfigurationError(
@@ -112,8 +112,7 @@ class GmailTarget:
                 )
 
             # Save the credentials for the next run
-            with open(self._token_file, 'w') as token:
-                token.write(self.creds.to_json())
+            self._token_file.write_text(self.creds.to_json())
 
         self._needs_auth = False
 
@@ -230,19 +229,18 @@ class GmailTarget:
         Raises:
             ConfigurationError: If credentials file is not found.
         """
-        if not os.path.exists(self._credentials_file):
+        if not self._credentials_file.exists():
             raise ConfigurationError(
                 f'{self._credentials_file} not found. Please download it from Google Cloud Console.'
             )
 
         logger.info('Starting re-authentication for Gmail account %s', self.identifier)
 
-        flow = InstalledAppFlow.from_client_secrets_file(self._credentials_file, SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(str(self._credentials_file), SCOPES)
         self.creds = flow.run_local_server(port=0)
 
         # Save the credentials
-        with open(self._token_file, 'w') as token:
-            token.write(self.creds.to_json())
+        self._token_file.write_text(self.creds.to_json())
 
         self._needs_auth = False
         self.service = None  # Reset service to force reconnect with new creds

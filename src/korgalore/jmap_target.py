@@ -53,7 +53,7 @@ class JmapTarget:
             token_path = Path(token_file).expanduser()
             if not token_path.exists():
                 raise ConfigurationError(f'Token file not found: {token_file}')
-            with open(token_path) as f:
+            with token_path.open() as f:
                 self.token = f.read().strip()
         else:
             raise ConfigurationError(f'No token or token_file specified for JMAP target: {identifier}')

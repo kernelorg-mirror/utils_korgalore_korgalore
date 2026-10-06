@@ -84,22 +84,23 @@ class ImapOAuth2Authenticator:
 
     _token: OAuth2Token | None = field(default=None, init=False, repr=False)
     _needs_auth: bool = field(default=False, init=False)
+    _token_path: Path = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Load existing token if present."""
-        self.token_file = os.path.expandvars(os.path.expanduser(self.token_file))
+        self._token_path = Path(os.path.expandvars(self.token_file)).expanduser()
         self._load_token()
 
     def _load_token(self) -> None:
         """Load token from file if it exists."""
-        if os.path.exists(self.token_file):
+        if self._token_path.exists():
             try:
-                with open(self.token_file) as f:
+                with self._token_path.open() as f:
                     data = json.load(f)
                 self._token = OAuth2Token.from_dict(data)
-                logger.debug('Loaded OAuth2 token for %s from %s', self.identifier, self.token_file)
+                logger.debug('Loaded OAuth2 token for %s from %s', self.identifier, self._token_path)
             except (json.JSONDecodeError, KeyError, TypeError) as e:
-                logger.warning('Failed to load OAuth2 token from %s: %s', self.token_file, e)
+                logger.warning('Failed to load OAuth2 token from %s: %s', self._token_path, e)
                 self._token = None
                 self._needs_auth = True
         else:
@@ -111,15 +112,14 @@ class ImapOAuth2Authenticator:
             return
 
         # Ensure directory exists
-        token_path = Path(self.token_file)
-        token_path.parent.mkdir(parents=True, exist_ok=True)
+        self._token_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(self.token_file, 'w') as f:
+        with self._token_path.open('w') as f:
             json.dump(self._token.to_dict(), f, indent=2)
 
         # Set restrictive permissions
-        os.chmod(self.token_file, 0o600)
-        logger.debug('Saved OAuth2 token to %s', self.token_file)
+        self._token_path.chmod(0o600)
+        logger.debug('Saved OAuth2 token to %s', self._token_path)
 
     @property
     def needs_auth(self) -> bool:
@@ -205,11 +205,10 @@ class ImapOAuth2Authenticator:
         except requests.RequestException as e:
             logger.warning('Token refresh failed for %s: %s', self.identifier, e)
             # Invalidate token file
-            invalid_file = self.token_file + '.invalid'
-            if os.path.exists(self.token_file):
-                if os.path.exists(invalid_file):
-                    os.remove(invalid_file)
-                os.rename(self.token_file, invalid_file)
+            if self._token_path.exists():
+                invalid_file = self._token_path.with_name(f'{self._token_path.name}.invalid')
+                invalid_file.unlink(missing_ok=True)
+                self._token_path.rename(invalid_file)
             self._token = None
             self._needs_auth = True
             raise AuthenticationError(

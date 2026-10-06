@@ -30,7 +30,7 @@ def load_bozofilter(config_dir: Path) -> set[str]:
     if not bozofilter_path.exists():
         return addresses
 
-    with open(bozofilter_path) as f:
+    with bozofilter_path.open() as f:
         for raw_line in f:
             # Strip whitespace
             line = raw_line.strip()
@@ -96,7 +96,7 @@ def add_to_bozofilter(config_dir: Path, addresses: list[str], reason: str | None
         config_dir.mkdir(parents=True, exist_ok=True)
 
         # Append to file
-        with open(bozofilter_path, 'a') as f:
+        with bozofilter_path.open('a') as f:
             f.writelines(new_lines)
 
     return added
@@ -115,7 +115,7 @@ def ensure_bozofilter_exists(config_dir: Path) -> Path:
 
     config_dir.mkdir(parents=True, exist_ok=True)
     if not bozofilter_path.exists():
-        with open(bozofilter_path, 'w') as f:
+        with bozofilter_path.open('w') as f:
             f.write('# Korgalore bozofilter - one email address per line\n')
             f.write('# Lines starting with # are comments\n')
             f.write('# Trailing comments after # are also supported\n')

@@ -178,7 +178,7 @@ def parse_maintainers(path: Path) -> dict[str, SubsystemEntry]:
     current_entry: SubsystemEntry | None = None
     prev_line_empty = True  # Start as true to catch first entry
 
-    with open(path, encoding='utf-8', errors='replace') as f:
+    with path.open(encoding='utf-8', errors='replace') as f:
         for raw_line in f:
             line = raw_line.rstrip('\n')
 

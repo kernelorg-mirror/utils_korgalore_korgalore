@@ -107,7 +107,7 @@ class TrackingManifest:
             return
 
         try:
-            with open(self.manifest_path, encoding='utf-8') as f:
+            with self.manifest_path.open(encoding='utf-8') as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning('Failed to load tracking manifest: %s', e)
@@ -138,7 +138,7 @@ class TrackingManifest:
 
         # Write atomically via temp file
         tmp_path = self.manifest_path.with_suffix('.tmp')
-        with open(tmp_path, 'w', encoding='utf-8') as f:
+        with tmp_path.open('w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
         tmp_path.rename(self.manifest_path)
 

@@ -200,7 +200,7 @@ class LoreFeed(PIFeed):
         epochs_info = []
         for enum, epath, fpr in epochs:
             epochs_info.append({'epoch': enum, 'path': epath, 'fpr': fpr})
-        with open(epochs_file, 'w') as ef:
+        with epochs_file.open('w') as ef:
             json.dump(epochs_info, ef, indent=2)
 
     def load_epochs_info(self) -> list[tuple[int, str, str]]:
@@ -208,7 +208,7 @@ class LoreFeed(PIFeed):
         epochs_file = self.feed_dir / 'epochs.json'
         if not epochs_file.exists():
             raise StateError(f'Epochs file {epochs_file} does not exist.')
-        with open(epochs_file) as ef:
+        with epochs_file.open() as ef:
             epochs_data = json.load(ef)
         return [(entry['epoch'], entry['path'], entry['fpr']) for entry in epochs_data]
 

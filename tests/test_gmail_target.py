@@ -1,31 +1,32 @@
 """Tests for GmailTarget message delivery."""
 
 import base64
-from unittest.mock import MagicMock, mock_open, patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 
 from korgalore import ConfigurationError, RemoteError
 from korgalore.gmail_target import SCOPES, GmailTarget
 
 
-def make_target() -> tuple[GmailTarget, MagicMock]:
+def make_target(tmp_path: Path) -> tuple[GmailTarget, MagicMock]:
     """A GmailTarget with valid stored credentials; returns it with those credentials."""
-    with (
-        patch('korgalore.gmail_target.Credentials') as mock_creds_class,
-        patch('os.path.exists', return_value=True),
-    ):
+    token = tmp_path / 'token.json'
+    token.write_text('{}')
+    with patch('korgalore.gmail_target.Credentials') as mock_creds_class:
         mock_creds = MagicMock()
         mock_creds.valid = True
         mock_creds_class.from_authorized_user_file.return_value = mock_creds
-        return GmailTarget('test', '/creds.json', '/token.json'), mock_creds
+        return GmailTarget('test', str(tmp_path / 'creds.json'), str(token)), mock_creds
 
 
 @pytest.fixture
-def gmail() -> tuple[GmailTarget, MagicMock]:
+def gmail(tmp_path: Path) -> tuple[GmailTarget, MagicMock]:
     """A target with a mocked API service; the label map is not loaded yet."""
-    target, _ = make_target()
+    target, _ = make_target(tmp_path)
     service = MagicMock()
     target.service = service
     return target, service
@@ -54,30 +55,29 @@ class TestGmailTargetInit:
     """Tests for GmailTarget initialization."""
 
     @patch('korgalore.gmail_target.Credentials')
-    @patch('os.path.exists')
-    def test_loads_existing_valid_token(self, mock_exists: MagicMock, mock_credentials: MagicMock) -> None:
+    def test_loads_existing_valid_token(self, mock_credentials: MagicMock, tmp_path: Path) -> None:
         """Loads credentials from the stored token; the service waits for connect()."""
-        mock_exists.return_value = True
+        token = tmp_path / 'token.json'
+        token.write_text('{}')
         mock_creds = MagicMock()
         mock_creds.valid = True
         mock_credentials.from_authorized_user_file.return_value = mock_creds
 
-        target = GmailTarget('test', '/path/to/creds.json', '/path/to/token.json')
+        target = GmailTarget('test', str(tmp_path / 'creds.json'), str(token))
 
         assert target.identifier == 'test'
         assert target.creds is mock_creds
         assert target.service is None
-        mock_credentials.from_authorized_user_file.assert_called_once_with('/path/to/token.json', SCOPES)
+        mock_credentials.from_authorized_user_file.assert_called_once_with(str(token), SCOPES)
 
     @patch('korgalore.gmail_target.Credentials')
     @patch('korgalore.gmail_target.Request')
-    @patch('os.path.exists')
-    @patch('builtins.open', new_callable=mock_open)
     def test_refreshes_expired_token(
-        self, mock_file: MagicMock, mock_exists: MagicMock, mock_request: MagicMock, mock_credentials: MagicMock
+        self, mock_request: MagicMock, mock_credentials: MagicMock, tmp_path: Path
     ) -> None:
-        """Refreshes expired credentials with refresh token."""
-        mock_exists.return_value = True
+        """Refreshes expired credentials with refresh token and saves the result."""
+        token = tmp_path / 'token.json'
+        token.write_text('{"token": "stale"}')
         mock_creds = MagicMock()
         mock_creds.valid = False
         mock_creds.expired = True
@@ -85,67 +85,81 @@ class TestGmailTargetInit:
         mock_creds.to_json.return_value = '{"token": "refreshed"}'
         mock_credentials.from_authorized_user_file.return_value = mock_creds
 
-        GmailTarget('test', '/path/to/creds.json', '/path/to/token.json')
+        GmailTarget('test', str(tmp_path / 'creds.json'), str(token))
 
         mock_creds.refresh.assert_called_once()
-        mock_file.assert_called_with('/path/to/token.json', 'w')
+        assert token.read_text() == '{"token": "refreshed"}'
 
     @patch('korgalore.gmail_target.Credentials')
-    @patch('korgalore.gmail_target.InstalledAppFlow')
-    @patch('os.path.exists')
-    @patch('builtins.open', new_callable=mock_open)
-    def test_runs_oauth_flow_and_saves_token_when_no_token(
-        self, mock_file: MagicMock, mock_exists: MagicMock, mock_flow_class: MagicMock, mock_credentials: MagicMock
+    @patch('korgalore.gmail_target.Request')
+    def test_revoked_token_is_set_aside(
+        self, mock_request: MagicMock, mock_credentials: MagicMock, tmp_path: Path
     ) -> None:
-        """Runs the OAuth flow when no token exists, then saves the new token."""
-        # First call (token file) returns False, second call (creds file) returns True
-        mock_exists.side_effect = [False, True]
+        """A token that fails to refresh is renamed out of the way and auth is flagged."""
+        token = tmp_path / 'token.json'
+        token.write_text('{"token": "revoked"}')
+        invalid = tmp_path / 'token.json.invalid'
+        invalid.write_text('{"token": "older"}')
+        mock_creds = MagicMock()
+        mock_creds.valid = False
+        mock_creds.expired = True
+        mock_creds.refresh_token = 'refresh_token_value'
+        mock_creds.refresh.side_effect = RefreshError
+        mock_credentials.from_authorized_user_file.return_value = mock_creds
 
+        target = GmailTarget('test', str(tmp_path / 'creds.json'), str(token), interactive=False)
+
+        assert target.needs_auth
+        assert not token.exists()
+        assert invalid.read_text() == '{"token": "revoked"}'
+
+    @patch('korgalore.gmail_target.InstalledAppFlow')
+    def test_runs_oauth_flow_and_saves_token_when_no_token(self, mock_flow_class: MagicMock, tmp_path: Path) -> None:
+        """Runs the OAuth flow when no token exists, then saves the new token."""
+        creds = tmp_path / 'creds.json'
+        creds.write_text('{}')
+        token = tmp_path / 'token.json'
         mock_creds = MagicMock()
         mock_creds.to_json.return_value = '{"access_token": "new_token"}'
         mock_flow = MagicMock()
         mock_flow.run_local_server.return_value = mock_creds
         mock_flow_class.from_client_secrets_file.return_value = mock_flow
 
-        target = GmailTarget('test', '/path/to/creds.json', '/path/to/token.json')
+        target = GmailTarget('test', str(creds), str(token))
 
-        mock_flow_class.from_client_secrets_file.assert_called_once_with('/path/to/creds.json', SCOPES)
+        mock_flow_class.from_client_secrets_file.assert_called_once_with(str(creds), SCOPES)
         mock_flow.run_local_server.assert_called_once_with(port=0)
         assert target.creds is mock_creds
-        mock_file.assert_called_with('/path/to/token.json', 'w')
-        mock_file().write.assert_called_once_with('{"access_token": "new_token"}')
+        assert token.read_text() == '{"access_token": "new_token"}'
 
-    @patch('os.path.exists')
-    def test_missing_credentials_file_raises(self, mock_exists: MagicMock) -> None:
+    def test_missing_credentials_file_raises(self, tmp_path: Path) -> None:
         """Missing credentials file raises ConfigurationError."""
-        # Both token file and credentials file don't exist
-        mock_exists.return_value = False
-
+        # Neither the token file nor the credentials file exists
         with pytest.raises(ConfigurationError) as exc_info:
-            GmailTarget('test', '/nonexistent/creds.json', '/path/to/token.json')
+            GmailTarget('test', str(tmp_path / 'creds.json'), str(tmp_path / 'token.json'))
         assert 'not found' in str(exc_info.value)
         assert 'creds.json' in str(exc_info.value)
 
     @patch('korgalore.gmail_target.Credentials')
-    @patch('os.path.exists')
-    def test_expands_user_paths(self, mock_exists: MagicMock, mock_credentials: MagicMock) -> None:
+    def test_expands_user_paths(self, mock_credentials: MagicMock, tmp_path: Path) -> None:
         """Tilde and env vars in paths are expanded."""
-        mock_exists.return_value = True
+        token = tmp_path / 'token.json'
+        token.write_text('{}')
         mock_credentials.from_authorized_user_file.return_value = MagicMock(valid=True)
 
-        with patch.dict('os.environ', {'HOME': '/home/testuser'}):
+        with patch.dict('os.environ', {'HOME': str(tmp_path)}):
             GmailTarget('test', '~/creds.json', '$HOME/token.json')
 
-        mock_credentials.from_authorized_user_file.assert_called_once_with('/home/testuser/token.json', SCOPES)
+        mock_credentials.from_authorized_user_file.assert_called_once_with(str(token), SCOPES)
 
 
 class TestGmailTargetConnect:
     """Tests for GmailTarget connect method."""
 
     @patch('korgalore.gmail_target.build')
-    def test_connect_builds_service_once(self, mock_build: MagicMock) -> None:
+    def test_connect_builds_service_once(self, mock_build: MagicMock, tmp_path: Path) -> None:
         """Connect builds the Gmail API service, and repeated calls don't rebuild it."""
-        target, mock_creds = make_target()
+        target, mock_creds = make_target(tmp_path)
         mock_service = MagicMock()
         mock_build.return_value = mock_service
 

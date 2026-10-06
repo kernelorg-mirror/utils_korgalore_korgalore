@@ -49,7 +49,7 @@ class PIFeed:
         results: list[tuple[int | str, ...]] = []
         if not filepath.exists():
             return results
-        with open(filepath) as f:
+        with filepath.open() as f:
             for raw_line in f:
                 line = raw_line.strip()
                 if not line:
@@ -71,15 +71,16 @@ class PIFeed:
     def _atomic_write(self, filepath: Path, content: str) -> None:
         """Write content to file atomically using temp file and rename."""
         dirpath = filepath.parent
-        fd, tmp_path = tempfile.mkstemp(dir=dirpath, prefix='.tmp_')
+        fd, tmp_name = tempfile.mkstemp(dir=dirpath, prefix='.tmp_')
+        tmp_path = Path(tmp_name)
         try:
             with os.fdopen(fd, 'w') as f:
                 f.write(content)
-            os.replace(tmp_path, filepath)
+            tmp_path.replace(filepath)
         except Exception:
             # Clean up temp file on error
             with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
+                tmp_path.unlink()
             raise
 
     def get_gitdir(self, epoch: int) -> Path:
@@ -88,7 +89,7 @@ class PIFeed:
 
     def _append_to_jsonl_file(self, filepath: Path, obj: tuple[int | str, ...]) -> None:
         """Append a tuple as a JSONL entry to a state file."""
-        with open(filepath, 'a') as f:
+        with filepath.open('a') as f:
             line = json.dumps(obj)
             f.write(line + '\n')
 
@@ -150,7 +151,7 @@ class PIFeed:
         delivery_name = self.feed_dir.name
 
         # Read the legacy info
-        with open(legacy_info_path) as f:
+        with legacy_info_path.open() as f:
             lgi = json.load(f)
 
         latest_commit = lgi.get('last')
@@ -484,7 +485,7 @@ class PIFeed:
         lock_file_path = self._get_state_file_path(delivery_name=None, suffix='lock')
         lock_file_path.parent.mkdir(parents=True, exist_ok=True)
         # Held open until feed_unlock(): closing it would drop the lock
-        lockfh = open(lock_file_path, 'w')  # noqa: SIM115
+        lockfh = lock_file_path.open('w')
         try:
             lockf(lockfh, LOCK_EX | LOCK_NB)
         except BlockingIOError as e:
@@ -717,7 +718,7 @@ class PIFeed:
             logger.debug('Initializing new state file for delivery: %s', delivery_name)
             self.save_delivery_info(delivery_name)
 
-        with open(state_file) as gf:
+        with state_file.open() as gf:
             info: dict[str, Any] = json.load(gf)
 
         return info
@@ -727,7 +728,7 @@ class PIFeed:
         state_file = self._get_state_file_path(delivery_name, 'info')
         if not state_file.exists():
             return None
-        with open(state_file) as gf:
+        with state_file.open() as gf:
             info: dict[str, Any] = json.load(gf)
         return info
 
@@ -862,7 +863,7 @@ class PIFeed:
             if not state_file.exists():
                 raise StateError(f'Feed state not found: {state_file}')
 
-        with open(state_file) as f:
+        with state_file.open() as f:
             result = json.load(f)
             assert isinstance(result, dict)
             return result
@@ -879,7 +880,7 @@ class PIFeed:
 
         state: dict[str, Any]
         if state_file.exists():
-            with open(state_file) as f:
+            with state_file.open() as f:
                 state = json.load(f)
         else:
             state = {
