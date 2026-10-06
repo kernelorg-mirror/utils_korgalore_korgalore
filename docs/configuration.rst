@@ -716,6 +716,11 @@ Digest parameters (only allowed with ``mode = 'digest'``):
 * ``digest_from``: The ``From:`` address of the digest email (default
   ``'korgalore <korgalore@localhost>'``). Set this to an address your mail
   filters will recognize
+* ``digest_format``: Which parts the digest email has. ``'both'`` (the
+  default) sends plain text and HTML together, and your mail client
+  shows the one it prefers. ``'plain'`` sends only plain text, for
+  people who never read HTML mail. ``'html'`` sends only HTML, for
+  people who always read digests in a browser or a webmail client
 
 How digests are sent:
 

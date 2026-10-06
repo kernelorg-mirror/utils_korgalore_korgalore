@@ -44,6 +44,7 @@ class TestFromConfig:
         assert sched.send_day == 0
         assert sched.send_empty is False
         assert sched.from_addr == DEFAULT_FROM
+        assert sched.body_format == 'both'
         assert sched.period == timedelta(days=1)
         assert sched.summarizer is None
         assert sched.max_summaries is None
@@ -59,8 +60,9 @@ class TestFromConfig:
                     'send_day': 'Friday',
                     'send_empty': True,
                     'digest_from': 'Digests <me@example.org>',
+                    'digest_format': 'plain',
                 },
-                DigestSchedule('weekly', time(18, 30), 4, True, 'Digests <me@example.org>'),
+                DigestSchedule('weekly', time(18, 30), 4, True, 'Digests <me@example.org>', 'plain'),
                 timedelta(weeks=1),
                 id='all-keys',
             ),
@@ -105,6 +107,9 @@ class TestFromConfig:
             ({'send_empty': 'yes'}, 'send_empty'),
             ({'digest_from': 'korgalore'}, 'digest_from'),
             ({'digest_from': ['me@example.org']}, 'digest_from'),
+            ({'digest_format': 'text'}, 'digest_format'),
+            ({'digest_format': 'HTML'}, 'digest_format'),
+            ({'digest_format': ['plain']}, 'digest_format'),
             ({'summarizer': ''}, 'summarizer'),
             ({'summarizer': ['local']}, 'summarizer'),
             ({'max_summaries': 10}, 'max_summaries'),

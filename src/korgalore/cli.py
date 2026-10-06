@@ -966,6 +966,7 @@ def render_digest_job(
         period_start=period_start.astimezone(),
         period_end=period_end.astimezone(),
         from_addr=schedule.from_addr,
+        body_format=schedule.body_format,
         model=str(model) if model else None,
         history_start=history_start.astimezone() if history_start else None,
     )

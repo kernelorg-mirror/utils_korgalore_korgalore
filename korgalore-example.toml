@@ -112,6 +112,7 @@ labels = []  # Labels are ignored for IMAP (single folder delivery)
 # schedule = 'daily'    # or 'weekly', with send_day = 'mon'
 # send_at = '07:00'     # local time
 # send_empty = false    # skip days with no messages
+# digest_format = 'both'  # or 'plain' or 'html' for only one part
 # summarizer = 'local'  # add a short summary of each thread
 # max_summaries = 50    # the most new summaries per digest
 # summary_instructions = 'Tell me if anyone sounds confused or upset.'  # added to the prompt

@@ -24,7 +24,9 @@ What a Digest Looks Like
 ------------------------
 
 Here is the start of a daily digest with summaries, as plain text. The
-HTML part has the same content.
+HTML part has the same content. If you only want one of the two parts,
+set ``digest_format = 'plain'`` or ``digest_format = 'html'`` in the
+delivery.
 
 .. code-block:: text
 

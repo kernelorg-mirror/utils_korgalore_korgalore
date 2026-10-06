@@ -673,6 +673,8 @@ class DigestInfo:
     period_start: datetime
     period_end: datetime
     from_addr: str = DEFAULT_FROM
+    # Which parts the email has: 'both', 'plain' or 'html'
+    body_format: str = 'both'
     # The summarizer model; None makes a plain digest without summaries
     model: str | None = None
     # When the feed history has a gap, the time of the oldest message we
@@ -724,6 +726,9 @@ _NO_SUMMARY_NOTES = {
 
 # Gmail cuts off HTML bodies over about 102 KB, so parts stay under this
 DIGEST_PART_MAX = 90_000
+# The parts a digest email can have: both in multipart/alternative, or
+# only one of them for people who never want the other
+BODY_FORMATS = ('both', 'plain', 'html')
 
 
 def mid_url(link_base: str, msgid: str) -> str:
@@ -1027,6 +1032,10 @@ def _section_starts(
     return starts
 
 
+def _text_section(heading: str) -> list[str]:
+    return ['=' * 72, heading.upper(), '=' * 72]
+
+
 def _render_text_part(
     info: DigestInfo,
     threads: Sequence[DigestThread],
@@ -1040,7 +1049,7 @@ def _render_text_part(
         thread_lines = _text_thread(info, thread, summaries)
         if index in starts:
             # The heading's own rule replaces the thread's rule
-            lines.extend(['=' * 72, starts[index].upper(), '=' * 72])
+            lines.extend(_text_section(starts[index]))
             thread_lines = thread_lines[1:]
         lines.extend(thread_lines)
     return '\n'.join(lines) + '\n'
@@ -1176,22 +1185,29 @@ def split_threads(
     summaries: Summaries | None = None,
     max_size: int = DIGEST_PART_MAX,
 ) -> list[list[DigestThread]]:
-    """Split threads into parts whose HTML stays under max_size bytes.
+    """Split threads into parts whose body stays under max_size bytes.
 
-    A thread is never split, so a thread that is bigger than max_size on
-    its own gets a part of its own. The order of the threads is kept.
+    The HTML part is measured, as it is the bigger one, unless the digest
+    is plain text only. A thread is never split, so a thread that is
+    bigger than max_size on its own gets a part of its own. The order of
+    the threads is kept.
     """
     # Measure the header of a part with the longest label it can have
     sample = DigestPart(number=1, total=len(threads), first=len(threads), last=len(threads), thread_count=len(threads))
-    overhead = len('\n'.join([*_html_header(info, threads, sample), _HTML_FOOTER]).encode()) + 2
-    # Room for every section heading, at the longest it can be
-    overhead += sum(
-        len(_html_section(f'{section.title} ({len(threads)}), continued').encode()) + 1 for section in Section
-    )
+    headings = [f'{section.title} ({len(threads)}), continued' for section in Section]
+    if info.body_format == 'plain':
+        overhead = len('\n'.join(_text_header(info, threads, sample)).encode()) + 1
+        # Room for every section heading, at the longest it can be
+        overhead += sum(len('\n'.join(_text_section(heading)).encode()) + 1 for heading in headings)
+        thread_lines = _text_thread
+    else:
+        overhead = len('\n'.join([*_html_header(info, threads, sample), _HTML_FOOTER]).encode()) + 2
+        overhead += sum(len(_html_section(heading).encode()) + 1 for heading in headings)
+        thread_lines = _html_thread
     parts: list[list[DigestThread]] = [[]]
     size = overhead
     for thread in threads:
-        thread_size = len('\n'.join(_html_thread(info, thread, summaries)).encode()) + 1
+        thread_size = len('\n'.join(thread_lines(info, thread, summaries)).encode()) + 1
         if parts[-1] and size + thread_size > max_size:
             parts.append([])
             size = overhead
@@ -1232,8 +1248,15 @@ def _build_digest(
     if part is not None:
         msg['X-Korgalore-Digest-Part'] = f'{part.number}/{part.total}'
     msg['X-Korgalore-Digest-Model'] = info.model or 'none'
-    msg.set_content(_render_text_part(info, threads, part_threads, part, summaries))
-    msg.add_alternative(_render_html_part(info, threads, part_threads, part, summaries), subtype='html')
+    if info.body_format != 'html':
+        msg.set_content(_render_text_part(info, threads, part_threads, part, summaries))
+    if info.body_format == 'plain':
+        return msg
+    html_part = _render_html_part(info, threads, part_threads, part, summaries)
+    if info.body_format == 'html':
+        msg.set_content(html_part, subtype='html')
+    else:
+        msg.add_alternative(html_part, subtype='html')
     return msg
 
 
@@ -1249,7 +1272,10 @@ def render_digest(
     msgid: str | None = None,
     now: datetime | None = None,
 ) -> EmailMessage:
-    """Build the digest email: text/plain and text/html in multipart/alternative.
+    """Build the digest email.
+
+    By default it has text/plain and text/html in multipart/alternative;
+    info.body_format can make it a single text/plain or text/html email.
 
     summaries maps a thread's root Message-ID to its summary, or to a
     NoSummary reason. It is only used when info.model is set; a missing
@@ -1440,6 +1466,7 @@ DIGEST_KEYS = (
     'send_day',
     'send_empty',
     'digest_from',
+    'digest_format',
     'summarizer',
     'max_summaries',
     'summary_instructions',
@@ -1456,6 +1483,8 @@ class DigestSchedule:
     send_day: int = 0
     send_empty: bool = False
     from_addr: str = DEFAULT_FROM
+    # One of BODY_FORMATS
+    body_format: str = 'both'
     # The [summarizers] entry to use; None makes a plain digest
     summarizer: str | None = None
     # The most new summaries one digest asks for; None means no limit
@@ -1503,6 +1532,10 @@ class DigestSchedule:
         if not isinstance(from_addr, str) or '@' not in email.utils.parseaddr(from_addr)[1]:
             raise bad('digest_from', f"must be an address like 'korgalore <me@example.org>' (got {from_addr!r})")
 
+        body_format = details.get('digest_format', 'both')
+        if body_format not in BODY_FORMATS:
+            raise bad('digest_format', f'must be one of: {", ".join(BODY_FORMATS)} (got {body_format!r})')
+
         summarizer = details.get('summarizer')
         if summarizer is not None and (not isinstance(summarizer, str) or not summarizer):
             raise bad('summarizer', f'must be the name of a [summarizers] entry (got {summarizer!r})')
@@ -1529,6 +1562,7 @@ class DigestSchedule:
             send_day,
             send_empty,
             from_addr,
+            body_format,
             summarizer=summarizer,
             max_summaries=max_summaries,
             summary_instructions=summary_instructions,

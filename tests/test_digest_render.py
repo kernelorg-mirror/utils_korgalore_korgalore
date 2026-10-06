@@ -4,6 +4,7 @@ import dataclasses
 import html
 import os
 import time as time_mod
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -39,7 +40,7 @@ TZ = timezone(timedelta(hours=2))
 RENDER_NOW = datetime(2026, 10, 1, 7, 0, tzinfo=TZ)
 
 
-def make_info(model: str | None = None) -> DigestInfo:
+def make_info(model: str | None = None, body_format: str = 'both') -> DigestInfo:
     """Digest settings used by most tests."""
     return DigestInfo(
         feed_name='lkml',
@@ -48,6 +49,7 @@ def make_info(model: str | None = None) -> DigestInfo:
         period_start=RENDER_NOW - timedelta(days=1),
         period_end=RENDER_NOW,
         from_addr='korgalore <digest@example.org>',
+        body_format=body_format,
         model=model,
         tz=TZ,
     )
@@ -548,6 +550,28 @@ class TestRenderDigest:
         assert msg['X-Korgalore-Digest'] == 'lkml-digest'
         assert msg['X-Korgalore-Digest-Model'] == 'none'
 
+    @pytest.mark.parametrize(
+        ('body_format', 'content_type', 'renderer'),
+        [('plain', 'text/plain', render_text), ('html', 'text/html', render_html)],
+    )
+    def test_single_format(
+        self,
+        sample: list[DigestThread],
+        body_format: str,
+        content_type: str,
+        renderer: Callable[[DigestInfo, list[DigestThread]], str],
+    ) -> None:
+        """digest_format makes an email with only the part that was asked for."""
+        info = make_info(body_format=body_format)
+        msg = render_digest(info, sample, msgid='fixed@example.org', now=RENDER_NOW)
+        assert not msg.is_multipart()
+        assert msg.get_content_type() == content_type
+        assert msg.get_content_charset() == 'utf-8'
+        assert msg.get_content() == renderer(info, sample)
+        # The headers don't depend on the format
+        assert msg['Subject'] == '[DIGEST] lkml: 2026-10-01 (3 threads, 8 messages)'
+        assert msg['X-Korgalore-Digest'] == 'lkml-digest'
+
         # A summarized digest names its model, and without a fixed Message-ID
         # one is made with the From domain
         summarized = render_digest(make_info('qwen3:32b'), [], now=RENDER_NOW)
@@ -728,6 +752,25 @@ class TestSplit:
         # Nothing is lost or reordered
         assert [t for chunk in chunks for t in chunk] == threads
         for msg in render_digest_parts(info, threads, now=RENDER_NOW, max_size=4000):
+            assert len(digest_html(msg).encode()) <= 4000
+
+    def test_plain_parts_measure_the_text(self) -> None:
+        """A plain-only digest is split by the size of its text, which is smaller."""
+        threads = many_threads(40)
+        plain = make_info(body_format='plain')
+        chunks = split_threads(plain, threads, max_size=4000)
+        assert len(chunks) < len(split_threads(make_info(), threads, max_size=4000))
+        assert [t for chunk in chunks for t in chunk] == threads
+        parts = render_digest_parts(plain, threads, now=RENDER_NOW, max_size=4000)
+        assert len(parts) == len(chunks)
+        for msg in parts:
+            assert msg.get_content_type() == 'text/plain'
+            assert len(digest_text(msg).encode()) <= 4000
+
+    def test_html_parts_stay_under_the_cap(self) -> None:
+        threads = many_threads(40)
+        for msg in render_digest_parts(make_info(body_format='html'), threads, now=RENDER_NOW, max_size=4000):
+            assert msg.get_content_type() == 'text/html'
             assert len(digest_html(msg).encode()) <= 4000
 
     def test_big_thread_gets_its_own_part(self) -> None:

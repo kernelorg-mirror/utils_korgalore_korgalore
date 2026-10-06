@@ -67,6 +67,14 @@ class TestSendDigest:
         assert feed.load_digest_sent(DNAME) == NOW
         assert feed.load_delivery_info(DNAME)['epochs']['0']['last'] == repo.head
 
+    def test_digest_format_reaches_the_email(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
+        """The delivery's digest_format decides which parts are delivered."""
+        repo.add_msg('a@x', NOW - timedelta(hours=1))
+        send(repo, maildir, schedule=DigestSchedule(body_format='plain'))
+        [msg] = delivered(maildir)
+        assert msg.get_content_type() == 'text/plain'
+        assert 'a@x' in digest_text(msg)
+
     def test_not_due_sends_nothing(self, repo: InboxRepo, maildir: MaildirTarget) -> None:
         repo.add_msg('a@x', NOW - timedelta(hours=1))
         send(repo, maildir)
