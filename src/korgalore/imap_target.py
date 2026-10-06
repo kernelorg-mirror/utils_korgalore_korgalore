@@ -3,13 +3,11 @@
 import imaplib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple, cast
+from typing import Any, List, Optional, Tuple, cast
 
 from korgalore import ConfigurationError, RemoteError
 from korgalore.message import RawMessage
-
-if TYPE_CHECKING:
-    from korgalore.oauth2_imap import ImapOAuth2Authenticator
+from korgalore.oauth2_imap import DEFAULT_CLIENT_ID, ImapOAuth2Authenticator
 
 logger = logging.getLogger('korgalore')
 
@@ -71,16 +69,14 @@ class ImapTarget:
             raise ConfigurationError(f'No username specified for IMAP target: {identifier}')
 
         # Initialize authentication based on auth_type
-        self._oauth2_authenticator: Optional['ImapOAuth2Authenticator'] = None
+        self._oauth2_authenticator: Optional[ImapOAuth2Authenticator] = None
         self.password: Optional[str] = None
 
         if auth_type == 'oauth2':
             # OAuth2 authentication
             # Import here to avoid circular imports and optional dependency issues
-            from korgalore.oauth2_imap import DEFAULT_CLIENT_ID, ImapOAuth2Authenticator
-
             # Use default client_id if not specified
-            effective_client_id = client_id if client_id else DEFAULT_CLIENT_ID
+            effective_client_id = client_id or DEFAULT_CLIENT_ID
 
             # Generate default token file path if not specified
             if not token:
@@ -294,7 +290,7 @@ class ImapTarget:
             try:
                 # imaplib type stubs are incomplete - append returns (str, List[Any])
                 typ, data = cast(
-                    Tuple[str, List[Any]],
+                    'Tuple[str, List[Any]]',
                     imap.append(
                         effective_folder,
                         '',  # No flags (empty string)

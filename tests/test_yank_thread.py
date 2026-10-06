@@ -48,7 +48,7 @@ class TestYankThreadDeduplication:
     @patch('korgalore.cli.get_lore_node')
     @patch('korgalore.cli.get_target')
     def test_crossposted_message_delivered_once(
-        self, mock_get_target: MagicMock, mock_get_node: MagicMock, _mock_close: MagicMock
+        self, mock_get_target: MagicMock, mock_get_node: MagicMock, mock_close: MagicMock
     ) -> None:
         """The same Message-ID arriving from two lists yields one delivery, in mbox order."""
         mbox = b''.join(
@@ -73,7 +73,7 @@ class TestYankThreadDeduplication:
     @patch('korgalore.cli.get_lore_node')
     @patch('korgalore.cli.get_target')
     def test_preferred_list_copy_wins_over_earlier_copy(
-        self, mock_get_target: MagicMock, mock_get_node: MagicMock, _mock_close: MagicMock
+        self, mock_get_target: MagicMock, mock_get_node: MagicMock, mock_close: MagicMock
     ) -> None:
         """A later kernel.org copy replaces an earlier copy from elsewhere.
 

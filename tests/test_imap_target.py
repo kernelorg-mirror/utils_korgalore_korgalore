@@ -237,7 +237,8 @@ class TestImapTargetImportMessage:
 
         assert result == [b'[APPENDUID 1234 5678]']
         mock_imap.append.assert_called_once()
-        # folder, flags (empty = unread), datetime (empty = now), message
+        # The arguments are folder, flags, datetime and message. Empty
+        # flags mean unread, and an empty datetime means now.
         assert mock_imap.append.call_args[0] == (
             'INBOX',
             '',

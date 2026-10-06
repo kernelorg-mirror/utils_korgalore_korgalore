@@ -350,6 +350,7 @@ class CommandSummarizer:
                 encoding='utf-8',
                 errors='replace',
                 timeout=self.timeout,
+                check=False,
             )
         except subprocess.TimeoutExpired as e:
             raise SummarizerError(f'{self.name}: {self.args[0]} took longer than {self.timeout} seconds') from e

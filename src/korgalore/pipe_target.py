@@ -74,7 +74,7 @@ class PipeTarget:
 
         try:
             result = subprocess.run(
-                command_with_args, input=msg.as_bytes(feed_name, delivery_name), capture_output=True
+                command_with_args, input=msg.as_bytes(feed_name, delivery_name), capture_output=True, check=False
             )
 
             if result.returncode != 0:

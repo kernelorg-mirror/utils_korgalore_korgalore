@@ -32,9 +32,9 @@ def load_bozofilter(config_dir: Path) -> Set[str]:
         return addresses
 
     with open(bozofilter_path, 'r') as f:
-        for line in f:
+        for raw_line in f:
             # Strip whitespace
-            line = line.strip()
+            line = raw_line.strip()
 
             # Skip empty lines and comment-only lines
             if not line or line.startswith('#'):
@@ -144,7 +144,7 @@ def edit_bozofilter(config_dir: Path) -> bool:
     editor = os.environ.get('EDITOR', os.environ.get('VISUAL', 'vi'))
 
     try:
-        result = subprocess.run([editor, str(bozofilter_path)])
+        result = subprocess.run([editor, str(bozofilter_path)], check=False)
         return result.returncode == 0
     except FileNotFoundError:
         logger.error('Editor not found: %s', editor)

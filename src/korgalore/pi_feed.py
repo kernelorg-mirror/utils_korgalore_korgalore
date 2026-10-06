@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -49,8 +50,8 @@ class PIFeed:
         if not filepath.exists():
             return results
         with open(filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
+            for raw_line in f:
+                line = raw_line.strip()
                 if not line:
                     continue
                 obj = json.loads(line)
@@ -77,10 +78,8 @@ class PIFeed:
             os.replace(tmp_path, filepath)
         except Exception:
             # Clean up temp file on error
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
     def get_gitdir(self, epoch: int) -> Path:
@@ -484,7 +483,8 @@ class PIFeed:
         global LOCKED_FEEDS
         lock_file_path = self._get_state_file_path(delivery_name=None, suffix='lock')
         lock_file_path.parent.mkdir(parents=True, exist_ok=True)
-        lockfh = open(lock_file_path, 'w')
+        # Held open until feed_unlock(): closing it would drop the lock
+        lockfh = open(lock_file_path, 'w')  # noqa: SIM115
         try:
             lockf(lockfh, LOCK_EX | LOCK_NB)
         except BlockingIOError as e:
@@ -516,10 +516,7 @@ class PIFeed:
         """Return list of (epoch, commit) tuples that previously failed delivery."""
         state_file = self._get_state_file_path(delivery_name, 'failed')
         failed = self._read_jsonl_file(state_file)
-        results: List[Tuple[int, str]] = list()
-        for entry in failed:
-            results.append((int(entry[0]), str(entry[1])))
-        return results
+        return [(int(entry[0]), str(entry[1])) for entry in failed]
 
     def mark_successful_delivery(
         self,

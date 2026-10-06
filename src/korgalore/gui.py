@@ -1,5 +1,6 @@
 """GNOME Taskbar Application for Korgalore."""
 
+import contextlib
 import logging
 import math
 import os
@@ -76,10 +77,8 @@ class KorgaloreApp:
     def _get_config_mtime(self) -> float:
         """Return the newest mtime of config files."""
         mtime = 0.0
-        try:
+        with contextlib.suppress(OSError):
             mtime = self.cfgpath.stat().st_mtime
-        except OSError:
-            pass
         conf_d = self.cfgpath.parent / 'conf.d'
         try:
             # Check conf.d directory itself (detects added/removed files)

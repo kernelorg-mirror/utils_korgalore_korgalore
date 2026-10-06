@@ -510,7 +510,7 @@ class TestPatchList:
         assert '  Posted by P. Author, Thu 09:12:\n    resctrl: a fix\n  Follow-ups:\n    Thu 09:12  Carol\n' in text
 
     @pytest.mark.parametrize(
-        'subject, line',
+        ('subject', 'line'),
         [
             ('Re: [PATCH v6 02/18] resctrl: step 2', '    Thu 09:12  Bob  on 02/18\n'),
             ('Re: [PATCH v7 02/18] resctrl: step 2', '    Thu 09:12  Bob  on v7 02/18\n'),
@@ -586,7 +586,7 @@ class TestRootSubjects:
     """A continuing thread named after one patch can take its cover letter's subject."""
 
     @pytest.mark.parametrize(
-        'msgs, roots',
+        ('msgs', 'roots'),
         [
             pytest.param([review_of_patch()], ['cover@x'], id='review-of-a-patch'),
             pytest.param(

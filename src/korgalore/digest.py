@@ -911,8 +911,8 @@ def summary_points(summary: str) -> List[str]:
     """
     points: List[str] = []
     continues = False
-    for line in summary.splitlines():
-        line = line.strip()
+    for raw_line in summary.splitlines():
+        line = raw_line.strip()
         if not line:
             continues = False
             continue
@@ -969,12 +969,10 @@ def _text_thread(info: DigestInfo, thread: DigestThread, summaries: Optional[Sum
     if summary is not None:
         # Blank lines keep the summary apart from the facts and lists
         lines.extend(['', '  Summary (machine-generated):'])
-        for point in summary_points(summary):
-            lines.append(
-                textwrap.fill(
-                    point, width=72, initial_indent='    - ', subsequent_indent='      ', break_on_hyphens=False
-                )
-            )
+        lines.extend(
+            textwrap.fill(point, width=72, initial_indent='    - ', subsequent_indent='      ', break_on_hyphens=False)
+            for point in summary_points(summary)
+        )
         lines.append('')
     if note is not None:
         lines.append(f'  {note}')

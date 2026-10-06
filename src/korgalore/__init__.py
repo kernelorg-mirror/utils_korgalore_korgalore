@@ -131,7 +131,7 @@ def _init_git_user_agent() -> None:
         GitError: If git is not installed or fails to run.
     """
     try:
-        result = subprocess.run([GITCMD, '--version'], capture_output=True)
+        result = subprocess.run([GITCMD, '--version'], capture_output=True, check=False)
     except FileNotFoundError as e:
         raise GitError(f"Git command '{GITCMD}' not found. Is it installed?") from e
 
@@ -169,7 +169,7 @@ def run_git_command(
     logger.debug('Running git command: %s', ' '.join(cmd))
 
     try:
-        result = subprocess.run(cmd, capture_output=True, input=stdin)
+        result = subprocess.run(cmd, capture_output=True, input=stdin, check=False)
     except FileNotFoundError as e:
         raise GitError(f"Git command '{GITCMD}' not found. Is it installed?") from e
     return result.returncode, result.stdout.strip(), result.stderr.strip()
@@ -227,7 +227,7 @@ def run_lei_command(args: List[str], stdin: Optional[bytes] = None) -> Tuple[int
         name='lei-heartbeat',
     ).start()
     try:
-        result = subprocess.run(cmd, capture_output=True, input=stdin)
+        result = subprocess.run(cmd, capture_output=True, input=stdin, check=False)
     except FileNotFoundError as e:
         raise PublicInboxError(f"LEI command '{LEICMD}' not found. Is it installed?") from e
     finally:

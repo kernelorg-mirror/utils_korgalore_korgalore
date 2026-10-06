@@ -8,6 +8,7 @@ let a corrupt gzip escape as BadGzipFile and returned an empty dict for
 an empty manifest.
 """
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -88,5 +89,7 @@ class TestGetManifest:
             mock_node.request.side_effect = Exception('Connection refused')
         feed = LoreFeed('test', tmp_path, 'https://lore.kernel.org/lkml', lore_node=mock_node)
 
-        with pytest.raises(RemoteError, match='Failed to fetch manifest from https://lore.kernel.org/lkml/manifest'):
+        with pytest.raises(
+            RemoteError, match=re.escape('Failed to fetch manifest from https://lore.kernel.org/lkml/manifest')
+        ):
             feed.get_manifest()

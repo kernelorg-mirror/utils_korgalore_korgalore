@@ -210,10 +210,7 @@ class LoreFeed(PIFeed):
             raise StateError(f'Epochs file {epochs_file} does not exist.')
         with open(epochs_file, 'r') as ef:
             epochs_data = json.load(ef)
-        epochs: List[Tuple[int, str, str]] = []
-        for entry in epochs_data:
-            epochs.append((entry['epoch'], entry['path'], entry['fpr']))
-        return epochs
+        return [(entry['epoch'], entry['path'], entry['fpr']) for entry in epochs_data]
 
     @staticmethod
     def shallow_since(keep_history_since: Optional[datetime], now: Optional[datetime] = None) -> Optional[str]:

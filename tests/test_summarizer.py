@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import time
+from contextlib import suppress
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -66,12 +67,10 @@ class FakeServer:
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                try:
+                # The client may have timed out and hung up, which is what
+                # test_timeout wants
+                with suppress(BrokenPipeError, ConnectionResetError):
                     self.wfile.write(body)
-                except (BrokenPipeError, ConnectionResetError):
-                    # The client timed out and hung up, which is what
-                    # test_timeout wants
-                    pass
 
             def log_message(self, format: str, *args: Any) -> None:
                 pass
@@ -153,7 +152,7 @@ class TestOpenAI:
     def test_http_error(self, server: FakeServer, session: requests.Session) -> None:
         server.status = 500
         server.reply = {'error': 'model not loaded'}
-        with pytest.raises(SummarizerError, match='HTTP 500.*model not loaded'):
+        with pytest.raises(SummarizerError, match=r'HTTP 500.*model not loaded'):
             openai(server, session).summarize('x')
 
     @pytest.mark.parametrize(

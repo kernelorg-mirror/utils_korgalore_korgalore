@@ -63,11 +63,9 @@ def test_progress_file_hidden() -> None:
 
 def test_hidden_bar_writes_nothing_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     items = list(range(5))
-    seen = []
     stream = progress_file(True)
     with click.progressbar(items, label='Hiding', show_pos=True, file=stream) as bar:
-        for item in bar:
-            seen.append(item)
+        seen = list(bar)
 
     # The iteration must still work -- hiding the bar is not skipping the work.
     assert seen == items

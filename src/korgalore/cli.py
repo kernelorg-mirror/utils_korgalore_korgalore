@@ -10,7 +10,7 @@ import sys
 import tomllib
 import urllib.parse
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email import policy
@@ -436,12 +436,11 @@ def get_imap_target(
         logger.critical('No username specified for IMAP target: %s', identifier)
         raise click.Abort()
 
-    if auth_type != 'oauth2':
-        # Password authentication - requires password or password_file
-        if not password and not password_file:
-            logger.critical('No password or password_file specified for IMAP target: %s', identifier)
-            logger.critical('Either provide password directly or use password_file for security')
-            raise click.Abort()
+    # Password authentication - requires password or password_file
+    if auth_type != 'oauth2' and not password and not password_file:
+        logger.critical('No password or password_file specified for IMAP target: %s', identifier)
+        logger.critical('Either provide password directly or use password_file for security')
+        raise click.Abort()
     # OAuth2 uses a built-in default client_id if not specified
 
     try:
@@ -1701,8 +1700,7 @@ def abort_if_feed_locked() -> Generator[None, None, None]:
 def unlock_all_feeds(ctx: click.Context) -> None:
     """Release exclusive locks on all feeds in the context."""
     feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
-    for feed_key in feeds:
-        feed = feeds[feed_key]
+    for feed in feeds.values():
         feed.feed_unlock()
 
 
@@ -1751,7 +1749,7 @@ def update_all_feeds(
         feeds.keys(),
         label='Updating feeds',
         show_pos=True,
-        item_show_func=lambda x: format_key_for_display(x in feeds and str(feeds[x].feed_url) or x),
+        item_show_func=lambda x: format_key_for_display((x in feeds and str(feeds[x].feed_url)) or x),
         file=progress_file(ctx.obj['hide_bar']),
     ) as bar:
         for feed_key in bar:
@@ -1905,7 +1903,7 @@ def auth(ctx: click.Context, target: Optional[str]) -> None:
     If TARGET is omitted, authenticate all targets that require authentication.
     """
     # Target types that don't require authentication
-    NO_AUTH_TARGETS = {'maildir', 'pipe', 'dummy'}
+    no_auth_targets = {'maildir', 'pipe', 'dummy'}
 
     config = ctx.obj.get('config', {})
     targets = config.get('targets', {})
@@ -1919,7 +1917,7 @@ def auth(ctx: click.Context, target: Optional[str]) -> None:
 
         # Check if target requires authentication
         target_type = targets[target].get('type', '')
-        if target_type in NO_AUTH_TARGETS:
+        if target_type in no_auth_targets:
             logger.warning('Target "%s" (type: %s) does not require authentication.', target, target_type)
             return
 
@@ -1930,7 +1928,7 @@ def auth(ctx: click.Context, target: Optional[str]) -> None:
         auth_targets = []
         for identifier, details in targets.items():
             target_type = details.get('type', '')
-            if target_type in NO_AUTH_TARGETS:
+            if target_type in no_auth_targets:
                 logger.debug(
                     'Skipping target that does not require authentication: %s (type: %s)', identifier, target_type
                 )
@@ -2168,7 +2166,7 @@ def perform_pull(
             run_list,
             label='Delivering to ' + target_name,
             show_pos=True,
-            item_show_func=lambda x: x is not None and format_key_for_display(x[0]) or None,
+            item_show_func=lambda x: (x is not None and format_key_for_display(x[0])) or None,
             file=progress_file(ctx.obj['hide_bar']),
         ) as bar:
             # We bail on a target if we have more than 5 consecutive failures
@@ -2594,10 +2592,9 @@ def update_tracked_thread_activity(ctx: click.Context, changes: Dict[str, int]) 
 
     for delivery_name, count in changes.items():
         if delivery_name.startswith('track-'):
-            try:
+            # Not a tracked thread, or already removed
+            with suppress(KeyError):
                 manifest.update_activity(delivery_name, count)
-            except KeyError:
-                pass  # Not a tracked thread or already removed
 
 
 @main.group()

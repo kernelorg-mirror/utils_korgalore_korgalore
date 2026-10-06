@@ -15,7 +15,7 @@ import pytest
 from korgalore import ConfigurationError
 from korgalore.digest import DEFAULT_FROM, DigestSchedule
 
-# Montreal is UTC-4 in summer (EDT) and UTC-5 in winter (EST)
+# Montreal: four hours behind UTC in summer, five in winter
 EDT = timezone(timedelta(hours=-4))
 EST = timezone(timedelta(hours=-5))
 
@@ -84,12 +84,12 @@ class TestFromConfig:
         assert sched.summary_instructions == 'Tell me if anyone sounds upset.'
         assert parse(summarizer='local').summary_instructions is None
 
-    @pytest.mark.parametrize('day,expected', [('mon', 0), ('SUN', 6), ('wednesday', 2), ('Thurs', 3)])
+    @pytest.mark.parametrize(('day', 'expected'), [('mon', 0), ('SUN', 6), ('wednesday', 2), ('Thurs', 3)])
     def test_send_day_spellings(self, day: str, expected: int) -> None:
         assert parse(schedule='weekly', send_day=day).send_day == expected
 
     @pytest.mark.parametrize(
-        'details,key',
+        ('details', 'key'),
         [
             ({'schedule': 'hourly'}, 'schedule'),
             ({'send_at': '24:00'}, 'send_at'),

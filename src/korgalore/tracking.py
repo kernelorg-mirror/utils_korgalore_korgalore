@@ -109,7 +109,7 @@ class TrackingManifest:
         try:
             with open(self.manifest_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning('Failed to load tracking manifest: %s', e)
             return
 

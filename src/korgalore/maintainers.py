@@ -114,7 +114,7 @@ def extract_email(line: str) -> Optional[str]:
         'list@domain.org (moderated for non-subscribers)'
     """
     _, email = parseaddr(line)
-    return email if email else None
+    return email or None
 
 
 def is_field_line(line: str) -> bool:
@@ -180,8 +180,8 @@ def parse_maintainers(path: Path) -> Dict[str, SubsystemEntry]:
     prev_line_empty = True  # Start as true to catch first entry
 
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            line = line.rstrip('\n')
+        for raw_line in f:
+            line = raw_line.rstrip('\n')
 
             # Track empty lines for subsystem title detection
             if not line.strip():
@@ -377,14 +377,10 @@ def build_patches_query(entry: SubsystemEntry, since: str) -> Tuple[Optional[str
     exclude_parts: List[str] = []
 
     # Process F: file patterns (preserve trailing slash for directory matching)
-    for pattern in entry.files:
-        if pattern:
-            include_parts.append(f'dfn:{pattern}')
+    include_parts.extend(f'dfn:{pattern}' for pattern in entry.files if pattern)
 
     # Process X: excluded patterns
-    for pattern in entry.excluded:
-        if pattern:
-            exclude_parts.append(f'dfn:{pattern}')
+    exclude_parts.extend(f'dfn:{pattern}' for pattern in entry.excluded if pattern)
 
     # Process N: file regex patterns (only simple ones)
     for pattern in entry.file_regex:

@@ -186,10 +186,10 @@ class JmapTarget:
             for method_response in result.get('methodResponses', []):
                 method_name, method_result, _ = method_response
                 if method_name == 'Mailbox/get':
-                    for mailbox in method_result.get('list', []):
-                        mailboxes.append(
-                            {'id': mailbox['id'], 'name': mailbox['name'], 'role': mailbox.get('role', '')}
-                        )
+                    mailboxes.extend(
+                        {'id': mailbox['id'], 'name': mailbox['name'], 'role': mailbox.get('role', '')}
+                        for mailbox in method_result.get('list', [])
+                    )
 
             logger.debug('Found %d mailboxes', len(mailboxes))
             return mailboxes

@@ -118,7 +118,7 @@ class TestExtractEmailAddress:
             pytest.param('', None, id='empty'),
             # Passing None is not part of the signature, but callers feed this
             # straight from header lookups, so the guard has to hold.
-            pytest.param(cast(str, None), None, id='none'),
+            pytest.param(cast('str', None), None, id='none'),
         ],
     )
     def test_extract(self, header: str, expected: Optional[str]) -> None:

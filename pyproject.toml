@@ -120,6 +120,25 @@ select = [
     "PGH004",  # https://docs.astral.sh/ruff/rules/blanket-noqa/
     "PIE790",  # https://docs.astral.sh/ruff/rules/unnecessary-placeholder/
     "PIE810",  # https://docs.astral.sh/ruff/rules/multiple-starts-ends-with/
+    "ERA001",  # https://docs.astral.sh/ruff/rules/commented-out-code/
+    "FURB110", # https://docs.astral.sh/ruff/rules/if-exp-instead-of-or-operator/
+    "N806",    # https://docs.astral.sh/ruff/rules/non-lowercase-variable-in-function/
+    "PERF401", # https://docs.astral.sh/ruff/rules/manual-list-comprehension/
+    "PERF402", # https://docs.astral.sh/ruff/rules/manual-list-copy/
+    "PLC0206", # https://docs.astral.sh/ruff/rules/dict-index-missing-items/
+    "PLW1510", # https://docs.astral.sh/ruff/rules/subprocess-run-without-check/
+    "PLW2901", # https://docs.astral.sh/ruff/rules/redefined-loop-name/
+    "PT006",   # https://docs.astral.sh/ruff/rules/pytest-parametrize-names-wrong-type/
+    "PT011",   # https://docs.astral.sh/ruff/rules/pytest-raises-too-broad/
+    "PT019",   # https://docs.astral.sh/ruff/rules/pytest-fixture-param-without-value/
+    "RUF021",  # https://docs.astral.sh/ruff/rules/parenthesize-chained-operators/
+    "RUF043",  # https://docs.astral.sh/ruff/rules/pytest-raises-ambiguous-pattern/
+    "SIM102",  # https://docs.astral.sh/ruff/rules/collapsible-if/
+    "SIM105",  # https://docs.astral.sh/ruff/rules/suppressible-exception/
+    "SIM115",  # https://docs.astral.sh/ruff/rules/open-file-with-context-handler/
+    "TC006",   # https://docs.astral.sh/ruff/rules/runtime-cast-value/
+    "UP024",   # https://docs.astral.sh/ruff/rules/os-error-alias/
+    "UP037",   # https://docs.astral.sh/ruff/rules/quoted-annotation/
     "RET505",  # https://docs.astral.sh/ruff/rules/superfluous-else-return/
     "RET506",  # https://docs.astral.sh/ruff/rules/superfluous-else-raise/
     "RET507",  # https://docs.astral.sh/ruff/rules/superfluous-else-continue/

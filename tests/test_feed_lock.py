@@ -43,7 +43,7 @@ class TestLockAllFeeds:
         """Only a busy feed is handled here."""
         first, broken = MagicMock(), MagicMock()
         broken.feed_lock.side_effect = OSError('disk full')
-        with pytest.raises(OSError):
+        with pytest.raises(OSError, match='disk full'):
             lock_all_feeds(make_ctx({'feeds': {'first': first, 'broken': broken}}))
         first.feed_unlock.assert_not_called()
 
