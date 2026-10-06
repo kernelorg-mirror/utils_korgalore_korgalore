@@ -582,7 +582,7 @@ def merge_config(base: dict[str, Any], extra: dict[str, Any]) -> None:
 
 def load_config(cfgfile: Path) -> dict[str, Any]:
     """Load and parse the TOML configuration file and conf.d/*.toml files."""
-    config: dict[str, Any] = dict()
+    config: dict[str, Any] = {}
 
     if not cfgfile.exists():
         logger.error('Config file not found: %s', str(cfgfile))
@@ -809,7 +809,7 @@ def look_up_root_subjects(delivery_name: str, feed: LeiFeed | LoreFeed, messages
     """
     if not isinstance(feed, LoreFeed):
         return {}
-    subjects: dict[str, str] = dict()
+    subjects: dict[str, str] = {}
     roots = roots_to_look_up(group_threads([parse_message(raw) for raw in messages]))
     if len(roots) > ROOT_LOOKUPS_MAX:
         logger.debug('Digest %s: looking up %d of %d thread roots', delivery_name, ROOT_LOOKUPS_MAX, len(roots))
@@ -831,7 +831,7 @@ def _job_root_subjects(job: DigestJob, state: Mapping[str, Any]) -> dict[str, st
     saved = state.get('root_subjects') or {}
     if not isinstance(saved, dict):
         raise StateError(f'Bad digest job in {job.path}: root_subjects is not a map of subjects')
-    subjects: dict[str, str] = dict()
+    subjects: dict[str, str] = {}
     for msgid, subject in saved.items():
         if not isinstance(subject, str):
             raise StateError(f'Bad digest job in {job.path}: root_subjects has a subject that is not text')
@@ -881,7 +881,7 @@ def read_digest_period(
                 history_start.isoformat(),
             )
 
-    messages: list[bytes] = list()
+    messages: list[bytes] = []
     for epoch, commit in commits:
         try:
             if feed.is_noop_commit(epoch, commit):
@@ -995,7 +995,7 @@ def deliver_digest_job(
     except (KeyError, TypeError, ValueError) as e:
         raise StateError(f'Bad digest job in {job.path}: {e}') from e
 
-    sent: list[EmailMessage] = list()
+    sent: list[EmailMessage] = []
     pending = job.pending()
     if pending:
         target.connect()
@@ -1223,8 +1223,8 @@ def run_due_digests(
     """
     schedules: dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
     bozo_set = ctx.obj.get('bozofilter', set())
-    sent: dict[str, list[str]] = dict()
-    used_targets: dict[str, Any] = dict()
+    sent: dict[str, list[str]] = {}
+    used_targets: dict[str, Any] = {}
     waiting = False
     for dname in delivery_names:
         feed, target, labels, subfolder = ctx.obj['deliveries'][dname]
@@ -1280,12 +1280,12 @@ def run_digest_worker(ctx: click.Context, delivery_names: list[str]) -> dict[str
         sent. Nothing is sent when another worker is running.
     """
     schedules: dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
-    sent: dict[str, list[str]] = dict()
+    sent: dict[str, list[str]] = {}
     with flocked(ctx.obj['data_dir'] / DIGEST_WORKER_LOCK) as have_lock:
         if not have_lock:
             logger.info('Another digest worker is running')
             return sent
-        used_targets: dict[str, Any] = dict()
+        used_targets: dict[str, Any] = {}
         failed: set[str] = set()
         cache = SummaryCache(ctx.obj['data_dir'] / SUMMARY_CACHE_DIR)
         summarizers: dict[str, Summarizer] = ctx.obj.get('summarizers', {})
@@ -1552,13 +1552,13 @@ def map_deliveries(ctx: click.Context, deliveries: dict[str, Any]) -> None:
     from datetime import datetime
 
     # 'deliveries' is a mapping: delivery_name -> tuple[feed, target, labels, subfolder]
-    dmap: dict[str, tuple[LeiFeed | LoreFeed, Any, list[str], str | None]] = dict()
+    dmap: dict[str, tuple[LeiFeed | LoreFeed, Any, list[str], str | None]] = {}
     # Store original strftime templates for refresh (used by GUI for long-running processes)
-    templates: dict[str, str] = dict()
+    templates: dict[str, str] = {}
     # Deliveries with mode = 'digest', and when they send
-    schedules: dict[str, DigestSchedule] = dict()
+    schedules: dict[str, DigestSchedule] = {}
     # The [summarizers] entries that digests use
-    summarizers: dict[str, Summarizer] = dict()
+    summarizers: dict[str, Summarizer] = {}
     summarizer_cfg: dict[str, Any] = ctx.obj.get('config', {}).get('summarizers', {})
     logger.debug('Mapping deliveries to their feeds and targets')
     # Pre-map deliveries to their feeds and targets for later use.
@@ -1712,7 +1712,7 @@ def digest_history_needs(ctx: click.Context) -> dict[str, datetime]:
     sent longer ago than that would miss messages. Returns a mapping of
     feed key to the oldest commit date that any of its digests needs.
     """
-    needs: dict[str, datetime] = dict()
+    needs: dict[str, datetime] = {}
     for dname in ctx.obj.get('digest_schedules', {}):
         feed = ctx.obj['deliveries'][dname][0]
         if not isinstance(feed, LoreFeed):
@@ -1785,7 +1785,7 @@ def retry_all_failed_deliveries(ctx: click.Context) -> None:
     # 'deliveries' is a mapping: delivery_name -> tuple[feed, target, labels, subfolder]
     deliveries = ctx.obj['deliveries']
     digest_names = ctx.obj.get('digest_schedules', {})
-    retry_list: list[tuple[str, Any, LeiFeed | LoreFeed, int, str, list[str], str | None]] = list()
+    retry_list: list[tuple[str, Any, LeiFeed | LoreFeed, int, str, list[str], str | None]] = []
     for delivery_name, (feed, target, labels, subfolder) in deliveries.items():
         if delivery_name in digest_names:
             # Digests never deliver single messages, not even ones left
@@ -1856,7 +1856,7 @@ def main(ctx: click.Context, cfgfile: str, logfile: click.Path | None) -> None:
 
     # LoreNode cache keyed by canonical origin (scheme://host).
     # Nodes are created on demand by get_lore_node() and closed on exit.
-    ctx.obj['lore_nodes'] = dict()
+    ctx.obj['lore_nodes'] = {}
 
     # Seed with default lore.kernel.org node and read lore.useragentplus.
     import korgalore
@@ -1877,11 +1877,11 @@ def main(ctx: click.Context, cfgfile: str, logfile: click.Path | None) -> None:
 
     # We lazy-load these
     # 'targets' is a mapping: target identifier -> target instance
-    ctx.obj['targets'] = dict()
+    ctx.obj['targets'] = {}
     # 'feeds' is a mapping: feed_key -> feed instance
-    ctx.obj['feeds'] = dict()
+    ctx.obj['feeds'] = {}
     # 'deliveries' is a mapping: delivery_name -> tuple[feed_instance, target_instance, labels, subfolder]
-    ctx.obj['deliveries'] = dict()
+    ctx.obj['deliveries'] = {}
 
     # Hide progress bar at the DEBUG level
     if logger.isEnabledFor(logging.DEBUG):
@@ -2091,13 +2091,13 @@ def perform_pull(
     retry_all_failed_deliveries(ctx)
     if no_update:
         logger.debug('No-update flag set, skipping feed updates')
-        updated_feeds: list[str] = list()
-        initialized_feeds: list[str] = list()
+        updated_feeds: list[str] = []
+        initialized_feeds: list[str] = []
     else:
         updated_feeds, initialized_feeds = update_all_feeds(ctx, status_callback=status_callback)
 
     # Build reverse index once: feed_key -> delivery names
-    feed_to_deliveries: dict[str, list[str]] = dict()
+    feed_to_deliveries: dict[str, list[str]] = {}
     for dname, (feed, _, _, _) in ctx.obj['deliveries'].items():
         feed_to_deliveries.setdefault(feed.feed_key, []).append(dname)
 
@@ -2113,7 +2113,7 @@ def perform_pull(
                     logger.info('Initializing delivery state: %s', dname)
                     feed.save_delivery_info(dname)
 
-    run_deliveries: list[str] = list()
+    run_deliveries: list[str] = []
     if not force:
         logger.debug('Updated feeds: %s', ', '.join(updated_feeds))
         for feed_key in updated_feeds:
@@ -2136,20 +2136,20 @@ def perform_pull(
         return {}, set()
 
     # Build a worklist of updates per target
-    by_target: dict[str, list[str]] = dict()
+    by_target: dict[str, list[str]] = {}
     for dname in run_deliveries:
         target_name = ctx.obj['deliveries'][dname][1].identifier
         if target_name not in by_target:
-            by_target[target_name] = list()
+            by_target[target_name] = []
         by_target[target_name].append(dname)
 
-    changes: dict[str, int] = dict()
+    changes: dict[str, int] = {}
     unique_msgids: set[str] = set()
 
     # Process deliveries now
     for target_name, delivery_names in by_target.items():
         logger.debug('Processing deliveries for target: %s', target_name)
-        run_list: list[tuple[str, Any, LeiFeed | LoreFeed, int, str, list[str], str | None]] = list()
+        run_list: list[tuple[str, Any, LeiFeed | LoreFeed, int, str, list[str], str | None]] = []
         for dname in delivery_names:
             feed, target, labels, subfolder = ctx.obj['deliveries'][dname]
             commits = feed.get_latest_commits_for_delivery(dname)

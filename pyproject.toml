@@ -113,6 +113,7 @@ select = [
     "F",       # https://docs.astral.sh/ruff/rules/#pyflakes-f
     "B007",    # https://docs.astral.sh/ruff/rules/unused-loop-control-variable/
     "B904",    # https://docs.astral.sh/ruff/rules/raise-without-from-err/
+    "C408",    # https://docs.astral.sh/ruff/rules/unnecessary-collection-call/
     "DTZ",     # https://docs.astral.sh/ruff/rules/#flake8-datetimez-dtz
     "G",       # https://docs.astral.sh/ruff/rules/#flake8-logging-format-g
     "I",       # https://docs.astral.sh/ruff/rules/#isort-i

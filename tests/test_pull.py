@@ -299,7 +299,7 @@ class TestGetLoreNode:
     @staticmethod
     def _make_ctx() -> click.Context:
         """Create a Click context with an empty lore_nodes cache."""
-        return make_ctx({'lore_nodes': dict()})
+        return make_ctx({'lore_nodes': {}})
 
     def test_same_origin_returns_same_node(self) -> None:
         """Two URLs on the same host return the same cached node."""

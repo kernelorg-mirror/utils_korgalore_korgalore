@@ -17,8 +17,8 @@ logger = logging.getLogger('korgalore')
 
 # We use this to cache commit messages to avoid reparsing them multiple times
 # during delivery just to get the subject
-COMMIT_SUBJECT_CACHE: dict[str, str] = dict()
-LOCKED_FEEDS: dict[str, Any] = dict()
+COMMIT_SUBJECT_CACHE: dict[str, str] = {}
+LOCKED_FEEDS: dict[str, Any] = {}
 # We retry failed deliveries for 5 days and then give up
 RETRY_FAILED_INTERVAL = 5 * 24 * 60 * 60  # 5 days in seconds
 
@@ -37,8 +37,8 @@ class PIFeed:
     STATUS_INITIALIZED: int = 4
 
     def __init__(self, feed_key: str, feed_dir: Path) -> None:
-        self._branch_cache: dict[str, str] = dict()
-        self._empty_repo_cache: dict[int, bool] = dict()
+        self._branch_cache: dict[str, str] = {}
+        self._empty_repo_cache: dict[int, bool] = {}
         self.feed_key: str = feed_key
         self.feed_dir: Path = feed_dir
         self.feed_type: str = 'unknown'
@@ -46,7 +46,7 @@ class PIFeed:
 
     def _read_jsonl_file(self, filepath: Path) -> list[tuple[int | str, ...]]:
         """Read a JSONL state file and return a list of tuples."""
-        results: list[tuple[int | str, ...]] = list()
+        results: list[tuple[int | str, ...]] = []
         if not filepath.exists():
             return results
         with open(filepath) as f:
@@ -206,7 +206,7 @@ class PIFeed:
         if not epochs_dir.exists():
             raise PublicInboxError(f'No existing epochs found in {epochs_dir}.')
         # List this directory for existing epochs
-        existing_epochs: list[int] = list()
+        existing_epochs: list[int] = []
         for item in epochs_dir.iterdir():
             if item.is_dir() and item.name.endswith('.git'):
                 epoch_str = item.name.replace('.git', '')
@@ -314,7 +314,7 @@ class PIFeed:
             # Normal first-clone initialisation is handled by perform_pull() after update_all_feeds().
             logger.info('Initializing new delivery: %s', delivery_name)
             self.save_delivery_info(delivery_name)
-            return list()
+            return []
 
         # Grab the highest epoch we know about
         known_epochs = [int(e) for e in dinfo.get('epochs', {})]

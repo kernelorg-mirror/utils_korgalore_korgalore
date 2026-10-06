@@ -1396,7 +1396,7 @@ class DigestJob:
 
     def summaries(self, state: Mapping[str, Any]) -> dict[str, str | NoSummary]:
         """The summaries stored by write_summaries(), from a loaded job state."""
-        found: dict[str, str | NoSummary] = dict()
+        found: dict[str, str | NoSummary] = {}
         try:
             for root, text in state.get('summaries', {}).items():
                 found[root] = str(text)

@@ -98,9 +98,9 @@ class KorgaloreApp:
         is_valid, error_msg = validate_config_file(self.cfgpath)
         if is_valid:
             self.ctx.obj['config'] = load_config(self.cfgpath)
-            self.ctx.obj['targets'] = dict()
-            self.ctx.obj['feeds'] = dict()
-            self.ctx.obj['deliveries'] = dict()
+            self.ctx.obj['targets'] = {}
+            self.ctx.obj['feeds'] = {}
+            self.ctx.obj['deliveries'] = {}
             gui_config = self.ctx.obj['config'].get('gui', {})
             self.sync_interval = gui_config.get('sync_interval', 300)
             self._config_mtime = current_mtime
@@ -424,9 +424,9 @@ class KorgaloreApp:
                 logger.info('Configuration file is valid, reloading...')
                 # Reload config and clear cached instances
                 self.ctx.obj['config'] = load_config(cfgpath)
-                self.ctx.obj['targets'] = dict()
-                self.ctx.obj['feeds'] = dict()
-                self.ctx.obj['deliveries'] = dict()
+                self.ctx.obj['targets'] = {}
+                self.ctx.obj['feeds'] = {}
+                self.ctx.obj['deliveries'] = {}
                 # Update sync interval if changed
                 gui_config = self.ctx.obj['config'].get('gui', {})
                 self.sync_interval = gui_config.get('sync_interval', 300)

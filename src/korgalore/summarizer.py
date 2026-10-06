@@ -699,7 +699,7 @@ def plan_summaries(
         NoSummary reason), keyed by root Message-ID, and the threads left
         for the model, in rank_threads() order.
     """
-    decided: dict[str, str | NoSummary] = dict()
+    decided: dict[str, str | NoSummary] = {}
     todo: list[DigestThread] = []
     for thread in rank_threads(threads):
         root = thread.root_msgid
@@ -717,7 +717,7 @@ def plan_summaries(
 
 
 def _by_msgid(msgs: Sequence[EmailMessage]) -> dict[str, EmailMessage]:
-    by_msgid: dict[str, EmailMessage] = dict()
+    by_msgid: dict[str, EmailMessage] = {}
     for msg in msgs:
         msgid = get_clean_msgid(msg)
         if msgid:
@@ -878,7 +878,7 @@ class SummaryRun:
             self.failures = 0
             results[root] = summary if summary is not None else NoSummary.NOT_NEEDED
 
-        counts: dict[str, int] = dict()
+        counts: dict[str, int] = {}
         for found in results.values():
             kind = found.value if isinstance(found, NoSummary) else 'summarized'
             counts[kind] = counts.get(kind, 0) + 1

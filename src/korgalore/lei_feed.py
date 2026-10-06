@@ -21,7 +21,7 @@ class LeiFeed(PIFeed):
         Raises:
             ConfigurationError: If the LEI search is not known to lei.
         """
-        self.known_searches: list[str] = list()
+        self.known_searches: list[str] = []
         self._load_known_searches()
         feed_dir = Path(lei_url[4:])  # Strip 'lei:' prefix
         if str(feed_dir) not in self.known_searches:
@@ -71,7 +71,7 @@ class LeiFeed(PIFeed):
             GitError: If git show-ref fails on any epoch.
         """
         epochs = self.find_epochs()
-        epoch_info: list[tuple[int, str]] = list()
+        epoch_info: list[tuple[int, str]] = []
         for epoch in epochs:
             epoch_dir = self.get_gitdir(epoch)
             gitargs = ['show-ref']
