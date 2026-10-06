@@ -1,7 +1,8 @@
 """Tests for JmapTarget message delivery."""
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Type
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,7 +44,7 @@ MAILBOX_MAP = {'inbox': 'mb-1', 'sent': 'mb-2', 'archive': 'mb-3'}
 
 def make_target(**kwargs: Any) -> JmapTarget:
     """A JmapTarget with a bearer token, overridable per test."""
-    params: Dict[str, Any] = {
+    params: dict[str, Any] = {
         'identifier': 'test',
         'server': SERVER,
         'username': 'user@example.com',
@@ -53,7 +54,7 @@ def make_target(**kwargs: Any) -> JmapTarget:
     return JmapTarget(**params)
 
 
-def json_response(payload: Dict[str, Any]) -> MagicMock:
+def json_response(payload: dict[str, Any]) -> MagicMock:
     """A requests response whose .json() is the given payload."""
     response = MagicMock()
     response.json.return_value = payload
@@ -64,7 +65,7 @@ def upload_response(blob_id: str = 'blob-123') -> MagicMock:
     return json_response({'blobId': blob_id})
 
 
-def import_response(result: Dict[str, Any]) -> MagicMock:
+def import_response(result: dict[str, Any]) -> MagicMock:
     """An Email/import response for the single email 'msg1'."""
     return json_response({'methodResponses': [['Email/import', result, 'call-0']]})
 
@@ -73,7 +74,7 @@ def created(email_id: str = 'email-456') -> MagicMock:
     return import_response({'created': {'msg1': {'id': email_id}}})
 
 
-def query_response(ids: List[str]) -> MagicMock:
+def query_response(ids: list[str]) -> MagicMock:
     return json_response({'methodResponses': [['Email/query', {'ids': ids}, 'call-0']]})
 
 
@@ -110,7 +111,7 @@ class TestJmapTargetInit:
         [({}, 60), ({'server': SERVER + '/', 'timeout': 120}, 120)],
         ids=['defaults', 'trailing-slash-and-custom-timeout'],
     )
-    def test_valid_config_with_token(self, kwargs: Dict[str, Any], timeout: int) -> None:
+    def test_valid_config_with_token(self, kwargs: dict[str, Any], timeout: int) -> None:
         target = make_target(token='secret_token', **kwargs)
         assert target.identifier == 'test'
         assert target.server == SERVER  # trailing slash stripped
@@ -159,7 +160,7 @@ class TestJmapTargetInit:
         ],
         ids=['no-token', 'missing-token-file'],
     )
-    def test_invalid_config_raises(self, kwargs: Dict[str, Any], message: str) -> None:
+    def test_invalid_config_raises(self, kwargs: dict[str, Any], message: str) -> None:
         with pytest.raises(ConfigurationError, match=message):
             make_target(**kwargs)
 
@@ -206,8 +207,8 @@ class TestJmapTargetConnect:
     def test_connect_failures(
         self,
         mock_get: MagicMock,
-        session: Optional[Dict[str, Any]],
-        error: Type[Exception],
+        session: dict[str, Any] | None,
+        error: type[Exception],
         message: str,
     ) -> None:
         if session is None:
@@ -242,7 +243,7 @@ class TestJmapTargetUploadBlob:
         ids=['request-failure', 'missing-blob-id'],
     )
     def test_upload_failures(
-        self, jmap: JmapTarget, mock_post: MagicMock, post_kwargs: Dict[str, Any], message: str
+        self, jmap: JmapTarget, mock_post: MagicMock, post_kwargs: dict[str, Any], message: str
     ) -> None:
         mock_post.configure_mock(**post_kwargs)
 
@@ -278,7 +279,7 @@ class TestJmapTargetMailboxes:
         [['inbox', 'sent', 'archive'], ['INBOX', 'Sent', 'ARCHIVE']],
         ids=['exact', 'case-insensitive'],
     )
-    def test_translate_folders(self, jmap_mailboxes: JmapTarget, folders: List[str]) -> None:
+    def test_translate_folders(self, jmap_mailboxes: JmapTarget, folders: list[str]) -> None:
         assert jmap_mailboxes.translate_folders(folders) == ['mb-1', 'mb-2', 'mb-3']
 
     def test_translate_unknown_folder_raises(self, jmap_mailboxes: JmapTarget) -> None:
@@ -327,8 +328,8 @@ class TestJmapTargetImportMessage:
         self,
         jmap_mailboxes: JmapTarget,
         mock_post: MagicMock,
-        labels: List[str],
-        expected_ids: Dict[str, bool],
+        labels: list[str],
+        expected_ids: dict[str, bool],
     ) -> None:
         mock_post.side_effect = [upload_response(), created()]
 
@@ -398,10 +399,10 @@ class TestJmapTargetDeduplication:
         self,
         jmap_mailboxes: JmapTarget,
         mock_post: MagicMock,
-        ids: List[str],
-        mailboxes: List[str],
+        ids: list[str],
+        mailboxes: list[str],
         expected: bool,
-        expected_filter: Dict[str, Any],
+        expected_filter: dict[str, Any],
     ) -> None:
         mock_post.return_value = query_response(ids)
 
@@ -421,7 +422,7 @@ class TestJmapTargetDeduplication:
         ids=['duplicate-skipped', 'not-duplicate-imported'],
     )
     def test_import_dedup(
-        self, jmap_mailboxes: JmapTarget, mock_post: MagicMock, existing_ids: List[str], skipped: bool
+        self, jmap_mailboxes: JmapTarget, mock_post: MagicMock, existing_ids: list[str], skipped: bool
     ) -> None:
         mock_post.side_effect = [query_response(existing_ids), upload_response(), created('new-email-id')]
         raw_message = b'From: test@example.com\r\nMessage-ID: <dup@example.com>\r\n\r\nBody'

@@ -12,9 +12,10 @@ The git-backed parts of PIFeed are tested in test_pi_feed_git.py.
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Generator, List, Tuple
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -37,7 +38,7 @@ sys.stdin.read()
 OLD = '2024-01-01T00:00:00'
 
 
-def write_state(path: Path, entries: List[Tuple[Any, ...]]) -> None:
+def write_state(path: Path, entries: list[tuple[Any, ...]]) -> None:
     """Write entries to a state file, one JSON list per line."""
     path.write_text(''.join(json.dumps(e) + '\n' for e in entries))
 
@@ -169,7 +170,7 @@ class TestMarkFailedDelivery:
         rejected_file = temp_feed_dir / 'korgalore.test-delivery.rejected'
 
         # Create failure from 6 days ago (past 5-day interval)
-        old_time = datetime.now(timezone.utc) - timedelta(seconds=RETRY_FAILED_INTERVAL + 3600)
+        old_time = datetime.now(UTC) - timedelta(seconds=RETRY_FAILED_INTERVAL + 3600)
         write_state(failed_file, [(0, 'abc123', old_time.isoformat(), 10)])
 
         mock_feed.mark_failed_delivery('test-delivery', 0, 'abc123')
@@ -186,7 +187,7 @@ class TestMarkFailedDelivery:
     def test_multiple_failures_only_updates_matching(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Only the matching entry's retry count goes up when several failures exist."""
         failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         write_state(failed_file, [(0, 'abc123', now, 1), (0, 'def456', now, 2), (1, 'ghi789', now, 3)])
 
         mock_feed.mark_failed_delivery('test-delivery', 0, 'def456')

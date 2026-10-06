@@ -5,9 +5,9 @@ are built once per module.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -17,8 +17,8 @@ from korgalore.pi_feed import PIFeed
 from tests.conftest import make_pi_feed
 from tests.digest_helpers import InboxRepo
 
-WHEN = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
-LATER = datetime(2026, 2, 20, 8, 30, tzinfo=timezone.utc)
+WHEN = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
+LATER = datetime(2026, 2, 20, 8, 30, tzinfo=UTC)
 BAD_COMMIT = 'deadbeef' * 5
 
 
@@ -27,8 +27,8 @@ def real_feed(feed_dir: Path) -> PIFeed:
     return make_pi_feed(feed_dir, highest_epoch=None, top_commit=None, subject=None)
 
 
-def read_epochs(feed: PIFeed, delivery: str = 'test-delivery') -> Dict[str, Any]:
-    epochs: Dict[str, Any] = json.loads((feed.feed_dir / f'korgalore.{delivery}.info').read_text())['epochs']
+def read_epochs(feed: PIFeed, delivery: str = 'test-delivery') -> dict[str, Any]:
+    epochs: dict[str, Any] = json.loads((feed.feed_dir / f'korgalore.{delivery}.info').read_text())['epochs']
     return epochs
 
 
@@ -38,7 +38,7 @@ def empty_repo(tmp_path_factory: pytest.TempPathFactory) -> InboxRepo:
 
 
 @pytest.fixture(scope='module')
-def one_commit_repo(tmp_path_factory: pytest.TempPathFactory) -> Tuple[InboxRepo, str]:
+def one_commit_repo(tmp_path_factory: pytest.TempPathFactory) -> tuple[InboxRepo, str]:
     """A repository with one message commit; returns it with that commit."""
     repo = InboxRepo(tmp_path_factory.mktemp('one'))
     return repo, repo.add(b'Subject: real commit\nMessage-ID: <real@example.com>\n\nbody\n', WHEN)
@@ -50,7 +50,7 @@ class TestFirstAndTopCommit:
     @pytest.mark.parametrize('method', ['get_first_commit', 'get_top_commit'])
     @pytest.mark.parametrize('empty', [True, False], ids=['empty-repo-gives-empty-string', 'commit-hash'])
     def test_commit_lookup(
-        self, method: str, empty: bool, empty_repo: InboxRepo, one_commit_repo: Tuple[InboxRepo, str]
+        self, method: str, empty: bool, empty_repo: InboxRepo, one_commit_repo: tuple[InboxRepo, str]
     ) -> None:
         repo, expected = (empty_repo, '') if empty else one_commit_repo
 
@@ -93,7 +93,7 @@ class TestIsEmptyRepoCache:
 
 
 @pytest.fixture(scope='module')
-def commits(tmp_path_factory: pytest.TempPathFactory) -> Tuple[PIFeed, Dict[str, str]]:
+def commits(tmp_path_factory: pytest.TempPathFactory) -> tuple[PIFeed, dict[str, str]]:
     repo = InboxRepo(tmp_path_factory.mktemp('noop'))
     message, removal = repo.add_many(
         [(b'Subject: Re: some thread\n\nbody\n', WHEN, 'm'), (b'blob content\n', WHEN, 'd')]
@@ -114,11 +114,11 @@ class TestIsNoopCommit:
         ('filename', 'noop'),
         [pytest.param('m', False, id='message-commit'), pytest.param('d', True, id='rm-commit')],
     )
-    def test_noop_detection(self, commits: Tuple[PIFeed, Dict[str, str]], filename: str, noop: bool) -> None:
+    def test_noop_detection(self, commits: tuple[PIFeed, dict[str, str]], filename: str, noop: bool) -> None:
         feed, by_file = commits
         assert feed.is_noop_commit(0, by_file[filename]) is noop
 
-    def test_bad_object_commit_raises_git_error(self, commits: Tuple[PIFeed, Dict[str, str]]) -> None:
+    def test_bad_object_commit_raises_git_error(self, commits: tuple[PIFeed, dict[str, str]]) -> None:
         """A non-existent commit (bad object) must raise GitError.
 
         Regression: is_noop_commit returned True for bad-object commits,
@@ -234,14 +234,14 @@ class TestSaveDeliveryInfoEpochZero:
     """
 
     @pytest.fixture
-    def rolled_over(self, tmp_path: Path) -> Tuple[PIFeed, str, str]:
+    def rolled_over(self, tmp_path: Path) -> tuple[PIFeed, str, str]:
         """A feed that has rolled over from epoch 0 to epoch 1, with each top commit."""
         feed_dir = tmp_path / 'test-feed'
         old = InboxRepo(feed_dir, epoch=0).add(b'Subject: old epoch\nMessage-ID: <old@example.com>\n\nbody\n', WHEN)
         new = InboxRepo(feed_dir, epoch=1).add(b'Subject: new epoch\nMessage-ID: <new@example.com>\n\nbody\n', LATER)
         return real_feed(feed_dir), old, new
 
-    def test_explicit_epoch_zero_is_kept(self, rolled_over: Tuple[PIFeed, str, str]) -> None:
+    def test_explicit_epoch_zero_is_kept(self, rolled_over: tuple[PIFeed, str, str]) -> None:
         """A commit from 0.git is saved under epoch 0, not the highest epoch."""
         feed, old, _new = rolled_over
         assert feed.get_highest_epoch() == 1
@@ -254,7 +254,7 @@ class TestSaveDeliveryInfoEpochZero:
         assert epochs['0']['msgid'] == '<old@example.com>'
         assert epochs['0']['commit_date'].startswith('2026-01-15 12:00:00')
 
-    def test_epoch_zero_without_commit_uses_epoch_zero_top(self, rolled_over: Tuple[PIFeed, str, str]) -> None:
+    def test_epoch_zero_without_commit_uses_epoch_zero_top(self, rolled_over: tuple[PIFeed, str, str]) -> None:
         """Epoch 0 with no commit picks the top of 0.git, not of 1.git."""
         feed, old, _new = rolled_over
 
@@ -262,7 +262,7 @@ class TestSaveDeliveryInfoEpochZero:
 
         assert read_epochs(feed)['0']['last'] == old
 
-    def test_no_epoch_defaults_to_highest(self, rolled_over: Tuple[PIFeed, str, str]) -> None:
+    def test_no_epoch_defaults_to_highest(self, rolled_over: tuple[PIFeed, str, str]) -> None:
         """Leaving the epoch out still means the highest epoch."""
         feed, _old, new = rolled_over
 

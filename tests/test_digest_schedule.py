@@ -7,8 +7,9 @@ and ends.
 """
 
 import time as time_mod
-from datetime import datetime, time, timedelta, timezone
-from typing import Any, Dict, Iterator
+from collections.abc import Iterator
+from datetime import UTC, datetime, time, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -68,7 +69,7 @@ class TestFromConfig:
             ),
         ],
     )
-    def test_all_keys(self, details: Dict[str, Any], expected: DigestSchedule, period: timedelta) -> None:
+    def test_all_keys(self, details: dict[str, Any], expected: DigestSchedule, period: timedelta) -> None:
         sched = parse(**details)
         assert sched == expected
         assert sched.period == period
@@ -119,7 +120,7 @@ class TestFromConfig:
             ),
         ],
     )
-    def test_bad_values(self, details: Dict[str, Any], key: str) -> None:
+    def test_bad_values(self, details: dict[str, Any], key: str) -> None:
         with pytest.raises(ConfigurationError) as exc:
             parse(**details)
         # The message names the delivery and the key, so it's easy to fix
@@ -148,7 +149,7 @@ class TestDaily:
             ),
             # 11:30 UTC is 07:30 in Montreal, so today's slot has passed
             pytest.param(
-                datetime(2026, 10, 1, 11, 30, tzinfo=timezone.utc),
+                datetime(2026, 10, 1, 11, 30, tzinfo=UTC),
                 datetime(2026, 10, 1, 7, 0, tzinfo=EDT),
                 id='utc-input-uses-local-wall-clock',
             ),

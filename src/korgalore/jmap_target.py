@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -15,17 +15,17 @@ logger = logging.getLogger('korgalore')
 class JmapTarget:
     """Service for delivering messages to JMAP mail servers (e.g., Fastmail)."""
 
-    DEFAULT_LABELS: List[str] = ['INBOX']
+    DEFAULT_LABELS: list[str] = ['INBOX']
 
     def __init__(
         self,
         identifier: str,
         server: str,
         username: str,
-        token: Optional[str] = None,
-        token_file: Optional[str] = None,
+        token: str | None = None,
+        token_file: str | None = None,
         timeout: int = 60,
-        reqsession: Optional[requests.Session] = None,
+        reqsession: requests.Session | None = None,
     ) -> None:
         """Initialize JMAP service.
 
@@ -53,7 +53,7 @@ class JmapTarget:
             token_path = Path(token_file).expanduser()
             if not token_path.exists():
                 raise ConfigurationError(f'Token file not found: {token_file}')
-            with open(token_path, 'r') as f:
+            with open(token_path) as f:
                 self.token = f.read().strip()
         else:
             raise ConfigurationError(f'No token or token_file specified for JMAP target: {identifier}')
@@ -62,13 +62,13 @@ class JmapTarget:
         self.timeout = timeout
 
         # Session state
-        self.session: Optional[Dict[str, Any]] = None
-        self.account_id: Optional[str] = None
-        self.api_url: Optional[str] = None
-        self.upload_url: Optional[str] = None
+        self.session: dict[str, Any] | None = None
+        self.account_id: str | None = None
+        self.api_url: str | None = None
+        self.upload_url: str | None = None
 
         # Mailbox cache
-        self._mailbox_map: Optional[Dict[str, str]] = None  # name -> id
+        self._mailbox_map: dict[str, str] | None = None  # name -> id
 
     def _get_session(self) -> requests.Session:
         """Get requests session, using provided one or falling back to requests module."""
@@ -97,7 +97,7 @@ class JmapTarget:
 
         # Bound to a local of known type as well as to the attribute, so the
         # lookups below do not have to defeat the attribute's Optional.
-        session: Dict[str, Any] = response.json()
+        session: dict[str, Any] = response.json()
         self.session = session
 
         # Extract endpoints and account
@@ -151,7 +151,7 @@ class JmapTarget:
         except requests.RequestException as e:
             raise RemoteError(f'Failed to upload message blob: {e}') from e
 
-    def list_mailboxes(self) -> List[Dict[str, str]]:
+    def list_mailboxes(self) -> list[dict[str, str]]:
         """List all mailboxes/folders.
 
         Returns:
@@ -182,7 +182,7 @@ class JmapTarget:
             result = response.json()
 
             # Extract mailboxes from Mailbox/get response
-            mailboxes: List[Dict[str, str]] = []
+            mailboxes: list[dict[str, str]] = []
             for method_response in result.get('methodResponses', []):
                 method_name, method_result, _ = method_response
                 if method_name == 'Mailbox/get':
@@ -196,7 +196,7 @@ class JmapTarget:
         except requests.RequestException as e:
             raise RemoteError(f'Failed to list mailboxes: {e}') from e
 
-    def translate_folders(self, folder_names: List[str]) -> List[str]:
+    def translate_folders(self, folder_names: list[str]) -> list[str]:
         """Translate folder names to mailbox IDs.
 
         Args:
@@ -230,7 +230,7 @@ class JmapTarget:
 
         return mailbox_ids
 
-    def _check_message_exists(self, message_id: str, mailbox_ids: List[str]) -> bool:
+    def _check_message_exists(self, message_id: str, mailbox_ids: list[str]) -> bool:
         """Check if a message with this Message-ID exists in any of the mailboxes.
 
         Args:
@@ -245,7 +245,7 @@ class JmapTarget:
         # Build filter: check for Message-ID in any of the target mailboxes
         if len(mailbox_ids) == 1:
             # Simple case: single mailbox
-            query_filter: Dict[str, Any] = {'header': ['Message-ID', message_id], 'inMailbox': mailbox_ids[0]}
+            query_filter: dict[str, Any] = {'header': ['Message-ID', message_id], 'inMailbox': mailbox_ids[0]}
         else:
             # Multiple mailboxes: use OR filter
             query_filter = {
@@ -293,10 +293,10 @@ class JmapTarget:
     def import_message(
         self,
         raw_message: bytes,
-        labels: List[str],
-        feed_name: Optional[str] = None,
-        delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None,
+        labels: list[str],
+        feed_name: str | None = None,
+        delivery_name: str | None = None,
+        subfolder: str | None = None,
     ) -> Any:
         """Import raw email message to JMAP server.
 
@@ -385,7 +385,7 @@ class JmapTarget:
         except requests.RequestException as e:
             raise RemoteError(f'Failed to import message: {e}') from e
 
-    def list_labels(self) -> List[Dict[str, str]]:
+    def list_labels(self) -> list[dict[str, str]]:
         """List all available folders/mailboxes.
 
         Returns:

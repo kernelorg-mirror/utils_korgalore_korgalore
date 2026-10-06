@@ -22,11 +22,12 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import requests
@@ -69,7 +70,7 @@ The maintainer who reads this digest also asked for the following. Follow
 it as long as it fits the rules above:"""
 
 
-def system_prompt(instructions: Optional[str] = None) -> str:
+def system_prompt(instructions: str | None = None) -> str:
     """SYSTEM_PROMPT, with the instructions of a delivery added at the end."""
     if not instructions:
         return SYSTEM_PROMPT
@@ -120,7 +121,7 @@ class Summarizer(Protocol):
         """True when the prompts surely stay on this machine."""
         ...
 
-    def summarize(self, text: str, instructions: Optional[str] = None) -> str:
+    def summarize(self, text: str, instructions: str | None = None) -> str:
         """Summarize one thread prompt, as made by thread_prompt().
 
         instructions are added to the system prompt, see system_prompt().
@@ -172,7 +173,7 @@ def thread_prompt(
     subject: str,
     msgs: Sequence[EmailMessage],
     max_chars: int = DEFAULT_MAX_INPUT_CHARS,
-    previous: Optional[str] = None,
+    previous: str | None = None,
 ) -> str:
     """Build the prompt for one thread, at most max_chars long.
 
@@ -198,7 +199,7 @@ def thread_prompt(
     if len(first) > max_chars // 2:
         first = first[: max_chars // 2] + '\n[message cut]'
     room = max_chars - len(head) - len(first)
-    newest: List[str] = []
+    newest: list[str] = []
     for block in reversed(blocks[1:]):
         # Leave space for the note about what was left out
         if len(block) + 2 > room - 60:
@@ -231,11 +232,11 @@ class OpenAISummarizer:
         name: str,
         url: str,
         model: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_input_chars: int = DEFAULT_MAX_INPUT_CHARS,
         allow_private_feeds: bool = False,
-        session: Optional[requests.Session] = None,
+        session: requests.Session | None = None,
     ) -> None:
         self.name = name
         self.url = url
@@ -254,7 +255,7 @@ class OpenAISummarizer:
     def is_local(self) -> bool:
         return _is_loopback(self.url)
 
-    def summarize(self, text: str, instructions: Optional[str] = None) -> str:
+    def summarize(self, text: str, instructions: str | None = None) -> str:
         session = self._session or get_requests_session()
         system = system_prompt(instructions)
         payload = {
@@ -322,7 +323,7 @@ class CommandSummarizer:
         timeout: float = DEFAULT_TIMEOUT,
         max_input_chars: int = DEFAULT_MAX_INPUT_CHARS,
         allow_private_feeds: bool = False,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> None:
         self.name = name
         self.command = command
@@ -340,7 +341,7 @@ class CommandSummarizer:
         # A program can send the prompt anywhere, so we cannot tell
         return False
 
-    def summarize(self, text: str, instructions: Optional[str] = None) -> str:
+    def summarize(self, text: str, instructions: str | None = None) -> str:
         try:
             result = subprocess.run(
                 self.args,
@@ -416,7 +417,7 @@ def make_summarizer(name: str, details: Mapping[str, Any]) -> Summarizer:
     model = details.get('model')
     if not isinstance(model, str) or not model:
         raise bad('model', 'is required')
-    api_key: Optional[str] = None
+    api_key: str | None = None
     if 'api_key_file' in details:
         key_path = Path(str(details['api_key_file'])).expanduser()
         try:
@@ -435,11 +436,11 @@ class CachedSummary:
     summary: str
     # Message-IDs of every message the summary is about, including the
     # ones covered by the summaries it was built on
-    covered: FrozenSet[str]
+    covered: frozenset[str]
     created: datetime
 
 
-def instructions_hash(instructions: Optional[str]) -> Optional[str]:
+def instructions_hash(instructions: str | None) -> str | None:
     """What the summary cache records of a delivery's summary_instructions.
 
     A hash is enough to tell them apart, and keeps the cache small.
@@ -473,7 +474,7 @@ class SummaryCache:
         # safe in a file name
         return self.path / f'{hashlib.sha256(root.encode()).hexdigest()}.json'
 
-    def _read(self, root: str) -> List[Dict[str, Any]]:
+    def _read(self, root: str) -> list[dict[str, Any]]:
         try:
             data = json.loads(self._file(root).read_text())
         except FileNotFoundError:
@@ -486,7 +487,7 @@ class SummaryCache:
             return []
         return [entry for entry in data['entries'] if isinstance(entry, dict)]
 
-    def _write(self, root: str, entries: List[Dict[str, Any]]) -> None:
+    def _write(self, root: str, entries: list[dict[str, Any]]) -> None:
         target = self._file(root)
         if not entries:
             target.unlink(missing_ok=True)
@@ -497,13 +498,13 @@ class SummaryCache:
         os.replace(tmp, target)
 
     @staticmethod
-    def _same_kind(entry: Mapping[str, Any], model: str, instructions: Optional[str]) -> bool:
+    def _same_kind(entry: Mapping[str, Any], model: str, instructions: str | None) -> bool:
         found = (entry.get('model'), entry.get('prompt_version'), entry.get('instructions'))
         return found == (model, PROMPT_VERSION, instructions_hash(instructions))
 
-    def entries(self, root: str, model: str, instructions: Optional[str] = None) -> List[CachedSummary]:
+    def entries(self, root: str, model: str, instructions: str | None = None) -> list[CachedSummary]:
         """The summaries of a thread made with this model, prompt and instructions, oldest first."""
-        found: List[CachedSummary] = []
+        found: list[CachedSummary] = []
         for entry in self._read(root):
             if not self._same_kind(entry, model, instructions):
                 continue
@@ -520,14 +521,14 @@ class SummaryCache:
         return sorted(found, key=lambda cached: cached.created)
 
     def find(
-        self, root: str, msgids: Sequence[str], model: str, instructions: Optional[str] = None
-    ) -> Optional[CachedSummary]:
+        self, root: str, msgids: Sequence[str], model: str, instructions: str | None = None
+    ) -> CachedSummary | None:
         """The newest summary that covers all of these messages, if any."""
         wanted = set(msgids)
         covering = [cached for cached in self.entries(root, model, instructions) if wanted <= cached.covered]
         return covering[-1] if covering else None
 
-    def latest(self, root: str, model: str, instructions: Optional[str] = None) -> Optional[CachedSummary]:
+    def latest(self, root: str, model: str, instructions: str | None = None) -> CachedSummary | None:
         """The newest summary of a thread, to build the next one on."""
         found = self.entries(root, model, instructions)
         return found[-1] if found else None
@@ -539,7 +540,7 @@ class SummaryCache:
         summary: str,
         covered: Sequence[str],
         now: datetime,
-        instructions: Optional[str] = None,
+        instructions: str | None = None,
     ) -> None:
         """Save a summary. Older ones that it fully replaces are removed."""
         new_covered = set(covered)
@@ -553,7 +554,7 @@ class SummaryCache:
             ):
                 continue
             kept.append(entry)
-        new_entry: Dict[str, Any] = {
+        new_entry: dict[str, Any] = {
             'model': model,
             'prompt_version': PROMPT_VERSION,
             'summary': summary,
@@ -600,8 +601,8 @@ class SummaryCache:
 
 
 def _unsummarized(
-    cache: SummaryCache, root: str, model: str, msgs: Sequence[EmailMessage], instructions: Optional[str] = None
-) -> Tuple[Optional[CachedSummary], List[EmailMessage]]:
+    cache: SummaryCache, root: str, model: str, msgs: Sequence[EmailMessage], instructions: str | None = None
+) -> tuple[CachedSummary | None, list[EmailMessage]]:
     """The newest cached summary of a thread, and the shrunk messages it does not cover."""
     previous = cache.latest(root, model, instructions)
     covered_before = previous.covered if previous else frozenset()
@@ -615,8 +616,8 @@ def summarize_thread(
     subject: str,
     msgs: Sequence[EmailMessage],
     now: datetime,
-    instructions: Optional[str] = None,
-) -> Optional[str]:
+    instructions: str | None = None,
+) -> str | None:
     """Summarize a thread, using the cache to send as little as possible.
 
     msgs are the thread's messages in this digest, oldest first. When a
@@ -675,7 +676,7 @@ def needs_summary(thread: DigestThread) -> bool:
     return series is not None and series.expected > 1
 
 
-def rank_threads(threads: Sequence[DigestThread]) -> List[DigestThread]:
+def rank_threads(threads: Sequence[DigestThread]) -> list[DigestThread]:
     """The order to summarize in: the most new messages first, then the newest.
 
     When max_summaries runs out, the threads at the end go without. The
@@ -688,9 +689,9 @@ def plan_summaries(
     threads: Sequence[DigestThread],
     cache: SummaryCache,
     model: str,
-    max_summaries: Optional[int] = None,
-    instructions: Optional[str] = None,
-) -> Tuple[Dict[str, Union[str, NoSummary]], List[DigestThread]]:
+    max_summaries: int | None = None,
+    instructions: str | None = None,
+) -> tuple[dict[str, str | NoSummary], list[DigestThread]]:
     """Decide which threads of a digest need the model, without calling it.
 
     Returns:
@@ -698,8 +699,8 @@ def plan_summaries(
         NoSummary reason), keyed by root Message-ID, and the threads left
         for the model, in rank_threads() order.
     """
-    decided: Dict[str, Union[str, NoSummary]] = dict()
-    todo: List[DigestThread] = []
+    decided: dict[str, str | NoSummary] = dict()
+    todo: list[DigestThread] = []
     for thread in rank_threads(threads):
         root = thread.root_msgid
         if not needs_summary(thread):
@@ -715,8 +716,8 @@ def plan_summaries(
     return decided, todo
 
 
-def _by_msgid(msgs: Sequence[EmailMessage]) -> Dict[str, EmailMessage]:
-    by_msgid: Dict[str, EmailMessage] = dict()
+def _by_msgid(msgs: Sequence[EmailMessage]) -> dict[str, EmailMessage]:
+    by_msgid: dict[str, EmailMessage] = dict()
     for msg in msgs:
         msgid = get_clean_msgid(msg)
         if msgid:
@@ -724,7 +725,7 @@ def _by_msgid(msgs: Sequence[EmailMessage]) -> Dict[str, EmailMessage]:
     return by_msgid
 
 
-def _thread_msgs(thread: DigestThread, by_msgid: Mapping[str, EmailMessage]) -> List[EmailMessage]:
+def _thread_msgs(thread: DigestThread, by_msgid: Mapping[str, EmailMessage]) -> list[EmailMessage]:
     return [by_msgid[update.msgid] for update in thread.updates if update.msgid in by_msgid]
 
 
@@ -755,8 +756,8 @@ def estimate_summaries(
     cache: SummaryCache,
     threads: Sequence[DigestThread],
     msgs: Sequence[EmailMessage],
-    max_summaries: Optional[int] = None,
-    instructions: Optional[str] = None,
+    max_summaries: int | None = None,
+    instructions: str | None = None,
 ) -> SummaryEstimate:
     """Work out what SummaryRun.summarize_threads() would send, without sending it.
 
@@ -819,9 +820,9 @@ class SummaryRun:
         threads: Sequence[DigestThread],
         msgs: Sequence[EmailMessage],
         now: datetime,
-        max_summaries: Optional[int] = None,
-        instructions: Optional[str] = None,
-    ) -> Dict[str, Union[str, NoSummary]]:
+        max_summaries: int | None = None,
+        instructions: str | None = None,
+    ) -> dict[str, str | NoSummary]:
         """Summarize the threads of one digest, as far as the limits allow.
 
         Cached summaries are always used, and only new summaries count
@@ -877,7 +878,7 @@ class SummaryRun:
             self.failures = 0
             results[root] = summary if summary is not None else NoSummary.NOT_NEEDED
 
-        counts: Dict[str, int] = dict()
+        counts: dict[str, int] = dict()
         for found in results.values():
             kind = found.value if isinstance(found, NoSummary) else 'summarized'
             counts[kind] = counts.get(kind, 0) + 1

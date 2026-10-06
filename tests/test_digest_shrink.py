@@ -1,7 +1,6 @@
 """Tests for digest thread shrinking."""
 
 from email.message import EmailMessage
-from typing import Optional
 
 import pytest
 from liblore.utils import msg_get_payload
@@ -68,7 +67,7 @@ This needs a lock, w->tail can change under us.
 
 
 def make_msg(
-    body: str, subject: str = '[PATCH] mm: widget', charset: Optional[str] = None, raw_body: Optional[bytes] = None
+    body: str, subject: str = '[PATCH] mm: widget', charset: str | None = None, raw_body: bytes | None = None
 ) -> EmailMessage:
     """Build a simple text/plain message."""
     msg = mkmsg('20261001.1@example.org', subject, body)

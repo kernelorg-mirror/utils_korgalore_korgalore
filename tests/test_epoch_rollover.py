@@ -8,7 +8,6 @@ the old and new epochs.
 
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,7 +17,7 @@ from korgalore.pi_feed import PIFeed
 from tests.conftest import make_pi_feed
 
 
-def create_feed_with_epochs(tmp_path: Path, epochs: List[int]) -> PIFeed:
+def create_feed_with_epochs(tmp_path: Path, epochs: list[int]) -> PIFeed:
     """Create a feed with the specified epoch directories.
 
     Epochs are found on disk; the git lookups are left for the test to mock.
@@ -56,7 +55,7 @@ class TestFindEpochs:
             pytest.param([0, 1], ['not_an_epoch.git', 'random_dir'], [0, 1], id='ignores-non-epoch-dirs'),
         ],
     )
-    def test_finds_epochs(self, tmp_path: Path, on_disk: List[int], extra_dirs: List[str], expected: List[int]) -> None:
+    def test_finds_epochs(self, tmp_path: Path, on_disk: list[int], extra_dirs: list[str], expected: list[int]) -> None:
         feed = create_feed_with_epochs(tmp_path, on_disk)
         for name in extra_dirs:
             (feed.feed_dir / 'git' / name).mkdir()
@@ -88,7 +87,7 @@ class TestGetHighestEpoch:
             pytest.param([0, 5, 10], 10, id='non-contiguous'),
         ],
     )
-    def test_highest_epoch(self, tmp_path: Path, on_disk: List[int], expected: int) -> None:
+    def test_highest_epoch(self, tmp_path: Path, on_disk: list[int], expected: int) -> None:
         assert create_feed_with_epochs(tmp_path, on_disk).get_highest_epoch() == expected
 
 
@@ -103,7 +102,7 @@ class TestGetAllCommitsInEpoch:
         ],
     )
     @patch('korgalore.pi_feed.run_git_command')
-    def test_returns_commits(self, mock_git: MagicMock, tmp_path: Path, stdout: bytes, expected: List[str]) -> None:
+    def test_returns_commits(self, mock_git: MagicMock, tmp_path: Path, stdout: bytes, expected: list[str]) -> None:
         """Commits are returned in chronological order."""
         feed = create_feed_with_epochs(tmp_path, [0])
         mock_git.return_value = (0, stdout, b'')
@@ -207,10 +206,10 @@ class TestEpochRolloverDetection:
         self,
         mock_git: MagicMock,
         tmp_path: Path,
-        on_disk: List[int],
-        known: Dict[int, str],
-        git_output: List[bytes],
-        expected: List[Tuple[int, str]],
+        on_disk: list[int],
+        known: dict[int, str],
+        git_output: list[bytes],
+        expected: list[tuple[int, str]],
     ) -> None:
         feed = create_feed_with_epochs(tmp_path, on_disk)
         write_delivery_info(feed, 'delivery1', {epoch: {'last': last} for epoch, last in known.items()})

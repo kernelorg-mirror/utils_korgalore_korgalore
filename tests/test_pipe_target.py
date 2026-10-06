@@ -1,7 +1,6 @@
 """Tests for PipeTarget message delivery."""
 
 import logging
-from typing import List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,7 +24,7 @@ class TestPipeTargetInit:
         ],
         ids=['simple', 'quoted-args', 'full-path'],
     )
-    def test_valid_command(self, command: str, expected_args: List[str]) -> None:
+    def test_valid_command(self, command: str, expected_args: list[str]) -> None:
         target = PipeTarget('my-pipe-target', command)
         assert target.identifier == 'my-pipe-target'
         assert target.command == command
@@ -88,7 +87,7 @@ class TestPipeTargetImportMessage:
         ],
         ids=['labels-appended', 'no-labels'],
     )
-    def test_labels_become_arguments(self, command: str, labels: List[str], argv: List[str]) -> None:
+    def test_labels_become_arguments(self, command: str, labels: list[str], argv: list[str]) -> None:
         target = PipeTarget('test', command)
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')

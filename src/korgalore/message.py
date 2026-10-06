@@ -2,7 +2,6 @@
 
 from email.message import EmailMessage
 from email.utils import formatdate
-from typing import Optional
 
 from liblore.utils import get_clean_msgid, parse_message, wrap_header
 
@@ -29,8 +28,8 @@ class RawMessage:
             raw_message: Raw email bytes (RFC 2822/5322 format)
         """
         self._raw: bytes = raw_message
-        self._parsed: Optional[EmailMessage] = None
-        self._message_id: Optional[str] = None
+        self._parsed: EmailMessage | None = None
+        self._message_id: str | None = None
         self._message_id_extracted: bool = False
 
     @property
@@ -50,7 +49,7 @@ class RawMessage:
         return self._parsed
 
     @property
-    def message_id(self) -> Optional[str]:
+    def message_id(self) -> str | None:
         """Extract and return the Message-ID header.
 
         Returns:
@@ -84,7 +83,7 @@ class RawMessage:
                 pass
         return self._message_id
 
-    def as_bytes(self, feed_name: Optional[str] = None, delivery_name: Optional[str] = None) -> bytes:
+    def as_bytes(self, feed_name: str | None = None, delivery_name: str | None = None) -> bytes:
         """Return message as binary data suitable for delivery.
 
         Performs any necessary transformations for target delivery:

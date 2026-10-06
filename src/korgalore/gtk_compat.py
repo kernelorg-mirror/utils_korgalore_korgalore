@@ -18,7 +18,7 @@ names: they are ``None`` when GTK is unavailable, exactly as before.
 
 import importlib
 import logging
-from typing import Any, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger('korgalore.gui')
 
@@ -33,7 +33,7 @@ AppIndicator3: Any = None
 _INDICATOR_NAMESPACES = (('AppIndicator3', '0.1'), ('AyatanaAppIndicator3', '0.1'))
 
 
-def _load() -> Optional[Tuple[Any, Any, Any, Any]]:
+def _load() -> tuple[Any, Any, Any, Any] | None:
     """Import the GTK namespaces, or return None if any of them is missing.
 
     require_version() raises ValueError for a namespace that is absent or

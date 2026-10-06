@@ -4,7 +4,7 @@ import gzip
 import json
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import click
@@ -24,7 +24,7 @@ class TestValidatePublicInboxUrl:
     """Tests for LoreFeed.validate_public_inbox_url static method."""
 
     @staticmethod
-    def _make_manifest_response(manifest_data: Dict[str, Any]) -> MagicMock:
+    def _make_manifest_response(manifest_data: dict[str, Any]) -> MagicMock:
         """Create a mock response with gzipped manifest JSON."""
         json_bytes = json.dumps(manifest_data).encode()
         compressed = gzip.compress(json_bytes)
@@ -54,7 +54,7 @@ class TestValidatePublicInboxUrl:
         ],
         ids=['lore-two-epochs', 'non-lore-server'],
     )
-    def test_success(self, url: str, manifest: Dict[str, Any], expected: str) -> None:
+    def test_success(self, url: str, manifest: dict[str, Any], expected: str) -> None:
         """Valid manifest with consistent list prefix returns list name."""
         mock_node = self._make_mock_node(self._make_manifest_response(manifest))
 
@@ -184,7 +184,7 @@ class TestGenerateSubscriptionConfig:
     ],
     ids=['active', 'paused', 'prefers-active-over-paused', 'not-found'],
 )
-def test_find_subscription_file(tmp_path: Path, present: List[str], expected: Optional[str]) -> None:
+def test_find_subscription_file(tmp_path: Path, present: list[str], expected: str | None) -> None:
     conf_d = tmp_path / 'conf.d'
     conf_d.mkdir()
     for name in present:
@@ -224,7 +224,7 @@ class TestDefaultCommandGroup:
 
 def sub_ctx(
     tmp_path: Path,
-    subs: Optional[Dict[str, str]] = None,
+    subs: dict[str, str] | None = None,
     **obj: Any,
 ) -> click.Context:
     """A context for the subscribe commands.
@@ -258,10 +258,10 @@ class TestSubscribeAdd:
     @staticmethod
     def _add_ctx(
         tmp_path: Path,
-        targets: Dict[str, Any],
-        subs: Optional[Dict[str, str]] = None,
-        feeds: Optional[Dict[str, Any]] = None,
-        deliveries: Optional[Dict[str, Any]] = None,
+        targets: dict[str, Any],
+        subs: dict[str, str] | None = None,
+        feeds: dict[str, Any] | None = None,
+        deliveries: dict[str, Any] | None = None,
     ) -> click.Context:
         return sub_ctx(
             tmp_path,
@@ -285,11 +285,11 @@ class TestSubscribeAdd:
     def test_add_lore(
         self,
         tmp_path: Path,
-        targets: Dict[str, Any],
-        target: Optional[str],
-        labels: Tuple[str, ...],
+        targets: dict[str, Any],
+        target: str | None,
+        labels: tuple[str, ...],
         expected_target: str,
-        expected_labels: List[str],
+        expected_labels: list[str],
     ) -> None:
         """subscribe add creates a conf.d file for a lore URL."""
         from korgalore.cli import subscribe_add
@@ -361,9 +361,9 @@ class TestSubscribeAdd:
         tmp_path: Path,
         key: str,
         target: str,
-        subs: Optional[Dict[str, str]],
-        feeds: Optional[Dict[str, Any]],
-        deliveries: Optional[Dict[str, Any]],
+        subs: dict[str, str] | None,
+        feeds: dict[str, Any] | None,
+        deliveries: dict[str, Any] | None,
     ) -> None:
         """subscribe add aborts when the key already exists in conf.d or main config."""
         from korgalore.cli import subscribe_add
@@ -379,7 +379,7 @@ class TestSubscribeList:
     """Tests for the subscribe list command."""
 
     @staticmethod
-    def _ctx(tmp_path: Path, subs: Dict[str, str]) -> click.Context:
+    def _ctx(tmp_path: Path, subs: dict[str, str]) -> click.Context:
         """A context whose conf.d holds the given sub-*.toml[.paused] files."""
         contents = {
             fname: generate_subscription_config(key, f'https://lore.kernel.org/{key}/', 'gmail', ['INBOX'])
@@ -403,7 +403,7 @@ class TestSubscribeList:
         self,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
-        subs: Dict[str, str],
+        subs: dict[str, str],
         paused: bool,
         expected: list[str],
         absent: list[str],

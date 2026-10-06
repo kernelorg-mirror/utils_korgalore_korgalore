@@ -8,14 +8,15 @@ import os
 import re
 import shutil
 import textwrap
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta, timezone, tzinfo
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from email.message import EmailMessage
 from enum import Enum
 from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any
 from urllib.parse import quote
 
 from liblore.utils import clean_header, get_clean_msgid, minimize_thread, msg_get_author, msg_get_payload
@@ -63,7 +64,7 @@ _DIFF_BODY_PREFIXES = (
 _BINARY_BLOCK_RE = re.compile(r'^(literal|delta) \d+$')
 
 
-def _starts_diff(lines: List[str], idx: int) -> bool:
+def _starts_diff(lines: list[str], idx: int) -> bool:
     """Return True if a diff starts at lines[idx]."""
     line = lines[idx]
     nextline = lines[idx + 1] if idx + 1 < len(lines) else ''
@@ -81,12 +82,12 @@ def _strip_path_prefix(path: str) -> str:
     return path
 
 
-def _diff_files(region: List[str]) -> List[str]:
+def _diff_files(region: list[str]) -> list[str]:
     """Return the files a diff region touches, in order, without duplicates."""
-    files: List[str] = []
-    minus_path: Optional[str] = None
+    files: list[str] = []
+    minus_path: str | None = None
     for line in region:
-        path: Optional[str] = None
+        path: str | None = None
         gmatch = _DIFF_GIT_RE.match(line)
         if gmatch:
             path = gmatch.group(2)
@@ -106,7 +107,7 @@ def _diff_files(region: List[str]) -> List[str]:
     return files
 
 
-def _diff_marker(region: List[str]) -> str:
+def _diff_marker(region: list[str]) -> str:
     """Build the line that replaces a diff region."""
     marker = f'[diff: {len(region)} lines'
     files = _diff_files(region)
@@ -118,7 +119,7 @@ def _diff_marker(region: List[str]) -> str:
     return marker + ']'
 
 
-def _diff_region_end(lines: List[str], start: int) -> int:
+def _diff_region_end(lines: list[str], start: int) -> int:
     """Return the index just past the diff region that begins at start.
 
     The region goes on for as long as the lines look like diff lines.
@@ -169,7 +170,7 @@ def strip_diffs(body: str) -> str:
     touches.
     """
     lines = body.splitlines()
-    out: List[str] = []
+    out: list[str] = []
     idx = 0
     while idx < len(lines):
         if _starts_diff(lines, idx):
@@ -208,7 +209,7 @@ def strip_review_trailers(body: str) -> str:
     return ''.join(lines)
 
 
-def shrink_thread(msgs: List[EmailMessage]) -> List[EmailMessage]:
+def shrink_thread(msgs: list[EmailMessage]) -> list[EmailMessage]:
     """Make a thread as small as possible before it goes to a summarizer.
 
     First liblore's minimize_thread() drops extra headers and deep quoting.
@@ -223,7 +224,7 @@ def shrink_thread(msgs: List[EmailMessage]) -> List[EmailMessage]:
 
     The input messages are not changed; new copies are returned.
     """
-    shrunk: List[EmailMessage] = []
+    shrunk: list[EmailMessage] = []
     for mmsg in minimize_thread(msgs, reduce_quote_context=True):
         body = strip_diffs(msg_get_payload(mmsg, strip_signature=True))
         if is_patch_posting(clean_header(mmsg.get('Subject'))):
@@ -292,11 +293,11 @@ class ThreadUpdate:
     subject: str
     author_name: str
     author_email: str
-    date: Optional[datetime]
+    date: datetime | None
     is_patch: bool
     # Patch details from the subject, also for replies ("Re: [PATCH 2/7] ...")
-    series: Optional[SeriesInfo] = None
-    trailers: List[Trailer] = field(default_factory=list)
+    series: SeriesInfo | None = None
+    trailers: list[Trailer] = field(default_factory=list)
 
 
 class Section(Enum):
@@ -323,12 +324,12 @@ class DigestThread:
     subject: str
     # True if the first message of the thread is in this period
     is_new: bool
-    updates: List[ThreadUpdate] = field(default_factory=list)
+    updates: list[ThreadUpdate] = field(default_factory=list)
     # Arrival position of the newest update, used for a stable sort order
     last_seen: int = 0
 
     @property
-    def series(self) -> Optional[SeriesInfo]:
+    def series(self) -> SeriesInfo | None:
         """Patch details of the thread, or None if it is not a patch thread."""
         return parse_series(self.subject)
 
@@ -365,18 +366,18 @@ class DigestThread:
         return Section.DISCUSSIONS
 
     @property
-    def participants(self) -> List[Tuple[str, str]]:
+    def participants(self) -> list[tuple[str, str]]:
         """(name, email) of each author, in order of their first message."""
-        seen: Dict[str, Tuple[str, str]] = {}
+        seen: dict[str, tuple[str, str]] = {}
         for update in self.updates:
             if update.author_email not in seen:
                 seen[update.author_email] = (update.author_name, update.author_email)
         return list(seen.values())
 
     @property
-    def trailers(self) -> List[Trailer]:
+    def trailers(self) -> list[Trailer]:
         """All review trailers given in this period, without duplicates."""
-        found: List[Trailer] = []
+        found: list[Trailer] = []
         for update in self.updates:
             for trailer in update.trailers:
                 if trailer not in found:
@@ -389,7 +390,7 @@ def strip_reply_prefixes(subject: str) -> str:
     return _REPLY_PREFIX_RE.sub('', subject).strip()
 
 
-def parse_series(subject: str) -> Optional[SeriesInfo]:
+def parse_series(subject: str) -> SeriesInfo | None:
     """Parse patch details from the bracketed prefixes of a subject.
 
     Returns None when the subject has no PATCH or RFC prefix.
@@ -443,9 +444,9 @@ def is_patch_posting(subject: str) -> bool:
     return parse_series(subject) is not None
 
 
-def find_trailers(body: str, sender: str) -> List[Trailer]:
+def find_trailers(body: str, sender: str) -> list[Trailer]:
     """Find review trailers in the unquoted lines of a message body."""
-    trailers: List[Trailer] = []
+    trailers: list[Trailer] = []
     for line in body.splitlines():
         tmatch = _TRAILER_RE.match(line)
         if not tmatch:
@@ -461,9 +462,9 @@ def find_trailers(body: str, sender: str) -> List[Trailer]:
     return trailers
 
 
-def _get_refs(msg: EmailMessage, msgid: str) -> List[str]:
+def _get_refs(msg: EmailMessage, msgid: str) -> list[str]:
     """Return the message's parents, References first, without duplicates."""
-    refs: List[str] = []
+    refs: list[str] = []
     for hdr in ('References', 'In-Reply-To'):
         for hval in msg.get_all(hdr, []):
             for ref in _MSGID_RE.findall(str(hval)):
@@ -473,7 +474,7 @@ def _get_refs(msg: EmailMessage, msgid: str) -> List[str]:
     return refs
 
 
-def _get_date(msg: EmailMessage) -> Optional[datetime]:
+def _get_date(msg: EmailMessage) -> datetime | None:
     """Parse the Date header. A date without a timezone is taken as UTC."""
     raw = msg.get('Date')
     if not raw:
@@ -483,7 +484,7 @@ def _get_date(msg: EmailMessage) -> Optional[datetime]:
     except (TypeError, ValueError):
         return None
     if date.tzinfo is None:
-        date = date.replace(tzinfo=timezone.utc)
+        date = date.replace(tzinfo=UTC)
     return date
 
 
@@ -494,7 +495,7 @@ def _make_update(msg: EmailMessage, msgid: str) -> ThreadUpdate:
     addr = addr.lower()
     series = parse_series(subject)
     is_patch = series is not None and not _REPLY_PREFIX_RE.match(subject)
-    trailers: List[Trailer] = []
+    trailers: list[Trailer] = []
     if not is_patch:
         # The trailers in a patch were collected on earlier versions, so
         # only replies count as new reviews.
@@ -515,7 +516,7 @@ class _Groups:
     """Union-find over Message-IDs that remembers the first id of each set."""
 
     def __init__(self) -> None:
-        self.parent: Dict[str, str] = {}
+        self.parent: dict[str, str] = {}
 
     def find(self, key: str) -> str:
         self.parent.setdefault(key, key)
@@ -533,9 +534,7 @@ class _Groups:
             self.parent[root2] = root1
 
 
-def group_threads(
-    msgs: Sequence[EmailMessage], root_subjects: Optional[Mapping[str, str]] = None
-) -> List[DigestThread]:
+def group_threads(msgs: Sequence[EmailMessage], root_subjects: Mapping[str, str] | None = None) -> list[DigestThread]:
     """Group the messages of a digest period into threads.
 
     Messages are expected in arrival order (the order of the feed's git
@@ -559,7 +558,7 @@ def group_threads(
     newest message, newest first. The digest shows them in this order.
     """
     groups = _Groups()
-    entries: List[Tuple[str, EmailMessage, List[str]]] = []
+    entries: list[tuple[str, EmailMessage, list[str]]] = []
     seen: set[str] = set()
     for msg in msgs:
         msgid = get_clean_msgid(msg)
@@ -580,8 +579,8 @@ def group_threads(
     # result does not depend on which message of a thread arrived first:
     # the message without parents if it is in the period, otherwise the
     # oldest ancestor named by the longest References chain in the group.
-    roots: Dict[str, Tuple[str, bool]] = {}
-    longest: Dict[str, int] = {}
+    roots: dict[str, tuple[str, bool]] = {}
+    longest: dict[str, int] = {}
     for msgid, _msg, refs in entries:
         key = groups.find(msgid)
         if key in roots and roots[key][1]:
@@ -592,7 +591,7 @@ def group_threads(
             longest[key] = len(refs)
             roots[key] = (refs[0], False)
 
-    threads: Dict[str, DigestThread] = {}
+    threads: dict[str, DigestThread] = {}
     for position, (msgid, msg, _refs) in enumerate(entries):
         key = groups.find(msgid)
         update = _make_update(msg, msgid)
@@ -615,7 +614,7 @@ def group_threads(
     return sorted(threads.values(), key=lambda thr: (_SECTION_ORDER[thr.section], -len(thr.updates), -thr.last_seen))
 
 
-def roots_to_look_up(threads: Sequence[DigestThread]) -> List[str]:
+def roots_to_look_up(threads: Sequence[DigestThread]) -> list[str]:
     """The roots of continuing threads that are named after one patch.
 
     Reviewers reply to the patches of a series, and the cover letter is
@@ -623,7 +622,7 @@ def roots_to_look_up(threads: Sequence[DigestThread]) -> List[str]:
     patch, such as "[PATCH v3 2/7] ...". The root, usually the cover
     letter, has a better name, so it is worth looking up in the archive.
     """
-    roots: List[str] = []
+    roots: list[str] = []
     for thread in threads:
         series = thread.series
         if not thread.is_new and series is not None and series.counter > 0 and series.expected > 1:
@@ -676,16 +675,16 @@ class DigestInfo:
     period_end: datetime
     from_addr: str = DEFAULT_FROM
     # The summarizer model; None makes a plain digest without summaries
-    model: Optional[str] = None
+    model: str | None = None
     # When the feed history has a gap, the time of the oldest message we
     # still have. Everything between period_start and this is missing.
-    history_start: Optional[datetime] = None
+    history_start: datetime | None = None
     # The time zone that message times are shown in. None is the local
     # zone, worked out for each time on its own, so a digest whose period
     # crosses a daylight saving change shows every message at the hour its
     # sender saw. A fixed offset, such as period_end.tzinfo, would be an
     # hour off on the other side of the change.
-    tz: Optional[tzinfo] = None
+    tz: tzinfo | None = None
 
 
 @dataclass(frozen=True)
@@ -714,7 +713,7 @@ class NoSummary(Enum):
 
 
 # A thread's root Message-ID mapped to its summary, or to why it has none
-Summaries = Mapping[str, Union[str, NoSummary]]
+Summaries = Mapping[str, str | NoSummary]
 
 # What the reader sees instead of a summary. These are our words, not the
 # model's, so they are not labelled as machine-generated.
@@ -733,12 +732,12 @@ def mid_url(link_base: str, msgid: str) -> str:
     return f'{link_base.rstrip("/")}/{quote(msgid, safe=_MID_SAFE)}/'
 
 
-def _plural(count: int, word: str, plural: Optional[str] = None) -> str:
+def _plural(count: int, word: str, plural: str | None = None) -> str:
     """Return "1 message" or "3 messages"."""
     return f'{count} {word if count == 1 else (plural or word + "s")}'
 
 
-def _fmt_time(date: Optional[datetime], tz: Optional[tzinfo]) -> str:
+def _fmt_time(date: datetime | None, tz: tzinfo | None) -> str:
     """Short weekday and time in the digest's timezone, such as "Thu 09:12"."""
     if date is None:
         return '?'
@@ -753,7 +752,7 @@ def _fmt_trailer(trailer: Trailer) -> str:
     return text
 
 
-def _thread_facts(thread: DigestThread) -> List[str]:
+def _thread_facts(thread: DigestThread) -> list[str]:
     """The short facts shown under a thread's subject."""
     facts = [
         'new' if thread.is_new else 'continuing',
@@ -795,7 +794,7 @@ def _update_note(update: ThreadUpdate, thread: DigestThread) -> str:
     A reply to a numbered patch says "on 01/18" instead of repeating the
     patch's subject, which is already in the thread's list of patches.
     """
-    parts: List[str] = []
+    parts: list[str] = []
     subject = strip_reply_prefixes(update.subject)
     if subject != thread.subject:
         series = update.series
@@ -825,12 +824,12 @@ class _ThreadLists:
     """A thread's updates, split for display."""
 
     # The first patch or cover letter posted, or None
-    poster: Optional[ThreadUpdate]
+    poster: ThreadUpdate | None
     # Patches in series order. The posting that started the thread is not
     # in the list when its subject is the thread's title.
-    patches: List[_Patch]
+    patches: list[_Patch]
     # Everything else, in arrival order
-    replies: List[ThreadUpdate]
+    replies: list[ThreadUpdate]
 
 
 def _thread_lists(thread: DigestThread) -> _ThreadLists:
@@ -841,9 +840,9 @@ def _thread_lists(thread: DigestThread) -> _ThreadLists:
     order, under one "Posted by" line.
     """
     thread_version = _thread_version(thread)
-    poster: Optional[ThreadUpdate] = None
-    found: List[Tuple[Tuple[int, int, int], _Patch]] = []
-    replies: List[ThreadUpdate] = []
+    poster: ThreadUpdate | None = None
+    found: list[tuple[tuple[int, int, int], _Patch]] = []
+    replies: list[ThreadUpdate] = []
     for index, update in enumerate(thread.updates):
         series = update.series if update.is_patch else None
         if series is None:
@@ -876,7 +875,7 @@ def _totals(threads: Sequence[DigestThread]) -> str:
     )
 
 
-def _gap_notice(info: DigestInfo) -> Optional[str]:
+def _gap_notice(info: DigestInfo) -> str | None:
     """Say which messages are missing, when the feed history has a gap."""
     if info.history_start is None:
         return None
@@ -900,7 +899,7 @@ def _part_label(part: DigestPart) -> str:
 _POINT_RE = re.compile(r'^(?:[-*\u2022]|\d{1,2}[.)])\s+')
 
 
-def summary_points(summary: str) -> List[str]:
+def summary_points(summary: str) -> list[str]:
     """Split a summary into the points of a list.
 
     Models are asked for one "- " point per line, but they do not always
@@ -909,7 +908,7 @@ def summary_points(summary: str) -> List[str]:
     wraps a long point. A summary without any markers, such as one saved
     before summaries were lists, gets one point per line.
     """
-    points: List[str] = []
+    points: list[str] = []
     continues = False
     for raw_line in summary.splitlines():
         line = raw_line.strip()
@@ -927,9 +926,7 @@ def summary_points(summary: str) -> List[str]:
     return points
 
 
-def _summary_for(
-    info: DigestInfo, summaries: Optional[Summaries], thread: DigestThread
-) -> Tuple[Optional[str], Optional[str]]:
+def _summary_for(info: DigestInfo, summaries: Summaries | None, thread: DigestThread) -> tuple[str | None, str | None]:
     """The thread's (summary, note), with at most one of them set.
 
     A plain digest has neither. In a summarized digest, a thread without
@@ -946,7 +943,7 @@ def _summary_for(
     return None, _NO_SUMMARY_NOTES[reason]
 
 
-def _text_header(info: DigestInfo, threads: Sequence[DigestThread], part: Optional[DigestPart]) -> List[str]:
+def _text_header(info: DigestInfo, threads: Sequence[DigestThread], part: DigestPart | None) -> list[str]:
     lines = [f'{info.feed_name} digest', _period_label(info), _totals(threads)]
     if part is not None:
         lines.append(_part_label(part))
@@ -960,7 +957,7 @@ def _text_header(info: DigestInfo, threads: Sequence[DigestThread], part: Option
     return lines
 
 
-def _text_thread(info: DigestInfo, thread: DigestThread, summaries: Optional[Summaries]) -> List[str]:
+def _text_thread(info: DigestInfo, thread: DigestThread, summaries: Summaries | None) -> list[str]:
     tz = info.tz
     lines = ['-' * 72, thread.subject, '  ' + ' | '.join(_thread_facts(thread))]
     # A "+" marks a new trailer, as in b4
@@ -1006,20 +1003,20 @@ def _text_thread(info: DigestInfo, thread: DigestThread, summaries: Optional[Sum
 
 
 def _section_starts(
-    threads: Sequence[DigestThread], part_threads: Sequence[DigestThread], part: Optional[DigestPart]
-) -> Dict[int, str]:
+    threads: Sequence[DigestThread], part_threads: Sequence[DigestThread], part: DigestPart | None
+) -> dict[int, str]:
     """Where a section heading goes in a part: thread index to heading.
 
     A heading counts the section's threads in the whole digest. A part
     that starts in the middle of a section says that it continues.
     """
-    counts: Dict[Section, int] = {}
+    counts: dict[Section, int] = {}
     for thread in threads:
         counts[thread.section] = counts.get(thread.section, 0) + 1
-    previous: Optional[Section] = None
+    previous: Section | None = None
     if part is not None and part.first > 1:
         previous = threads[part.first - 2].section
-    starts: Dict[int, str] = {}
+    starts: dict[int, str] = {}
     for index, thread in enumerate(part_threads):
         section = thread.section
         if index == 0 or section != previous:
@@ -1035,8 +1032,8 @@ def _render_text_part(
     info: DigestInfo,
     threads: Sequence[DigestThread],
     part_threads: Sequence[DigestThread],
-    part: Optional[DigestPart],
-    summaries: Optional[Summaries],
+    part: DigestPart | None,
+    summaries: Summaries | None,
 ) -> str:
     lines = _text_header(info, threads, part)
     starts = _section_starts(threads, part_threads, part)
@@ -1050,7 +1047,7 @@ def _render_text_part(
     return '\n'.join(lines) + '\n'
 
 
-def render_text(info: DigestInfo, threads: Sequence[DigestThread], summaries: Optional[Summaries] = None) -> str:
+def render_text(info: DigestInfo, threads: Sequence[DigestThread], summaries: Summaries | None = None) -> str:
     """Render the text/plain part of a digest."""
     return _render_text_part(info, threads, threads, None, summaries)
 
@@ -1060,7 +1057,7 @@ def _link(url: str, text: str) -> str:
     return f'<a href="{html.escape(url)}">{html.escape(text)}</a>'
 
 
-def _html_header(info: DigestInfo, threads: Sequence[DigestThread], part: Optional[DigestPart]) -> List[str]:
+def _html_header(info: DigestInfo, threads: Sequence[DigestThread], part: DigestPart | None) -> list[str]:
     esc = html.escape
     status = esc(_period_label(info)) + '<br>' + esc(_totals(threads))
     if part is not None:
@@ -1081,7 +1078,7 @@ def _html_header(info: DigestInfo, threads: Sequence[DigestThread], part: Option
     return out
 
 
-def _html_thread(info: DigestInfo, thread: DigestThread, summaries: Optional[Summaries]) -> List[str]:
+def _html_thread(info: DigestInfo, thread: DigestThread, summaries: Summaries | None) -> list[str]:
     esc = html.escape
     tz = info.tz
     out = [f'<div style="{_STYLE_THREAD}">']
@@ -1152,8 +1149,8 @@ def _render_html_part(
     info: DigestInfo,
     threads: Sequence[DigestThread],
     part_threads: Sequence[DigestThread],
-    part: Optional[DigestPart],
-    summaries: Optional[Summaries],
+    part: DigestPart | None,
+    summaries: Summaries | None,
 ) -> str:
     out = _html_header(info, threads, part)
     starts = _section_starts(threads, part_threads, part)
@@ -1165,7 +1162,7 @@ def _render_html_part(
     return '\n'.join(out) + '\n'
 
 
-def render_html(info: DigestInfo, threads: Sequence[DigestThread], summaries: Optional[Summaries] = None) -> str:
+def render_html(info: DigestInfo, threads: Sequence[DigestThread], summaries: Summaries | None = None) -> str:
     """Render the text/html part of a digest.
 
     Every value that comes from a message or a summarizer is escaped, and
@@ -1177,9 +1174,9 @@ def render_html(info: DigestInfo, threads: Sequence[DigestThread], summaries: Op
 def split_threads(
     info: DigestInfo,
     threads: Sequence[DigestThread],
-    summaries: Optional[Summaries] = None,
+    summaries: Summaries | None = None,
     max_size: int = DIGEST_PART_MAX,
-) -> List[List[DigestThread]]:
+) -> list[list[DigestThread]]:
     """Split threads into parts whose HTML stays under max_size bytes.
 
     A thread is never split, so a thread that is bigger than max_size on
@@ -1192,7 +1189,7 @@ def split_threads(
     overhead += sum(
         len(_html_section(f'{section.title} ({len(threads)}), continued').encode()) + 1 for section in Section
     )
-    parts: List[List[DigestThread]] = [[]]
+    parts: list[list[DigestThread]] = [[]]
     size = overhead
     for thread in threads:
         thread_size = len('\n'.join(_html_thread(info, thread, summaries)).encode()) + 1
@@ -1204,7 +1201,7 @@ def split_threads(
     return parts
 
 
-def _digest_subject(info: DigestInfo, threads: Sequence[DigestThread], part: Optional[DigestPart]) -> str:
+def _digest_subject(info: DigestInfo, threads: Sequence[DigestThread], part: DigestPart | None) -> str:
     messages = sum(len(thread.updates) for thread in threads)
     prefix = f'[DIGEST {part.number}/{part.total}]' if part else '[DIGEST]'
     return (
@@ -1217,11 +1214,11 @@ def _build_digest(
     info: DigestInfo,
     threads: Sequence[DigestThread],
     part_threads: Sequence[DigestThread],
-    part: Optional[DigestPart],
-    summaries: Optional[Summaries],
+    part: DigestPart | None,
+    summaries: Summaries | None,
     msgid: str,
     now: datetime,
-    first_msgid: Optional[str] = None,
+    first_msgid: str | None = None,
 ) -> EmailMessage:
     msg = EmailMessage()
     msg['From'] = info.from_addr
@@ -1249,9 +1246,9 @@ def _new_msgid(info: DigestInfo) -> str:
 def render_digest(
     info: DigestInfo,
     threads: Sequence[DigestThread],
-    summaries: Optional[Summaries] = None,
-    msgid: Optional[str] = None,
-    now: Optional[datetime] = None,
+    summaries: Summaries | None = None,
+    msgid: str | None = None,
+    now: datetime | None = None,
 ) -> EmailMessage:
     """Build the digest email: text/plain and text/html in multipart/alternative.
 
@@ -1261,7 +1258,7 @@ def render_digest(
     default a new Message-ID and the current time are used.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     full_msgid = f'<{msgid}>' if msgid else _new_msgid(info)
     return _build_digest(info, threads, threads, None, summaries, full_msgid, now)
 
@@ -1269,10 +1266,10 @@ def render_digest(
 def render_digest_parts(
     info: DigestInfo,
     threads: Sequence[DigestThread],
-    summaries: Optional[Summaries] = None,
-    now: Optional[datetime] = None,
+    summaries: Summaries | None = None,
+    now: datetime | None = None,
     max_size: int = DIGEST_PART_MAX,
-) -> List[EmailMessage]:
+) -> list[EmailMessage]:
     """Build the digest as one email, or as several when it is too big.
 
     The parts are numbered like a patch series ("[DIGEST 2/5]") and parts
@@ -1281,13 +1278,13 @@ def render_digest_parts(
     render_digest() makes.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     chunks = split_threads(info, threads, summaries, max_size)
     if len(chunks) == 1:
         return [render_digest(info, threads, summaries, now=now)]
-    parts: List[EmailMessage] = []
+    parts: list[EmailMessage] = []
     first = 1
-    first_msgid: Optional[str] = None
+    first_msgid: str | None = None
     for number, chunk in enumerate(chunks, start=1):
         part = DigestPart(number, len(chunks), first, first + len(chunk) - 1, len(threads))
         msgid = _new_msgid(info)
@@ -1363,12 +1360,12 @@ class DigestJob:
         """
         return flocked(self.path.with_name(f'{self.path.name}.lock'), wait=wait)
 
-    def _save(self, state: Dict[str, Any]) -> None:
+    def _save(self, state: dict[str, Any]) -> None:
         tmp = self.path / f'{self.JOB_FILE}.tmp'
         tmp.write_text(json.dumps(state, indent=2))
         os.replace(tmp, self.path / self.JOB_FILE)
 
-    def create(self, messages: Sequence[bytes], state: Dict[str, Any]) -> None:
+    def create(self, messages: Sequence[bytes], state: dict[str, Any]) -> None:
         """Start a new job with these raw messages, replacing any old one."""
         self.clear()
         self.messages_dir.mkdir(parents=True)
@@ -1376,17 +1373,17 @@ class DigestJob:
             (self.messages_dir / f'{number:06d}.eml').write_bytes(raw)
         self._save({**state, 'stage': self.COLLECTED, 'messages': len(messages)})
 
-    def load(self) -> Dict[str, Any]:
+    def load(self) -> dict[str, Any]:
         job_file = self.path / self.JOB_FILE
         try:
-            state: Dict[str, Any] = json.loads(job_file.read_text())
+            state: dict[str, Any] = json.loads(job_file.read_text())
         except (OSError, ValueError) as e:
             raise StateError(f'Cannot read digest job {job_file}: {e}') from e
         if state.get('stage') not in (self.COLLECTED, self.SUMMARIZED, self.RENDERED):
             raise StateError(f'Unknown stage {state.get("stage")!r} in digest job {job_file}')
         return state
 
-    def messages(self) -> List[bytes]:
+    def messages(self) -> list[bytes]:
         """The collected messages, in the order they were collected."""
         return [path.read_bytes() for path in sorted(self.messages_dir.glob('*.eml'))]
 
@@ -1397,9 +1394,9 @@ class DigestJob:
         reasons = {root: found.value for root, found in summaries.items() if isinstance(found, NoSummary)}
         self._save({**state, 'stage': self.SUMMARIZED, 'model': model, 'summaries': texts, 'no_summary': reasons})
 
-    def summaries(self, state: Mapping[str, Any]) -> Dict[str, Union[str, NoSummary]]:
+    def summaries(self, state: Mapping[str, Any]) -> dict[str, str | NoSummary]:
         """The summaries stored by write_summaries(), from a loaded job state."""
-        found: Dict[str, Union[str, NoSummary]] = dict()
+        found: dict[str, str | NoSummary] = dict()
         try:
             for root, text in state.get('summaries', {}).items():
                 found[root] = str(text)
@@ -1422,7 +1419,7 @@ class DigestJob:
         # The parts have everything now
         shutil.rmtree(self.messages_dir, ignore_errors=True)
 
-    def pending(self) -> List[Path]:
+    def pending(self) -> list[Path]:
         """The parts that were not delivered yet, in order."""
         return sorted(self.parts_dir.glob('*.eml'))
 
@@ -1461,12 +1458,12 @@ class DigestSchedule:
     send_empty: bool = False
     from_addr: str = DEFAULT_FROM
     # The [summarizers] entry to use; None makes a plain digest
-    summarizer: Optional[str] = None
+    summarizer: str | None = None
     # The most new summaries one digest asks for; None means no limit
-    max_summaries: Optional[int] = None
+    max_summaries: int | None = None
     # Added to the summarizer's system prompt, for what this maintainer
     # wants to know about each thread
-    summary_instructions: Optional[str] = None
+    summary_instructions: str | None = None
 
     @classmethod
     def from_config(cls, delivery_name: str, details: Mapping[str, Any]) -> 'DigestSchedule':
@@ -1570,7 +1567,7 @@ class DigestSchedule:
             slot = datetime.combine(day, self.send_at).astimezone()
         return slot
 
-    def is_due(self, last_sent: Optional[datetime], now: datetime) -> bool:
+    def is_due(self, last_sent: datetime | None, now: datetime) -> bool:
         """True when a digest should go out now.
 
         A delivery that never sent a digest is due right away, so a new
@@ -1578,6 +1575,6 @@ class DigestSchedule:
         """
         return last_sent is None or last_sent < self.last_slot(now)
 
-    def period_start(self, last_sent: Optional[datetime], now: datetime) -> datetime:
+    def period_start(self, last_sent: datetime | None, now: datetime) -> datetime:
         """Where the next digest starts: the last one, or one period back."""
         return last_sent if last_sent is not None else now - self.period

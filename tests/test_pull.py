@@ -8,7 +8,8 @@ exits with status 3 at the end when any feed failed to update. Delivery
 failures don't count.
 """
 
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import click
@@ -29,7 +30,7 @@ from korgalore.pi_feed import PIFeed
 from tests.digest_helpers import make_ctx
 
 
-def _make_feed(feed_key: str, status: int = PIFeed.STATUS_UPDATED, error: Optional[Exception] = None) -> MagicMock:
+def _make_feed(feed_key: str, status: int = PIFeed.STATUS_UPDATED, error: Exception | None = None) -> MagicMock:
     """Create a mock feed that updates with ``status`` or raises ``error``."""
     feed = MagicMock(spec=LoreFeed)
     feed.feed_key = feed_key
@@ -46,12 +47,12 @@ def _make_feed(feed_key: str, status: int = PIFeed.STATUS_UPDATED, error: Option
 
 
 def _make_obj(
-    feeds: Dict[str, MagicMock], with_deliveries: bool = True, labels: Optional[List[str]] = None
-) -> Dict[str, Any]:
+    feeds: dict[str, MagicMock], with_deliveries: bool = True, labels: list[str] | None = None
+) -> dict[str, Any]:
     """Build ctx.obj with one delivery per feed, all to the same target."""
     target = MagicMock()
     target.identifier = 'test-target'
-    deliveries: Dict[str, Tuple[Any, Any, List[str], Any]] = {}
+    deliveries: dict[str, tuple[Any, Any, list[str], Any]] = {}
     if with_deliveries:
         deliveries = {f'd-{key}': (feed, target, labels or [], None) for key, feed in feeds.items()}
     return {
@@ -99,7 +100,7 @@ class TestUpdateAllFeedsRecordsFailures:
             ),
         ],
     )
-    def test_status_decides_the_list(self, status: int, updated: List[str], initialized: List[str]) -> None:
+    def test_status_decides_the_list(self, status: int, updated: list[str], initialized: list[str]) -> None:
         """update_all_feeds returns (updated_feeds, initialized_feeds)."""
         ctx = make_ctx(_make_obj({'f': _make_feed('f', status)}))
 
@@ -177,7 +178,7 @@ class TestPullExitStatus:
     """The exit status of the pull command itself."""
 
     @staticmethod
-    def _invoke(obj: Dict[str, Any], *args: str) -> Any:
+    def _invoke(obj: dict[str, Any], *args: str) -> Any:
         return CliRunner().invoke(pull, list(args), obj=obj)
 
     def test_feed_failure_exits_3(self, pull_env: MagicMock) -> None:
@@ -233,8 +234,8 @@ class TestDeliveryStateInitOnClone:
 
     @staticmethod
     def _pull(
-        feeds: Dict[str, MagicMock], initialized: List[str], no_update: bool = False
-    ) -> Tuple[Any, Dict[str, MagicMock]]:
+        feeds: dict[str, MagicMock], initialized: list[str], no_update: bool = False
+    ) -> tuple[Any, dict[str, MagicMock]]:
         """Pull with every feed lacking delivery state; return update mock and feeds."""
         for feed in feeds.values():
             feed.load_delivery_info.side_effect = StateError('no state')

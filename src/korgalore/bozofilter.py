@@ -6,7 +6,6 @@ import subprocess
 from datetime import datetime
 from email.utils import parseaddr
 from pathlib import Path
-from typing import Optional, Set
 
 logger = logging.getLogger('korgalore')
 
@@ -16,7 +15,7 @@ def get_bozofilter_path(config_dir: Path) -> Path:
     return config_dir / 'bozofilter.txt'
 
 
-def load_bozofilter(config_dir: Path) -> Set[str]:
+def load_bozofilter(config_dir: Path) -> set[str]:
     """Load and parse the bozofilter file.
 
     Args:
@@ -26,12 +25,12 @@ def load_bozofilter(config_dir: Path) -> Set[str]:
         Set of lowercase email addresses in the filter.
     """
     bozofilter_path = get_bozofilter_path(config_dir)
-    addresses: Set[str] = set()
+    addresses: set[str] = set()
 
     if not bozofilter_path.exists():
         return addresses
 
-    with open(bozofilter_path, 'r') as f:
+    with open(bozofilter_path) as f:
         for raw_line in f:
             # Strip whitespace
             line = raw_line.strip()
@@ -54,7 +53,7 @@ def load_bozofilter(config_dir: Path) -> Set[str]:
     return addresses
 
 
-def add_to_bozofilter(config_dir: Path, addresses: list[str], reason: Optional[str] = None) -> int:
+def add_to_bozofilter(config_dir: Path, addresses: list[str], reason: str | None = None) -> int:
     """Add addresses to the bozofilter.
 
     Args:
@@ -151,7 +150,7 @@ def edit_bozofilter(config_dir: Path) -> bool:
         return False
 
 
-def extract_email_address(from_header: str) -> Optional[str]:
+def extract_email_address(from_header: str) -> str | None:
     """Extract the email address from a From: header value.
 
     Args:
@@ -170,7 +169,7 @@ def extract_email_address(from_header: str) -> Optional[str]:
     return None
 
 
-def is_bozofied(from_header: str, bozofilter: Set[str]) -> bool:
+def is_bozofied(from_header: str, bozofilter: set[str]) -> bool:
     """Check if a From: header matches any address in the bozofilter.
 
     Args:

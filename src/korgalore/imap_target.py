@@ -3,7 +3,7 @@
 import imaplib
 import logging
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, cast
+from typing import Any, cast
 
 from korgalore import ConfigurationError, RemoteError
 from korgalore.message import RawMessage
@@ -15,7 +15,7 @@ logger = logging.getLogger('korgalore')
 class ImapTarget:
     """Target for delivering messages to IMAP mail servers."""
 
-    DEFAULT_LABELS: List[str] = []
+    DEFAULT_LABELS: list[str] = []
 
     def __init__(
         self,
@@ -23,13 +23,13 @@ class ImapTarget:
         server: str,
         username: str,
         folder: str = 'INBOX',
-        password: Optional[str] = None,
-        password_file: Optional[str] = None,
+        password: str | None = None,
+        password_file: str | None = None,
         timeout: int = 60,
         auth_type: str = 'password',
-        client_id: Optional[str] = None,
+        client_id: str | None = None,
         tenant: str = 'common',
-        token: Optional[str] = None,
+        token: str | None = None,
         interactive: bool = True,
     ) -> None:
         """Initialize IMAP service.
@@ -57,7 +57,7 @@ class ImapTarget:
         self.server = server
         self.username = username
         self.folder = folder
-        self.imap: Optional[imaplib.IMAP4_SSL] = None
+        self.imap: imaplib.IMAP4_SSL | None = None
         self.auth_type = auth_type
         self._interactive = interactive
 
@@ -69,8 +69,8 @@ class ImapTarget:
             raise ConfigurationError(f'No username specified for IMAP target: {identifier}')
 
         # Initialize authentication based on auth_type
-        self._oauth2_authenticator: Optional[ImapOAuth2Authenticator] = None
-        self.password: Optional[str] = None
+        self._oauth2_authenticator: ImapOAuth2Authenticator | None = None
+        self.password: str | None = None
 
         if auth_type == 'oauth2':
             # OAuth2 authentication
@@ -101,7 +101,7 @@ class ImapTarget:
                 password_path = Path(password_file).expanduser()
                 if not password_path.exists():
                     raise ConfigurationError(f'Password file not found: {password_file}')
-                with open(password_path, 'r') as f:
+                with open(password_path) as f:
                     self.password = f.read().strip()
             else:
                 raise ConfigurationError(f'No password or password_file specified for IMAP target: {identifier}')
@@ -244,10 +244,10 @@ class ImapTarget:
     def import_message(
         self,
         raw_message: bytes,
-        labels: List[str],
-        feed_name: Optional[str] = None,
-        delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None,
+        labels: list[str],
+        feed_name: str | None = None,
+        delivery_name: str | None = None,
+        subfolder: str | None = None,
     ) -> Any:
         """Import raw email message to IMAP server.
 
@@ -288,9 +288,9 @@ class ImapTarget:
             # flags: empty string = no flags set (message will be unread)
             # date_time: empty string = use current time (imaplib doesn't accept None)
             try:
-                # imaplib type stubs are incomplete - append returns (str, List[Any])
+                # imaplib type stubs are incomplete - append returns (str, list[Any])
                 typ, data = cast(
-                    'Tuple[str, List[Any]]',
+                    'tuple[str, list[Any]]',
                     imap.append(
                         effective_folder,
                         '',  # No flags (empty string)

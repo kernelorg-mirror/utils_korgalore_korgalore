@@ -1,10 +1,10 @@
 import io
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from gzip import GzipFile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from korgalore import RemoteError, StateError, run_git_command
 from korgalore.pi_feed import PIFeed
@@ -19,7 +19,7 @@ HISTORY_WINDOW = timedelta(weeks=1)
 HISTORY_MAX = timedelta(days=30)
 
 
-def _fetch_manifest(node: LoreNode, base_url: str) -> Dict[str, Any]:
+def _fetch_manifest(node: LoreNode, base_url: str) -> dict[str, Any]:
     """Fetch and parse a public-inbox manifest.
 
     Manifests describe the epochs a public-inbox archive is split into,
@@ -48,7 +48,7 @@ def _fetch_manifest(node: LoreNode, base_url: str) -> Dict[str, Any]:
 
     try:
         with GzipFile(fileobj=io.BytesIO(response.content)) as f:
-            manifest: Dict[str, Any] = json.load(f)
+            manifest: dict[str, Any] = json.load(f)
     except Exception as e:
         raise RemoteError(f'Failed to parse manifest from {manifest_url}: {e}') from e
 
@@ -63,7 +63,7 @@ def _fetch_manifest(node: LoreNode, base_url: str) -> Dict[str, Any]:
 class LoreFeed(PIFeed):
     """Service for interacting with lore.kernel.org public-inbox archives."""
 
-    def __init__(self, feed_key: str, feed_dir: Path, feed_url: str, lore_node: Optional[LoreNode] = None) -> None:
+    def __init__(self, feed_key: str, feed_dir: Path, feed_url: str, lore_node: LoreNode | None = None) -> None:
         """Initialize a LoreFeed instance.
 
         Args:
@@ -130,11 +130,11 @@ class LoreFeed(PIFeed):
         """
         return self._node.get_message_by_msgid(msgid)
 
-    def get_manifest(self) -> Dict[str, Any]:
+    def get_manifest(self) -> dict[str, Any]:
         """Fetch and parse the gzipped manifest from the Lore server."""
         return _fetch_manifest(self._node, self.feed_url)
 
-    def _git_mirror_config(self) -> Dict[str, str]:
+    def _git_mirror_config(self) -> dict[str, str]:
         """Return git config dict to redirect operations to the preferred mirror.
 
         After auto-probe, the first entry in node.origins is the
@@ -175,11 +175,11 @@ class LoreFeed(PIFeed):
         if retcode != 0:
             raise RemoteError(f'Git clone failed (exit {retcode}): {error.decode()}')
 
-    def get_manifest_epochs(self) -> List[Tuple[int, str, str]]:
+    def get_manifest_epochs(self) -> list[tuple[int, str, str]]:
         """Parse manifest to extract sorted list of (epoch, path, fingerprint) tuples."""
         manifest = self.get_manifest()
         # The keys are epoch paths, so we extract epoch numbers and paths
-        epochs: List[Tuple[int, str, str]] = []
+        epochs: list[tuple[int, str, str]] = []
         # The key ends in #.git, so grab the final path component and remove .git
         for epoch_path in manifest:
             epoch_str = epoch_path.split('/')[-1].replace('.git', '')
@@ -194,7 +194,7 @@ class LoreFeed(PIFeed):
         self.store_epochs_info(epochs)
         return epochs
 
-    def store_epochs_info(self, epochs: List[Tuple[int, str, str]]) -> None:
+    def store_epochs_info(self, epochs: list[tuple[int, str, str]]) -> None:
         """Save epoch information to local JSON file."""
         epochs_file = self.feed_dir / 'epochs.json'
         epochs_info = []
@@ -203,17 +203,17 @@ class LoreFeed(PIFeed):
         with open(epochs_file, 'w') as ef:
             json.dump(epochs_info, ef, indent=2)
 
-    def load_epochs_info(self) -> List[Tuple[int, str, str]]:
+    def load_epochs_info(self) -> list[tuple[int, str, str]]:
         """Load epoch information from local JSON file."""
         epochs_file = self.feed_dir / 'epochs.json'
         if not epochs_file.exists():
             raise StateError(f'Epochs file {epochs_file} does not exist.')
-        with open(epochs_file, 'r') as ef:
+        with open(epochs_file) as ef:
             epochs_data = json.load(ef)
         return [(entry['epoch'], entry['path'], entry['fpr']) for entry in epochs_data]
 
     @staticmethod
-    def shallow_since(keep_history_since: Optional[datetime], now: Optional[datetime] = None) -> Optional[str]:
+    def shallow_since(keep_history_since: datetime | None, now: datetime | None = None) -> str | None:
         """The --shallow-since value for a fetch, or None for the default window.
 
         keep_history_since is the oldest commit date a digest still needs.
@@ -224,15 +224,13 @@ class LoreFeed(PIFeed):
         if keep_history_since is None:
             return None
         if now is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
         if keep_history_since >= now - HISTORY_WINDOW:
             return None
         since = max(keep_history_since, now - HISTORY_MAX)
         return since.strftime('%Y-%m-%d %H:%M:%S %z')
 
-    def fetch_epoch(
-        self, epoch: int, keep_history_since: Optional[datetime] = None, now: Optional[datetime] = None
-    ) -> None:
+    def fetch_epoch(self, epoch: int, keep_history_since: datetime | None = None, now: datetime | None = None) -> None:
         """Fetch new commits for an epoch and move the shallow cut.
 
         Normally the cut moves to one week back on every fetch. When a
@@ -273,7 +271,7 @@ class LoreFeed(PIFeed):
         self.clone_epoch(epoch)
         self.save_feed_state(epoch=epoch, success=True)
 
-    def update_feed(self, keep_history_since: Optional[datetime] = None) -> int:
+    def update_feed(self, keep_history_since: datetime | None = None) -> int:
         """Update feed by fetching new epochs and commits.
 
         keep_history_since is the oldest commit date that a digest on this

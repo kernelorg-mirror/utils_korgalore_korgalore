@@ -2,9 +2,8 @@
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, Union
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,7 +20,7 @@ from tests.target_helpers import valid_token_file
 
 
 def make_auth(
-    token_file: Union[Path, str],
+    token_file: Path | str,
     username: str = 'user@example.com',
     client_id: str = 'client-id',
     tenant: str = 'common',
@@ -50,11 +49,11 @@ class TestOAuth2Token:
         ],
         ids=['future', 'past', 'within-buffer'],
     )
-    def test_is_expired(self, offset: float, buffer_seconds: Optional[int], expected: bool) -> None:
+    def test_is_expired(self, offset: float, buffer_seconds: int | None, expected: bool) -> None:
         token = OAuth2Token(
             access_token='test',
             refresh_token='test',
-            expires_at=datetime.now(timezone.utc).timestamp() + offset,
+            expires_at=datetime.now(UTC).timestamp() + offset,
         )
         if buffer_seconds is None:
             assert token.is_expired() is expected
@@ -97,7 +96,7 @@ class TestImapOAuth2Authenticator:
     """Tests for ImapOAuth2Authenticator."""
 
     @pytest.mark.parametrize('content', [None, 'invalid json {{{'], ids=['no-file', 'invalid-json'])
-    def test_init_without_usable_token_file(self, tmp_path: Path, content: Optional[str]) -> None:
+    def test_init_without_usable_token_file(self, tmp_path: Path, content: str | None) -> None:
         token_file = tmp_path / 'token.json'
         if content is not None:
             token_file.write_text(content)

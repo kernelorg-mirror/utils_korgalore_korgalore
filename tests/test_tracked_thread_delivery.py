@@ -5,9 +5,9 @@ map_deliveries(), so that retry_all_failed_deliveries() and perform_pull()
 can unpack them without a ValueError.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from korgalore.cli import map_tracked_threads
@@ -15,9 +15,9 @@ from korgalore.tracking import TrackedThread, TrackStatus
 from tests.digest_helpers import make_ctx
 
 
-def _make_tracked_thread(tmp_path: Path, labels: Optional[List[str]] = None) -> TrackedThread:
+def _make_tracked_thread(tmp_path: Path, labels: list[str] | None = None) -> TrackedThread:
     """Create a TrackedThread with sensible defaults."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return TrackedThread(
         track_id='track-abc123',
         msgid='<test@example.com>',
@@ -33,7 +33,7 @@ def _make_tracked_thread(tmp_path: Path, labels: Optional[List[str]] = None) -> 
     )
 
 
-def _map_tracked(tmp_path: Path, tracked: TrackedThread) -> Tuple[MagicMock, MagicMock, Dict[str, Any]]:
+def _map_tracked(tmp_path: Path, tracked: TrackedThread) -> tuple[MagicMock, MagicMock, dict[str, Any]]:
     """Run map_tracked_threads for one active thread.
 
     Returns the LeiFeed and target the delivery should be made of, and the

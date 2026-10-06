@@ -8,12 +8,13 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Iterator, Sequence
 from contextlib import suppress
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from typing import Any
 
 import pytest
 import requests
@@ -38,14 +39,14 @@ from korgalore.summarizer import (
     system_prompt,
     thread_prompt,
 )
-from tests.digest_helpers import ALICE, BOB, UTC, RecordingSummarizer, mkmsg
+from tests.digest_helpers import ALICE, BOB, RecordingSummarizer, mkmsg
 
 
 class FakeServer:
     """An OpenAI-compatible endpoint that answers what the test sets up."""
 
     def __init__(self) -> None:
-        self.requests: List[Dict[str, Any]] = []
+        self.requests: list[dict[str, Any]] = []
         self.status = 200
         self.reply: Any = self.completion('A short summary.')
         self.delay = 0.0
@@ -82,9 +83,9 @@ class FakeServer:
 
     @staticmethod
     def completion(
-        content: Optional[str], finish_reason: str = 'stop', prompt_tokens: Optional[int] = None
-    ) -> Dict[str, Any]:
-        reply: Dict[str, Any] = {
+        content: str | None, finish_reason: str = 'stop', prompt_tokens: int | None = None
+    ) -> dict[str, Any]:
+        reply: dict[str, Any] = {
             'choices': [{'message': {'role': 'assistant', 'content': content}, 'finish_reason': finish_reason}]
         }
         if prompt_tokens is not None:
@@ -128,9 +129,9 @@ class TestOpenAI:
         self,
         server: FakeServer,
         session: requests.Session,
-        api_key: Optional[str],
+        api_key: str | None,
         url_suffix: str,
-        instructions: Optional[str],
+        instructions: str | None,
     ) -> None:
         summarizer = OpenAISummarizer('local', server.url + url_suffix, 'qwen3:32b', api_key=api_key, session=session)
         assert summarizer.summarize('Thread: mm: fix it', instructions) == 'A short summary.'
@@ -229,7 +230,7 @@ class TestOpenAI:
 
 class TestCommand:
     @pytest.mark.parametrize('instructions', [None, 'Tell me if anyone sounds upset.'], ids=['plain', 'instructions'])
-    def test_prompt_on_stdin(self, tmp_path: Path, instructions: Optional[str]) -> None:
+    def test_prompt_on_stdin(self, tmp_path: Path, instructions: str | None) -> None:
         seen = tmp_path / 'stdin'
         summarizer = CommandSummarizer('script', f"sh -c 'cat > {seen}; echo The summary.'")
 
@@ -295,7 +296,7 @@ class TestCleanSummary:
             clean_summary(reply)
 
 
-def thread(count: int, body_size: int = 100) -> List[EmailMessage]:
+def thread(count: int, body_size: int = 100) -> list[EmailMessage]:
     return [
         mkmsg(
             f'm{idx}@x',
@@ -373,7 +374,7 @@ class TestMakeSummarizer:
         assert summarizer.allow_private_feeds is False
 
     @pytest.mark.parametrize(('extra', 'model'), [({}, 'llm'), ({'model': 'x'}, 'x')], ids=['program-name', 'named'])
-    def test_command(self, extra: Dict[str, Any], model: str) -> None:
+    def test_command(self, extra: dict[str, Any], model: str) -> None:
         details = {'type': 'command', 'command': 'llm -m x', 'allow_private_feeds': True, **extra}
         summarizer = make_summarizer('cli', details)
         assert isinstance(summarizer, CommandSummarizer)
@@ -404,14 +405,14 @@ class TestMakeSummarizer:
             ({'type': 'command', 'command': 'x', 'allow_private_feeds': 'yes'}, 'allow_private_feeds'),
         ],
     )
-    def test_bad_config(self, details: Dict[str, Any], error: str) -> None:
+    def test_bad_config(self, details: dict[str, Any], error: str) -> None:
         with pytest.raises(ConfigurationError, match=error):
             make_summarizer('bad', details)
 
     @pytest.mark.parametrize(
         ('content', 'error'), [(None, 'cannot be read'), ('\n', 'is empty')], ids=['missing-file', 'empty-file']
     )
-    def test_bad_key_file(self, tmp_path: Path, content: Optional[str], error: str) -> None:
+    def test_bad_key_file(self, tmp_path: Path, content: str | None, error: str) -> None:
         key = tmp_path / 'llm.key'
         if content is not None:
             key.write_text(content)
@@ -424,7 +425,7 @@ DAY1 = datetime(2026, 10, 1, 7, 0, tzinfo=UTC)
 ROOT = 'root@x'
 
 
-def msg(msgid: str, body: Optional[str] = None) -> EmailMessage:
+def msg(msgid: str, body: str | None = None) -> EmailMessage:
     return mkmsg(
         msgid, '[PATCH] mm: fix it', body=body or f'Text of {msgid}.\n', refs=None if msgid == ROOT else [ROOT]
     )
@@ -639,7 +640,7 @@ class TestSummarizeThread:
         assert 'Message number 40.' in prompt
 
 
-def post(msgid: str, root: Optional[str] = None, sender: str = ALICE, body: Optional[str] = None) -> EmailMessage:
+def post(msgid: str, root: str | None = None, sender: str = ALICE, body: str | None = None) -> EmailMessage:
     """A message of thread root, or a new thread's first message."""
     return mkmsg(
         msgid,
@@ -650,7 +651,7 @@ def post(msgid: str, root: Optional[str] = None, sender: str = ALICE, body: Opti
     )
 
 
-def digest_msgs() -> List[EmailMessage]:
+def digest_msgs() -> list[EmailMessage]:
     """busy@x has 4 messages, small@x has 2, and nobody answered lonely@x."""
     return [
         post('lonely@x'),
@@ -663,11 +664,11 @@ def digest_msgs() -> List[EmailMessage]:
     ]
 
 
-def by_root(threads: Sequence[DigestThread]) -> Dict[str, DigestThread]:
+def by_root(threads: Sequence[DigestThread]) -> dict[str, DigestThread]:
     return {thread.root_msgid: thread for thread in threads}
 
 
-def series(*subjects: str) -> List[EmailMessage]:
+def series(*subjects: str) -> list[EmailMessage]:
     """A new thread whose first message is the first subject."""
     return [mkmsg(f'p{n}@x', subj, refs=['p0@x'] if n else None) for n, subj in enumerate(subjects)]
 
@@ -689,7 +690,7 @@ class TestNeedsSummary:
             pytest.param([post('a@x'), post('r@x', 'a@x', BOB)], True, id='answered-thread'),
         ],
     )
-    def test_needs_summary(self, msgs: List[EmailMessage], expected: bool) -> None:
+    def test_needs_summary(self, msgs: list[EmailMessage], expected: bool) -> None:
         assert needs_summary(group_threads(msgs)[0]) is expected
 
     def test_continuing_thread(self) -> None:
@@ -711,8 +712,8 @@ class TestRankThreads:
 
 class TestSummaryRun:
     def summarize(
-        self, run: SummaryRun, msgs: Sequence[EmailMessage], max_summaries: Optional[int] = None
-    ) -> Dict[str, Any]:
+        self, run: SummaryRun, msgs: Sequence[EmailMessage], max_summaries: int | None = None
+    ) -> dict[str, Any]:
         return run.summarize_threads('Digest t', group_threads(msgs), msgs, DAY1, max_summaries=max_summaries)
 
     def test_threads_with_answers_are_summarized(self, cache: SummaryCache) -> None:
@@ -782,7 +783,7 @@ class TestSummaryRun:
     def test_stops_after_failures_in_a_row(self, cache: SummaryCache, caplog: pytest.LogCaptureFixture) -> None:
         fake = RecordingSummarizer(fail=True)
         run = SummaryRun(fake, cache)
-        msgs: List[EmailMessage] = []
+        msgs: list[EmailMessage] = []
         for number in range(FAILURES_MAX + 2):
             msgs += [post(f't{number}@x'), post(f'r{number}@x', f't{number}@x', BOB)]
         with caplog.at_level(logging.ERROR, logger='korgalore'):
@@ -840,7 +841,7 @@ class TestEstimateSummaries:
         fake: RecordingSummarizer,
         cache: SummaryCache,
         msgs: Sequence[EmailMessage],
-        max_summaries: Optional[int] = None,
+        max_summaries: int | None = None,
     ) -> Any:
         return estimate_summaries(fake, cache, group_threads(msgs), msgs, max_summaries=max_summaries)
 

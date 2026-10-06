@@ -13,7 +13,7 @@ cancels the active LoreNodes instead.
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -152,7 +152,7 @@ class TestCheckReloadConfig:
     @patch('korgalore.gui.load_config', return_value={'gui': {}})
     @patch('korgalore.gui.validate_config_file')
     def test_updates_stored_mtime(
-        self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path, validate_result: Tuple[bool, str]
+        self, mock_validate: MagicMock, mock_load: MagicMock, tmp_path: Path, validate_result: tuple[bool, str]
     ) -> None:
         """Mtime is recorded even on failure, to avoid retrying every cycle."""
         mock_validate.return_value = validate_result
@@ -180,7 +180,7 @@ class TestCheckReloadConfig:
     ) -> None:
         cfgpath = tmp_path / 'korgalore.toml'
         cfgpath.write_text('[main]\n')
-        original_config: Dict[str, Any] = {'gui': {'sync_interval': 300}}
+        original_config: dict[str, Any] = {'gui': {'sync_interval': 300}}
 
         app = make_app(original_config, cfgpath)
 
@@ -238,7 +238,7 @@ class TestNetworkLostCancelsSync:
         [('https://lore.kernel.org', 'https://erol.kernel.org'), ()],
         ids=['two-nodes', 'no-nodes-yet'],
     )
-    def test_cancels_every_node_when_syncing(self, names: Tuple[str, ...]) -> None:
+    def test_cancels_every_node_when_syncing(self, names: tuple[str, ...]) -> None:
         """Each cached node is cancelled, not shut down; no nodes is harmless."""
         nodes = {name: _mock_node() for name in names}
         app = make_app(nodes=nodes, is_syncing=True)
@@ -300,12 +300,12 @@ class TestNetworkLostCancelsSync:
 class TestSyncRescheduleAfterCancel:
     """run_sync() must not push back a sooner sync scheduled by a callback."""
 
-    def _run_sync_with(self, app: 'KorgaloreApp', pull_side_effect: Any) -> List[str]:
+    def _run_sync_with(self, app: 'KorgaloreApp', pull_side_effect: Any) -> list[str]:
         """Run app.run_sync() with everything but the pull stubbed out.
 
         Returns the status texts passed to update_status().
         """
-        statuses: List[str] = []
+        statuses: list[str] = []
         with (
             patch('korgalore.gui.GLib'),
             patch('korgalore.gui.refresh_subfolder_templates'),

@@ -2,7 +2,7 @@
 
 import gzip
 import json
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock
 
 
@@ -14,6 +14,6 @@ def gzipped_response(payload: bytes) -> MagicMock:
     return response
 
 
-def manifest_response(manifest_data: Dict[str, Any]) -> MagicMock:
+def manifest_response(manifest_data: dict[str, Any]) -> MagicMock:
     """A mock HTTP response carrying a gzipped manifest.js.gz."""
     return gzipped_response(json.dumps(manifest_data).encode())

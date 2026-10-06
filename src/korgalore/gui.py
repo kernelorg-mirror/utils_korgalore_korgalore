@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import click
 
@@ -61,7 +61,7 @@ class KorgaloreApp:
         self.is_syncing = False
         self.last_sync_time = 0.0
         self.next_sync_time = 0.0
-        self.auth_needed_target: Optional[str] = None  # Target ID needing re-auth
+        self.auth_needed_target: str | None = None  # Target ID needing re-auth
 
         # Network monitoring
         self.network_monitor = Gio.NetworkMonitor.get_default()
@@ -71,7 +71,7 @@ class KorgaloreApp:
 
         self.ind.set_menu(self.build_menu())
 
-        self.sync_thread: Optional[threading.Thread] = None
+        self.sync_thread: threading.Thread | None = None
         self.stop_event = threading.Event()
 
     def _get_config_mtime(self) -> float:
@@ -233,7 +233,7 @@ class KorgaloreApp:
                 # A node we cannot cancel is no reason to skip the rest.
                 logger.debug('Error cancelling LoreNode requests: %s', str(e))
 
-    def update_status(self, text: str, icon_name: Optional[str] = None) -> None:
+    def update_status(self, text: str, icon_name: str | None = None) -> None:
         """Update UI status (thread-safe)."""
 
         def _update() -> bool:

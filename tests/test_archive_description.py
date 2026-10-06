@@ -8,7 +8,6 @@ failing to write one must never raise.
 """
 
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -36,7 +35,7 @@ class TestWriteArchiveDescription:
             pytest.param('   \n\t ', None, id='blank-writes-nothing'),
         ],
     )
-    def test_description_file(self, tmp_path: Path, given: str, expected: Optional[str]) -> None:
+    def test_description_file(self, tmp_path: Path, given: str, expected: str | None) -> None:
         write_archive_description(tmp_path, given)
 
         if expected is None:

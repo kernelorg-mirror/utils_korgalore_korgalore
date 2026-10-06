@@ -1,7 +1,7 @@
 """Tests for CLI configuration loading and merging."""
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import click
 import pytest
@@ -26,16 +26,16 @@ class TestMergeConfig:
         ],
         ids=['targets', 'feeds', 'deliveries'],
     )
-    def test_merge_section(self, section: str, old: Dict[str, Any], new: Dict[str, Any]) -> None:
+    def test_merge_section(self, section: str, old: dict[str, Any], new: dict[str, Any]) -> None:
         """Merges a section from extra into base, keeping base's own entries."""
-        base: Dict[str, Any] = {section: dict(old)}
+        base: dict[str, Any] = {section: dict(old)}
         merge_config(base, {section: new})
         assert base[section] == {**old, **new}
 
     def test_merge_gui_replaces(self) -> None:
         """GUI section is replaced, not merged."""
-        base: Dict[str, Any] = {'gui': {'sync_interval': 300, 'option_a': True}}
-        extra: Dict[str, Any] = {'gui': {'sync_interval': 600}}
+        base: dict[str, Any] = {'gui': {'sync_interval': 300, 'option_a': True}}
+        extra: dict[str, Any] = {'gui': {'sync_interval': 600}}
         merge_config(base, extra)
         # gui section should be completely replaced
         assert base['gui'] == {'sync_interval': 600}
@@ -43,8 +43,8 @@ class TestMergeConfig:
 
     def test_merge_creates_missing_section(self) -> None:
         """Creates section in base if missing."""
-        base: Dict[str, Any] = {}
-        extra: Dict[str, Any] = {
+        base: dict[str, Any] = {}
+        extra: dict[str, Any] = {
             'targets': {'new': {'type': 'gmail'}},
             'feeds': {'feed1': {'url': 'https://example.com'}},
             'deliveries': {'d1': {'feed': 'feed1', 'target': 'new'}},
@@ -57,15 +57,15 @@ class TestMergeConfig:
 
     def test_merge_overwrites_existing_keys(self) -> None:
         """Existing keys in sections are overwritten by extra."""
-        base: Dict[str, Any] = {'targets': {'target1': {'type': 'gmail', 'credentials': 'old.json'}}}
-        extra: Dict[str, Any] = {'targets': {'target1': {'type': 'maildir', 'path': '/new/path'}}}
+        base: dict[str, Any] = {'targets': {'target1': {'type': 'gmail', 'credentials': 'old.json'}}}
+        extra: dict[str, Any] = {'targets': {'target1': {'type': 'maildir', 'path': '/new/path'}}}
         merge_config(base, extra)
         # The entire target1 entry is replaced
         assert base['targets']['target1'] == {'type': 'maildir', 'path': '/new/path'}
 
     def test_merge_empty_extra(self) -> None:
         """Empty extra dict doesn't modify base."""
-        base: Dict[str, Any] = {
+        base: dict[str, Any] = {
             'targets': {'t1': {'type': 'gmail'}},
             'gui': {'sync_interval': 300},
         }
@@ -75,11 +75,11 @@ class TestMergeConfig:
 
     def test_merge_preserves_other_sections(self) -> None:
         """Sections not in targets/feeds/deliveries/gui are preserved."""
-        base: Dict[str, Any] = {
+        base: dict[str, Any] = {
             'custom_section': {'key': 'value'},
             'targets': {'t1': {'type': 'gmail'}},
         }
-        extra: Dict[str, Any] = {
+        extra: dict[str, Any] = {
             'targets': {'t2': {'type': 'maildir'}},
         }
         merge_config(base, extra)
@@ -261,7 +261,7 @@ class TestResolveTargetName:
         ],
         ids=['explicit-known-passes-through', 'omitted-uses-first-configured'],
     )
-    def test_resolves(self, name: Optional[str], targets: Dict[str, Any], expected: str) -> None:
+    def test_resolves(self, name: str | None, targets: dict[str, Any], expected: str) -> None:
         assert resolve_target_name(name, targets) == expected
 
     @pytest.mark.parametrize(
@@ -269,7 +269,7 @@ class TestResolveTargetName:
         [('nope', {'first': {}}), (None, {})],
         ids=['unknown-target', 'no-targets-configured'],
     )
-    def test_aborts(self, name: Optional[str], targets: Dict[str, Any]) -> None:
+    def test_aborts(self, name: str | None, targets: dict[str, Any]) -> None:
         """An unconfigured target is a user error; with no targets there is no default.
 
         The empty case used to raise IndexError from list(targets.keys())[0].

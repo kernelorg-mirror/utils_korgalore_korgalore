@@ -8,7 +8,6 @@ split_and_dedupe_as_bytes(), which keeps one copy per Message-ID and
 prefers the copy from the source least likely to have mangled it.
 """
 
-from typing import List
 from unittest.mock import MagicMock, patch
 
 import click
@@ -36,7 +35,7 @@ def _make_context() -> click.Context:
     return make_ctx({'config': {'targets': {}}, 'targets': {}, 'hide_bar': True})
 
 
-def _imported(target: MagicMock) -> List[bytes]:
+def _imported(target: MagicMock) -> list[bytes]:
     """Return the raw messages handed to import_message, in order."""
     return [call.args[0] for call in target.import_message.call_args_list]
 

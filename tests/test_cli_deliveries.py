@@ -3,7 +3,7 @@
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import click
@@ -24,7 +24,7 @@ def run_map(tmp_path: Path, target: str = 'maildir', **delivery: Any) -> click.C
     """
     if target == 'maildir':
         maildir_path = tmp_path / 'mail'
-        target_cfg: Dict[str, Any] = {'type': 'maildir', 'path': str(maildir_path)}
+        target_cfg: dict[str, Any] = {'type': 'maildir', 'path': str(maildir_path)}
         target_obj: Any = MaildirTarget('local', str(maildir_path))
         name = 'local'
     else:
@@ -129,7 +129,7 @@ class TestMapDeliveriesRejections:
         ],
         ids=['imap-subfolder-template', 'labels-percent', 'subfolder-list'],
     )
-    def test_rejected(self, tmp_path: Path, target: str, delivery: Dict[str, Any], messages: List[str]) -> None:
+    def test_rejected(self, tmp_path: Path, target: str, delivery: dict[str, Any], messages: list[str]) -> None:
         with pytest.raises(ConfigurationError) as exc_info:
             run_map(tmp_path, target, **delivery)
 

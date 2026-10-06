@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -23,7 +23,7 @@ def valid_token_file(
             {
                 'access_token': access_token,
                 'refresh_token': refresh_token,
-                'expires_at': datetime.now(timezone.utc).timestamp() + expires_in,
+                'expires_at': datetime.now(UTC).timestamp() + expires_in,
             }
         )
     )

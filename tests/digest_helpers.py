@@ -4,14 +4,15 @@ import mailbox
 import os
 import re
 import subprocess
+from collections.abc import Generator, Sequence
 from contextlib import ExitStack, contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import click
@@ -23,7 +24,6 @@ from korgalore.lore_feed import LoreFeed
 from korgalore.maildir_target import MaildirTarget
 from korgalore.summarizer import DEFAULT_MAX_INPUT_CHARS, SummarizerError, SummaryCache
 
-UTC = timezone.utc
 # 09:00 UTC, well after a 07:00 send time in any time zone near UTC
 NOW = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
 DAILY = DigestSchedule()
@@ -35,13 +35,13 @@ BOB = 'Bob <bob@x>'
 
 
 def mkmsg(
-    msgid: Optional[str],
+    msgid: str | None,
     subject: str,
     body: str = 'Some text.\n',
-    refs: Optional[List[str]] = None,
-    irt: Optional[str] = None,
+    refs: list[str] | None = None,
+    irt: str | None = None,
     sender: str = 'P. Author <p@example.org>',
-    date: Optional[str] = 'Thu, 01 Oct 2026 09:12:00 +0200',
+    date: str | None = 'Thu, 01 Oct 2026 09:12:00 +0200',
 ) -> EmailMessage:
     """Build a message with the threading headers we need."""
     msg = EmailMessage()
@@ -59,7 +59,7 @@ def mkmsg(
     return msg
 
 
-def make_raw(msgid: str, subject: str, sender: str = 'P. Author <p@example.org>', irt: Optional[str] = None) -> bytes:
+def make_raw(msgid: str, subject: str, sender: str = 'P. Author <p@example.org>', irt: str | None = None) -> bytes:
     lines = [
         f'From: {sender}',
         f'Subject: {subject}',
@@ -83,9 +83,9 @@ class InboxRepo:
         self.gitdir = feed_dir / 'git' / f'{epoch}.git'
         self.gitdir.mkdir(parents=True)
         self._git('init', '--bare', '--initial-branch=master', '.')
-        self.head: Optional[str] = None
+        self.head: str | None = None
 
-    def _git(self, *args: str, stdin: Optional[bytes] = None, env: Optional[Dict[str, str]] = None) -> str:
+    def _git(self, *args: str, stdin: bytes | None = None, env: dict[str, str] | None = None) -> str:
         full_env = dict(os.environ, **(env or {}))
         result = subprocess.run(
             ['git', '-C', str(self.gitdir), *args], input=stdin, capture_output=True, check=True, env=full_env
@@ -95,7 +95,7 @@ class InboxRepo:
     def add(self, raw: bytes, when: datetime, filename: str = 'm') -> str:
         return self.add_many([(raw, when, filename)])[0]
 
-    def add_many(self, items: Sequence[Tuple[bytes, datetime, str]]) -> List[str]:
+    def add_many(self, items: Sequence[tuple[bytes, datetime, str]]) -> list[str]:
         """Commit (raw, when, filename) triples in one git fast-import run.
 
         Each message is one commit, as public-inbox writes them, but a
@@ -121,7 +121,7 @@ class InboxRepo:
     def add_msg(self, msgid: str, when: datetime, **kwargs: Any) -> str:
         return self.add(make_raw(msgid, kwargs.pop('subject', f'[PATCH] {msgid}'), **kwargs), when)
 
-    def add_msgs(self, *msgs: Tuple[str, datetime]) -> List[str]:
+    def add_msgs(self, *msgs: tuple[str, datetime]) -> list[str]:
         """add_msg for several (msgid, when) pairs, in one git run."""
         return self.add_many([(make_raw(msgid, f'[PATCH] {msgid}'), when, 'm') for msgid, when in msgs])
 
@@ -176,7 +176,7 @@ class ShallowCopy:
         return LoreFeed('lkml', self.feed_dir, 'https://lore.kernel.org/lkml')
 
 
-def make_ctx(obj: Dict[str, Any]) -> click.Context:
+def make_ctx(obj: dict[str, Any]) -> click.Context:
     """A click context with the given ctx.obj, like the cli functions get."""
     ctx = click.Context(click.Command('test'))
     ctx.obj = obj
@@ -189,20 +189,20 @@ def make_ctx(obj: Dict[str, Any]) -> click.Context:
 MAILDIR_KEY = re.compile(r'^(\d+)\.M(\d+)P\d+Q(\d+)\.')
 
 
-def maildir_order(key: str) -> Tuple[int, ...]:
+def maildir_order(key: str) -> tuple[int, ...]:
     match = MAILDIR_KEY.match(key)
     assert match is not None, key
     return tuple(int(part) for part in match.groups())
 
 
-def delivered(target: MaildirTarget) -> List[EmailMessage]:
+def delivered(target: MaildirTarget) -> list[EmailMessage]:
     """The messages in the maildir, parsed, in the order they were written."""
     md = mailbox.Maildir(target.maildir_path, create=False)
     parser = BytesParser(_class=EmailMessage, policy=policy.default)
     return [parser.parsebytes(md.get_bytes(key)) for key in sorted(md.iterkeys(), key=maildir_order)]
 
 
-def part_text(msg: Optional[EmailMessage], subtype: str) -> str:
+def part_text(msg: EmailMessage | None, subtype: str) -> str:
     """The text of one alternative ('plain' or 'html') of a digest."""
     assert msg is not None
     body = msg.get_body(preferencelist=(subtype,))
@@ -212,11 +212,11 @@ def part_text(msg: Optional[EmailMessage], subtype: str) -> str:
     return content
 
 
-def digest_text(msg: Optional[EmailMessage]) -> str:
+def digest_text(msg: EmailMessage | None) -> str:
     return part_text(msg, 'plain')
 
 
-def digest_html(msg: Optional[EmailMessage]) -> str:
+def digest_html(msg: EmailMessage | None) -> str:
     return part_text(msg, 'html')
 
 
@@ -224,7 +224,7 @@ def job_of(repo: InboxRepo) -> DigestJob:
     return DigestJob(repo.feed().get_digest_job_dir(DNAME))
 
 
-def send_parts(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> List[EmailMessage]:
+def send_parts(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> list[EmailMessage]:
     sched = kwargs.pop('schedule', DAILY)
     return send_digest(DNAME, repo.feed(), target, ['digests'], None, sched, now=now, **kwargs)
 
@@ -242,7 +242,7 @@ def small_parts(max_size: int = 1) -> Generator[None, None, None]:
         yield
 
 
-def send(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> Optional[EmailMessage]:
+def send(repo: InboxRepo, target: Any, now: datetime = NOW, **kwargs: Any) -> EmailMessage | None:
     """Send a digest that fits in one message; None when nothing was sent."""
     parts = send_parts(repo, target, now=now, **kwargs)
     assert len(parts) <= 1
@@ -290,11 +290,11 @@ class RecordingSummarizer:
         self.fail = fail
         # 1-based numbers of the calls that fail
         self.fail_calls = fail_calls
-        self.prompts: List[str] = []
+        self.prompts: list[str] = []
         # The summary_instructions of each call
-        self.instructions: List[Optional[str]] = []
+        self.instructions: list[str | None] = []
 
-    def summarize(self, text: str, instructions: Optional[str] = None) -> str:
+    def summarize(self, text: str, instructions: str | None = None) -> str:
         self.prompts.append(text)
         self.instructions.append(instructions)
         if self.fail or len(self.prompts) in self.fail_calls:
@@ -305,7 +305,7 @@ class RecordingSummarizer:
 class FlakyTarget:
     """Delivers to a maildir, but fails on chosen calls to import_message."""
 
-    def __init__(self, maildir: MaildirTarget, fail_on: List[int]) -> None:
+    def __init__(self, maildir: MaildirTarget, fail_on: list[int]) -> None:
         self.identifier = 'flaky'
         self.maildir = maildir
         self.fail_on = fail_on
@@ -353,7 +353,7 @@ DIGEST_CLI_FUNCTIONS = {
 
 
 @contextmanager
-def digest_cli_env(*names: str) -> Generator[Dict[str, MagicMock], None, None]:
+def digest_cli_env(*names: str) -> Generator[dict[str, MagicMock], None, None]:
     """Replace the named korgalore.cli functions with mocks, and yield them by short name."""
     mocks = {name: MagicMock() for name in names}
     with ExitStack() as stack:
@@ -362,6 +362,6 @@ def digest_cli_env(*names: str) -> Generator[Dict[str, MagicMock], None, None]:
         yield mocks
 
 
-def invoke_digest(obj: Dict[str, Any], *args: str) -> Result:
+def invoke_digest(obj: dict[str, Any], *args: str) -> Result:
     """Run "kgl digest" with the given ctx.obj."""
     return CliRunner().invoke(digest_cmd, list(args), obj=obj)

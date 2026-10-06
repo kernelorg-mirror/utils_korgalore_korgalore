@@ -2,7 +2,6 @@
 
 import email
 from email.utils import parsedate_to_datetime
-from typing import Optional
 from unittest.mock import patch
 
 import pytest
@@ -61,7 +60,7 @@ class TestRawMessage:
             pytest.param(b'\xff\xfe invalid utf-8 with Message-ID: maybe', None, id='invalid-content-does-not-crash'),
         ],
     )
-    def test_message_id(self, raw: bytes, expected: Optional[str]) -> None:
+    def test_message_id(self, raw: bytes, expected: str | None) -> None:
         msg = RawMessage(raw)
 
         with patch('korgalore.message.get_clean_msgid', wraps=get_clean_msgid) as extract:

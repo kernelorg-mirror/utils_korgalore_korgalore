@@ -1,7 +1,6 @@
 """Tests for GmailTarget message delivery."""
 
 import base64
-from typing import Tuple
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -11,7 +10,7 @@ from korgalore import ConfigurationError, RemoteError
 from korgalore.gmail_target import SCOPES, GmailTarget
 
 
-def make_target() -> Tuple[GmailTarget, MagicMock]:
+def make_target() -> tuple[GmailTarget, MagicMock]:
     """A GmailTarget with valid stored credentials; returns it with those credentials."""
     with (
         patch('korgalore.gmail_target.Credentials') as mock_creds_class,
@@ -24,7 +23,7 @@ def make_target() -> Tuple[GmailTarget, MagicMock]:
 
 
 @pytest.fixture
-def gmail() -> Tuple[GmailTarget, MagicMock]:
+def gmail() -> tuple[GmailTarget, MagicMock]:
     """A target with a mocked API service; the label map is not loaded yet."""
     target, _ = make_target()
     service = MagicMock()
@@ -33,7 +32,7 @@ def gmail() -> Tuple[GmailTarget, MagicMock]:
 
 
 @pytest.fixture
-def gmail_labels(gmail: Tuple[GmailTarget, MagicMock]) -> Tuple[GmailTarget, MagicMock]:
+def gmail_labels(gmail: tuple[GmailTarget, MagicMock]) -> tuple[GmailTarget, MagicMock]:
     """Like `gmail`, with the label map pre-populated to avoid a list_labels call."""
     gmail[0]._label_map = {'INBOX': 'INBOX', 'UNREAD': 'UNREAD', 'MyLabel': 'Label_123'}
     return gmail
@@ -183,7 +182,7 @@ class TestGmailTargetListLabels:
         ids=['labels', 'empty'],
     )
     def test_list_labels(
-        self, gmail: Tuple[GmailTarget, MagicMock], response: dict[str, object], expected: list[object]
+        self, gmail: tuple[GmailTarget, MagicMock], response: dict[str, object], expected: list[object]
     ) -> None:
         target, service = gmail
         service.users().labels().list().execute.return_value = response
@@ -191,7 +190,7 @@ class TestGmailTargetListLabels:
         assert target.list_labels() == expected
         service.users().labels().list.assert_called_with(userId='me')
 
-    def test_list_labels_http_error(self, gmail: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_list_labels_http_error(self, gmail: tuple[GmailTarget, MagicMock]) -> None:
         target, service = gmail
         service.users().labels().list().execute.side_effect = http_error(403, b'Forbidden')
 
@@ -202,7 +201,7 @@ class TestGmailTargetListLabels:
 class TestGmailTargetTranslateLabels:
     """Tests for GmailTarget translate_labels method."""
 
-    def test_translate_labels(self, gmail: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_translate_labels(self, gmail: tuple[GmailTarget, MagicMock]) -> None:
         """Label names become IDs, in order; the label map is fetched only once."""
         target, service = gmail
         service.users().labels().list().execute.return_value = {
@@ -219,7 +218,7 @@ class TestGmailTargetTranslateLabels:
 
         assert service.users().labels().list().execute.call_count == 1
 
-    def test_translate_unknown_label_raises(self, gmail: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_translate_unknown_label_raises(self, gmail: tuple[GmailTarget, MagicMock]) -> None:
         target, service = gmail
         service.users().labels().list().execute.return_value = {'labels': [{'id': 'INBOX', 'name': 'INBOX'}]}
 
@@ -228,7 +227,7 @@ class TestGmailTargetTranslateLabels:
         assert 'not found' in str(exc_info.value)
         assert 'NonExistent' in str(exc_info.value)
 
-    def test_label_names_are_case_sensitive(self, gmail: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_label_names_are_case_sensitive(self, gmail: tuple[GmailTarget, MagicMock]) -> None:
         target, _ = gmail
         target._label_map = {'INBOX': 'INBOX', 'inbox': 'inbox_lower'}
 
@@ -239,7 +238,7 @@ class TestGmailTargetTranslateLabels:
 class TestGmailTargetImportMessage:
     """Tests for GmailTarget import_message method."""
 
-    def test_import_success_with_labels(self, gmail_labels: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_import_success_with_labels(self, gmail_labels: tuple[GmailTarget, MagicMock]) -> None:
         target, service = gmail_labels
         mock_result = {'id': 'msg123', 'labelIds': ['INBOX', 'UNREAD']}
         service.users().messages().import_().execute.return_value = mock_result
@@ -259,7 +258,7 @@ class TestGmailTargetImportMessage:
     )
     def test_import_label_ids(
         self,
-        gmail_labels: Tuple[GmailTarget, MagicMock],
+        gmail_labels: tuple[GmailTarget, MagicMock],
         labels: list[str],
         expected_ids: list[str] | None,
     ) -> None:
@@ -284,7 +283,7 @@ class TestGmailTargetImportMessage:
         ],
         ids=['ascii-punctuation', 'all-bytes-no-newline', 'empty'],
     )
-    def test_import_base64_encoding(self, gmail_labels: Tuple[GmailTarget, MagicMock], payload: bytes) -> None:
+    def test_import_base64_encoding(self, gmail_labels: tuple[GmailTarget, MagicMock], payload: bytes) -> None:
         """Message is base64 URL-safe encoded and decodes back to the payload."""
         target, service = gmail_labels
         service.users().messages().import_().execute.return_value = {'id': 'msg123'}
@@ -296,20 +295,20 @@ class TestGmailTargetImportMessage:
         assert isinstance(encoded, str)
         assert base64.urlsafe_b64decode(encoded) == payload
 
-    def test_import_http_error(self, gmail_labels: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_import_http_error(self, gmail_labels: tuple[GmailTarget, MagicMock]) -> None:
         target, service = gmail_labels
         service.users().messages().import_().execute.side_effect = http_error(500, b'Internal Server Error')
 
         with pytest.raises(RemoteError, match='error occurred'):
             target.import_message(b'Test', ['INBOX'])
 
-    def test_import_unknown_label_raises(self, gmail_labels: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_import_unknown_label_raises(self, gmail_labels: tuple[GmailTarget, MagicMock]) -> None:
         target, _ = gmail_labels
 
         with pytest.raises(ConfigurationError, match='not found'):
             target.import_message(b'Test', ['UnknownLabel'])
 
-    def test_multiple_imports(self, gmail_labels: Tuple[GmailTarget, MagicMock]) -> None:
+    def test_multiple_imports(self, gmail_labels: tuple[GmailTarget, MagicMock]) -> None:
         target, service = gmail_labels
         service.users().messages().import_().execute.side_effect = [{'id': f'msg{i}'} for i in range(5)]
 

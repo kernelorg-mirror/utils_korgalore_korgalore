@@ -9,7 +9,6 @@ on stdin instead, where lei uses it as written.
 """
 
 from pathlib import Path
-from typing import List, Optional, Tuple
 from unittest import mock
 
 import pytest
@@ -19,13 +18,13 @@ from korgalore.tracking import create_lei_query_search
 QUERY = '(dfn:Documentation/ OR dfn:Documentation/process/) AND d:30.days.ago..'
 
 
-def run_search(tmp_path: Path, threads: bool = False) -> Tuple[List[str], Optional[bytes]]:
+def run_search(tmp_path: Path, threads: bool = False) -> tuple[list[str], bytes | None]:
     """Run create_lei_query_search and return the lei args and stdin it used."""
     with mock.patch('korgalore.tracking.run_lei_command', return_value=(0, b'')) as mock_lei:
         create_lei_query_search(QUERY, tmp_path / 'lei' / 'search', threads=threads)
     mock_lei.assert_called_once()
-    args: List[str] = mock_lei.call_args.args[0]
-    stdin: Optional[bytes] = mock_lei.call_args.kwargs.get('stdin')
+    args: list[str] = mock_lei.call_args.args[0]
+    stdin: bytes | None = mock_lei.call_args.kwargs.get('stdin')
     return args, stdin
 
 

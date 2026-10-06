@@ -3,7 +3,7 @@
 import logging
 import mailbox
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from korgalore import ConfigurationError
 from korgalore.message import RawMessage
@@ -14,7 +14,7 @@ logger = logging.getLogger('korgalore')
 class MaildirTarget:
     """Service for delivering messages to a local maildir."""
 
-    DEFAULT_LABELS: List[str] = []
+    DEFAULT_LABELS: list[str] = []
 
     def __init__(self, identifier: str, maildir_path: str) -> None:
         """Initialize maildir service.
@@ -30,7 +30,7 @@ class MaildirTarget:
         self.maildir_path = Path(maildir_path).expanduser()
 
         # Cache for subfolder maildirs
-        self._subfolder_maildirs: Dict[str, mailbox.Maildir] = {}
+        self._subfolder_maildirs: dict[str, mailbox.Maildir] = {}
 
         try:
             # Ensure parent directories exist (mailbox.Maildir only creates
@@ -41,7 +41,7 @@ class MaildirTarget:
         except Exception as e:
             raise ConfigurationError(f'Failed to initialize maildir at {self.maildir_path}: {e}') from e
 
-    def _get_maildir(self, subfolder: Optional[str]) -> mailbox.Maildir:
+    def _get_maildir(self, subfolder: str | None) -> mailbox.Maildir:
         """Get or create a maildir for the given subfolder.
 
         Args:
@@ -76,10 +76,10 @@ class MaildirTarget:
     def import_message(
         self,
         raw_message: bytes,
-        labels: List[str],
-        feed_name: Optional[str] = None,
-        delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None,
+        labels: list[str],
+        feed_name: str | None = None,
+        delivery_name: str | None = None,
+        subfolder: str | None = None,
     ) -> Any:
         """Import message to maildir.
 

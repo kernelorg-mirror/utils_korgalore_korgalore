@@ -6,7 +6,6 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -39,11 +38,11 @@ logger = logging.getLogger('korgalore')
 # Set at CLI startup via LoreNode.user_agent_plus; applied to git HTTP
 # and lei user-agent strings only — NOT to the shared requests session
 # (which serves JMAP, MAINTAINERS, etc.).
-_user_agent_plus: Optional[str] = None
+_user_agent_plus: str | None = None
 
 
 # Global requests session for HTTP calls
-_REQSESSION: Optional[requests.Session] = None
+_REQSESSION: requests.Session | None = None
 
 
 def get_requests_session() -> requests.Session:
@@ -63,7 +62,7 @@ def close_requests_session() -> None:
         _REQSESSION = None
 
 
-def make_lore_node(url: str = 'https://lore.kernel.org/all', cache_dir: Optional[str] = None) -> LoreNode:
+def make_lore_node(url: str = 'https://lore.kernel.org/all', cache_dir: str | None = None) -> LoreNode:
     """Create a LoreNode with failover/probing from git config.
 
     Reads the ``[lore]`` section from git config via
@@ -148,11 +147,11 @@ def _init_git_user_agent() -> None:
 
 
 def run_git_command(
-    gitdir: Optional[str],
-    args: List[str],
-    stdin: Optional[bytes] = None,
-    git_config: Optional[Dict[str, str]] = None,
-) -> Tuple[int, bytes, bytes]:
+    gitdir: str | None,
+    args: list[str],
+    stdin: bytes | None = None,
+    git_config: dict[str, str] | None = None,
+) -> tuple[int, bytes, bytes]:
     """Run a git command in the specified git directory and return (returncode, stdout, stderr).
 
     Uses --git-dir instead of -C to work with safe.bareRepository=explicit.
@@ -191,7 +190,7 @@ def _report_still_running(what: str, finished: threading.Event, interval: float)
         logger.info('Still running lei %s (%d seconds so far)...', what, round(time.monotonic() - started))
 
 
-def run_lei_command(args: List[str], stdin: Optional[bytes] = None) -> Tuple[int, bytes]:
+def run_lei_command(args: list[str], stdin: bytes | None = None) -> tuple[int, bytes]:
     """Run a lei command and return (returncode, stdout).
 
     Reports progress every LEI_HEARTBEAT_INTERVAL seconds while the command
@@ -235,7 +234,7 @@ def run_lei_command(args: List[str], stdin: Optional[bytes] = None) -> Tuple[int
     return result.returncode, result.stdout.strip()
 
 
-def format_key_for_display(key: Optional[str]) -> str:
+def format_key_for_display(key: str | None) -> str:
     """Format a key (feed or delivery) for user-facing display by trimming lei paths."""
     if key is None:
         return ''

@@ -1,8 +1,7 @@
 """Tests for digest threading and thread facts."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from email.message import EmailMessage
-from typing import List
 
 import pytest
 
@@ -21,7 +20,7 @@ from korgalore.digest import (
 from tests.digest_helpers import mkmsg
 
 
-def only(threads: List[DigestThread]) -> DigestThread:
+def only(threads: list[DigestThread]) -> DigestThread:
     """Return the single thread in a list."""
     assert len(threads) == 1
     return threads[0]
@@ -150,7 +149,7 @@ class TestGroupThreads:
             pytest.param([], [], id='empty'),
         ],
     )
-    def test_edge_inputs(self, msgs: List[EmailMessage], updates: List[int]) -> None:
+    def test_edge_inputs(self, msgs: list[EmailMessage], updates: list[int]) -> None:
         assert [len(thread.updates) for thread in group_threads(msgs)] == updates
 
 
@@ -246,7 +245,7 @@ class TestThreadFacts:
         )
         dates = {thread.root_msgid: thread.updates[0].date for thread in threads}
         assert dates['a@x'] == datetime(2026, 10, 1, 9, 12, tzinfo=timezone(timedelta(hours=2)))
-        assert dates['b@x'] == datetime(2026, 10, 1, 9, 12, tzinfo=timezone.utc)
+        assert dates['b@x'] == datetime(2026, 10, 1, 9, 12, tzinfo=UTC)
         assert dates['c@x'] is None
         assert dates['d@x'] is None
 

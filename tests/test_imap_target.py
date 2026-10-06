@@ -1,8 +1,9 @@
 """Tests for ImapTarget message delivery."""
 
 import imaplib
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +20,7 @@ MSG_WITH_ID = b'From: test@example.com\r\nMessage-ID: <test@example.com>\r\n\r\n
 
 def make_target(**kwargs: Any) -> ImapTarget:
     """An ImapTarget with password auth, overridable per test."""
-    params: Dict[str, Any] = {
+    params: dict[str, Any] = {
         'identifier': 'test',
         'server': SERVER,
         'username': USER,
@@ -50,13 +51,13 @@ def mock_imap(mock_imap_class: MagicMock) -> MagicMock:
 
 
 @pytest.fixture
-def imap(mock_imap: MagicMock) -> Tuple[ImapTarget, MagicMock]:
+def imap(mock_imap: MagicMock) -> tuple[ImapTarget, MagicMock]:
     """A default password target (not yet connected) and its mock connection."""
     return make_target(), mock_imap
 
 
 @pytest.fixture
-def connected(imap: Tuple[ImapTarget, MagicMock]) -> Tuple[ImapTarget, MagicMock]:
+def connected(imap: tuple[ImapTarget, MagicMock]) -> tuple[ImapTarget, MagicMock]:
     """Like `imap`, but already connected."""
     imap[0].connect()
     return imap
@@ -73,7 +74,7 @@ class TestImapTargetInit:
         ],
         ids=['defaults', 'custom-folder-and-timeout'],
     )
-    def test_valid_config_with_password(self, kwargs: Dict[str, Any], folder: str, timeout: int) -> None:
+    def test_valid_config_with_password(self, kwargs: dict[str, Any], folder: str, timeout: int) -> None:
         target = make_target(**kwargs)
         assert target.identifier == 'test'
         assert target.server == SERVER
@@ -127,7 +128,7 @@ class TestImapTargetInit:
         ],
         ids=['no-server', 'no-username', 'no-password', 'missing-password-file', 'bad-auth-type'],
     )
-    def test_invalid_config_raises(self, kwargs: Dict[str, Any], message: str) -> None:
+    def test_invalid_config_raises(self, kwargs: dict[str, Any], message: str) -> None:
         with pytest.raises(ConfigurationError, match=message):
             make_target(**kwargs)
 
@@ -147,7 +148,7 @@ class TestImapTargetConnect:
         self,
         mock_imap_class: MagicMock,
         mock_imap: MagicMock,
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
         folder: str,
         timeout: int,
     ) -> None:
@@ -159,7 +160,7 @@ class TestImapTargetConnect:
         mock_imap.select.assert_called_once_with(folder, readonly=True)
         assert target.imap is mock_imap
 
-    def test_connect_auth_failure(self, imap: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_connect_auth_failure(self, imap: tuple[ImapTarget, MagicMock]) -> None:
         target, mock_imap = imap
         mock_imap.login.side_effect = imaplib.IMAP4.error('Invalid credentials')
 
@@ -176,7 +177,7 @@ class TestImapTargetConnect:
         ],
         ids=['bad-status', 'exception'],
     )
-    def test_connect_folder_not_found(self, mock_imap: MagicMock, select_kwargs: Dict[str, Any]) -> None:
+    def test_connect_folder_not_found(self, mock_imap: MagicMock, select_kwargs: dict[str, Any]) -> None:
         mock_imap.select.configure_mock(**select_kwargs)
         target = make_target(folder='NonExistent')
 
@@ -185,7 +186,7 @@ class TestImapTargetConnect:
         assert 'does not exist' in str(exc_info.value)
         assert 'NonExistent' in str(exc_info.value)
 
-    def test_connect_idempotent(self, imap: Tuple[ImapTarget, MagicMock], mock_imap_class: MagicMock) -> None:
+    def test_connect_idempotent(self, imap: tuple[ImapTarget, MagicMock], mock_imap_class: MagicMock) -> None:
         """Multiple connect() calls don't reconnect."""
         target, _ = imap
         target.connect()
@@ -206,10 +207,10 @@ class TestImapTargetImportMessage:
     @pytest.mark.parametrize('subfolder', [None, 'Lists/LKML'], ids=['base-folder', 'subfolder'])
     def test_import_dedup(
         self,
-        connected: Tuple[ImapTarget, MagicMock],
+        connected: tuple[ImapTarget, MagicMock],
         search_result: bytes,
         appended: bool,
-        subfolder: Optional[str],
+        subfolder: str | None,
     ) -> None:
         """Duplicates are skipped; the check runs in the effective folder."""
         target, mock_imap = connected
@@ -227,7 +228,7 @@ class TestImapTargetImportMessage:
             assert result.get('skipped') is True
             mock_imap.append.assert_not_called()
 
-    def test_import_success(self, connected: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_import_success(self, connected: tuple[ImapTarget, MagicMock]) -> None:
         """Message is appended with no flags, current time and normalized line endings."""
         target, mock_imap = connected
         mock_imap.append.return_value = ('OK', [b'[APPENDUID 1234 5678]'])
@@ -256,7 +257,7 @@ class TestImapTargetImportMessage:
         ids=['base', 'subfolder', 'nested'],
     )
     def test_import_to_correct_folder(
-        self, mock_imap: MagicMock, folder: str, subfolder: Optional[str], expected: str
+        self, mock_imap: MagicMock, folder: str, subfolder: str | None, expected: str
     ) -> None:
         target = make_target(folder=folder)
         target.connect()
@@ -264,7 +265,7 @@ class TestImapTargetImportMessage:
 
         assert mock_imap.append.call_args[0][0] == expected
 
-    def test_import_auto_connects(self, imap: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_import_auto_connects(self, imap: tuple[ImapTarget, MagicMock]) -> None:
         """import_message auto-connects if not connected."""
         target, mock_imap = imap
         target.import_message(b'Test message', [])
@@ -282,7 +283,7 @@ class TestImapTargetImportMessage:
         ids=['bad-status', 'imap-error', 'connection-error'],
     )
     def test_import_append_failure(
-        self, connected: Tuple[ImapTarget, MagicMock], append_kwargs: Dict[str, Any], message: str
+        self, connected: tuple[ImapTarget, MagicMock], append_kwargs: dict[str, Any], message: str
     ) -> None:
         target, mock_imap = connected
         mock_imap.append.configure_mock(**append_kwargs)
@@ -290,14 +291,14 @@ class TestImapTargetImportMessage:
         with pytest.raises(RemoteError, match=message):
             target.import_message(b'Test', [])
 
-    def test_import_multiple_messages(self, connected: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_import_multiple_messages(self, connected: tuple[ImapTarget, MagicMock]) -> None:
         target, mock_imap = connected
         for i in range(5):
             target.import_message(f'Message {i}'.encode(), [])
 
         assert mock_imap.append.call_count == 5
 
-    def test_import_proceeds_without_message_id(self, connected: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_import_proceeds_without_message_id(self, connected: tuple[ImapTarget, MagicMock]) -> None:
         """No dedup check when Message-ID is missing."""
         target, mock_imap = connected
         target.import_message(b'From: test@example.com\r\n\r\nBody', [])
@@ -311,7 +312,7 @@ class TestImapTargetImportMessage:
         ids=['empty', 'all-byte-values', 'binary-body'],
     )
     def test_odd_payloads_reach_append_normalized(
-        self, connected: Tuple[ImapTarget, MagicMock], payload: bytes
+        self, connected: tuple[ImapTarget, MagicMock], payload: bytes
     ) -> None:
         target, mock_imap = connected
         target.import_message(payload, [])
@@ -331,7 +332,7 @@ class TestImapTargetOAuth2:
         ],
         ids=['default-client-id', 'custom-client-id', 'custom-tenant'],
     )
-    def test_oauth2_configuration(self, tmp_path: Path, kwargs: Dict[str, Any], client_id: str, tenant: str) -> None:
+    def test_oauth2_configuration(self, tmp_path: Path, kwargs: dict[str, Any], client_id: str, tenant: str) -> None:
         from korgalore.oauth2_imap import DEFAULT_CLIENT_ID
 
         target = make_target(
@@ -389,7 +390,7 @@ class TestImapTargetOAuth2:
 class TestImapTargetDisconnect:
     """Tests for ImapTarget disconnect method."""
 
-    def test_disconnect_closes_connection(self, connected: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_disconnect_closes_connection(self, connected: tuple[ImapTarget, MagicMock]) -> None:
         target, mock_imap = connected
         assert target.imap is not None
 
@@ -398,14 +399,14 @@ class TestImapTargetDisconnect:
         mock_imap.logout.assert_called_once()
         assert target.imap is None
 
-    def test_disconnect_handles_logout_error(self, connected: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_disconnect_handles_logout_error(self, connected: tuple[ImapTarget, MagicMock]) -> None:
         target, mock_imap = connected
         mock_imap.logout.side_effect = imaplib.IMAP4.error('Connection lost')
 
         target.disconnect()  # Should not raise
         assert target.imap is None
 
-    def test_disconnect_when_not_connected(self, imap: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_disconnect_when_not_connected(self, imap: tuple[ImapTarget, MagicMock]) -> None:
         target, _ = imap
         assert target.imap is None
 
@@ -413,7 +414,7 @@ class TestImapTargetDisconnect:
         assert target.imap is None
 
     def test_disconnect_allows_reconnect(
-        self, connected: Tuple[ImapTarget, MagicMock], mock_imap_class: MagicMock
+        self, connected: tuple[ImapTarget, MagicMock], mock_imap_class: MagicMock
     ) -> None:
         """After disconnect(), connect() establishes a new connection."""
         target, _ = connected
@@ -437,7 +438,7 @@ class TestImapTargetDeduplication:
         ids=['found', 'not-found'],
     )
     def test_check_message_exists(
-        self, connected: Tuple[ImapTarget, MagicMock], search_result: bytes, expected: bool
+        self, connected: tuple[ImapTarget, MagicMock], search_result: bytes, expected: bool
     ) -> None:
         target, mock_imap = connected
         mock_imap.search.return_value = ('OK', [search_result])
@@ -445,13 +446,13 @@ class TestImapTargetDeduplication:
         assert target._check_message_exists('<test@example.com>', 'INBOX') is expected
         mock_imap.search.assert_called_once_with(None, 'HEADER', 'Message-ID', '<test@example.com>')
 
-    def test_check_message_exists_error_returns_false(self, connected: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_check_message_exists_error_returns_false(self, connected: tuple[ImapTarget, MagicMock]) -> None:
         """Fail-open on IMAP error."""
         target, mock_imap = connected
         mock_imap.search.side_effect = imaplib.IMAP4.error('Search failed')
 
         assert target._check_message_exists('<test@example.com>', 'INBOX') is False
 
-    def test_check_message_exists_no_connection(self, imap: Tuple[ImapTarget, MagicMock]) -> None:
+    def test_check_message_exists_no_connection(self, imap: tuple[ImapTarget, MagicMock]) -> None:
         target, _ = imap
         assert target._check_message_exists('<test@example.com>', 'INBOX') is False

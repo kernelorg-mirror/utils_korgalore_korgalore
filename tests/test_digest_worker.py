@@ -8,9 +8,9 @@ digest. TestSummarizedDigest gives the worker a fake summarizer.
 import mailbox
 import textwrap
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -175,7 +175,7 @@ class TestWorker:
     def test_poke_makes_the_worker_look_again(self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget) -> None:
         ctx = worker_ctx(tmp_path, repo, maildir)
         real_exists = DigestJob.exists
-        looked: List[int] = []
+        looked: list[int] = []
 
         def exists(job: DigestJob) -> bool:
             if looked:
@@ -267,7 +267,7 @@ class TestSummarizedDigest:
         summarize_digest_job(DNAME, SLOW, job, SummaryRun(RecordingSummarizer(), cache_of(ctx)))
         assert job.load()['stage'] == DigestJob.SUMMARIZED
         # Even an empty cache does not matter now
-        cache_of(ctx).prune(datetime.now(timezone.utc), max_age=timedelta(0))
+        cache_of(ctx).prune(datetime.now(UTC), max_age=timedelta(0))
 
         run_digest_worker(ctx, [DNAME])
 
@@ -342,8 +342,8 @@ class TestSummarizedDigest:
     def test_old_summaries_are_pruned(self, tmp_path: Path, repo: InboxRepo, maildir: MaildirTarget) -> None:
         ctx = summarized_ctx(tmp_path, repo, maildir, RecordingSummarizer())
         cache = cache_of(ctx)
-        cache.store('old@x', 'qwen3:32b', 'old news', ['old@x'], datetime.now(timezone.utc) - timedelta(days=31))
-        cache.store('new@x', 'qwen3:32b', 'fresh', ['new@x'], datetime.now(timezone.utc))
+        cache.store('old@x', 'qwen3:32b', 'old news', ['old@x'], datetime.now(UTC) - timedelta(days=31))
+        cache.store('new@x', 'qwen3:32b', 'fresh', ['new@x'], datetime.now(UTC))
 
         run_digest_worker(ctx, [DNAME])
 
@@ -363,7 +363,7 @@ class TestJobSummaries:
         assert job.summaries(state) == {'a@x': 'text', 'b@x': NoSummary.BUDGET, 'c@x': NoSummary.NOT_NEEDED}
 
     @pytest.mark.parametrize('state', [{'no_summary': {'a@x': 'tired'}}, {'summaries': ['a@x']}])
-    def test_bad_summaries(self, repo: InboxRepo, state: Dict[str, Any]) -> None:
+    def test_bad_summaries(self, repo: InboxRepo, state: dict[str, Any]) -> None:
         with pytest.raises(StateError, match='Bad summaries'):
             job_of(repo).summaries(state)
 
@@ -442,7 +442,7 @@ class TestWorkerConfig:
             pytest.param({'digests': {'worker': 'thread'}}, None, id='bad-value'),
         ],
     )
-    def test_mode(self, config: Dict[str, Any], expected: Optional[str]) -> None:
+    def test_mode(self, config: dict[str, Any], expected: str | None) -> None:
         if expected is None:
             with pytest.raises(ConfigurationError, match='worker'):
                 get_digest_worker_mode(config)

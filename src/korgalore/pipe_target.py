@@ -3,7 +3,7 @@
 import logging
 import shlex
 import subprocess
-from typing import Any, List, Optional
+from typing import Any
 
 from korgalore import ConfigurationError, DeliveryError
 from korgalore.message import RawMessage
@@ -14,7 +14,7 @@ logger = logging.getLogger('korgalore')
 class PipeTarget:
     """Service for delivering messages by piping to an external command."""
 
-    DEFAULT_LABELS: List[str] = []
+    DEFAULT_LABELS: list[str] = []
 
     def __init__(self, identifier: str, command: str) -> None:
         """Initialize pipe target.
@@ -48,10 +48,10 @@ class PipeTarget:
     def import_message(
         self,
         raw_message: bytes,
-        labels: List[str],
-        feed_name: Optional[str] = None,
-        delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None,
+        labels: list[str],
+        feed_name: str | None = None,
+        delivery_name: str | None = None,
+        subfolder: str | None = None,
     ) -> Any:
         """Pipe message to the configured command.
 

@@ -1,7 +1,7 @@
 """Behaviour shared by the simple local targets: dummy, pipe and maildir."""
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Union
 
 import pytest
 
@@ -9,7 +9,7 @@ from korgalore.dummy_target import DummyTarget
 from korgalore.maildir_target import MaildirTarget
 from korgalore.pipe_target import PipeTarget
 
-SimpleTarget = Union[DummyTarget, PipeTarget, MaildirTarget]
+SimpleTarget = DummyTarget | PipeTarget | MaildirTarget
 Factory = Callable[[Path], SimpleTarget]
 
 

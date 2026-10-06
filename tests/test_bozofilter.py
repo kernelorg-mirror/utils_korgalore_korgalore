@@ -1,7 +1,7 @@
 """Tests for the bozofilter module."""
 
 from pathlib import Path
-from typing import Optional, Set, cast
+from typing import cast
 
 import pytest
 
@@ -17,7 +17,7 @@ class TestLoadBozofilter:
     """Tests for load_bozofilter function."""
 
     @pytest.mark.parametrize('content', [None, ''], ids=['file-missing', 'file-empty'])
-    def test_empty(self, tmp_path: Path, content: Optional[str]) -> None:
+    def test_empty(self, tmp_path: Path, content: str | None) -> None:
         """Returns empty set when the bozofilter file is missing or empty."""
         if content is not None:
             (tmp_path / 'bozofilter.txt').write_text(content)
@@ -121,7 +121,7 @@ class TestExtractEmailAddress:
             pytest.param(cast('str', None), None, id='none'),
         ],
     )
-    def test_extract(self, header: str, expected: Optional[str]) -> None:
+    def test_extract(self, header: str, expected: str | None) -> None:
         assert extract_email_address(header) == expected
 
 
@@ -141,5 +141,5 @@ class TestIsBozofied:
             pytest.param('', {'spam@example.com'}, False, id='empty-header'),
         ],
     )
-    def test_is_bozofied(self, header: str, bozo: Set[str], expected: bool) -> None:
+    def test_is_bozofied(self, header: str, bozo: set[str], expected: bool) -> None:
         assert is_bozofied(header, bozo) is expected

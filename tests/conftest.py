@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -67,10 +68,10 @@ def temp_feed_dir(tmp_path: Path) -> Path:
 def make_pi_feed(
     feed_dir: Path,
     key: str = 'test-feed',
-    highest_epoch: Optional[int] = 0,
-    top_commit: Optional[str] = 'abc123',
-    subject: Optional[str] = 'Test subject for {commitish}',
-    default_branch: Optional[str] = None,
+    highest_epoch: int | None = 0,
+    top_commit: str | None = 'abc123',
+    subject: str | None = 'Test subject for {commitish}',
+    default_branch: str | None = None,
 ) -> PIFeed:
     """A PIFeed with feed_type 'test', for tests that need no archive.
 

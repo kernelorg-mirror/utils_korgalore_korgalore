@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from google.auth.exceptions import RefreshError
 from google.auth.external_account_authorized_user import Credentials as ExternalAccountCredentials
@@ -28,13 +28,13 @@ SCOPES = [
 # the client_secrets file describes. Both expose the valid/expired/refresh_token
 # attributes and the to_json() and refresh() methods used below, so the code
 # does not care which one it gets -- but the declared type has to allow both.
-GmailCredentials = Union[Credentials, ExternalAccountCredentials]
+GmailCredentials = Credentials | ExternalAccountCredentials
 
 
 class GmailTarget:
     """Target class for delivering email messages to Gmail via the API."""
 
-    DEFAULT_LABELS: List[str] = ['INBOX', 'UNREAD']
+    DEFAULT_LABELS: list[str] = ['INBOX', 'UNREAD']
 
     def __init__(self, identifier: str, credentials_file: str, token_file: str, interactive: bool = True) -> None:
         """Initialize a GmailTarget instance.
@@ -52,9 +52,9 @@ class GmailTarget:
                                or if interactive=False and no token exists.
         """
         self.identifier = identifier
-        self.creds: Optional[GmailCredentials] = None
-        self.service: Optional[Any] = None
-        self._label_map: Optional[Dict[str, str]] = None
+        self.creds: GmailCredentials | None = None
+        self.service: Any | None = None
+        self._label_map: dict[str, str] | None = None
         # Store expanded paths for potential re-authentication
         self._credentials_file = os.path.expandvars(os.path.expanduser(credentials_file))
         self._token_file = os.path.expandvars(os.path.expanduser(token_file))
@@ -129,14 +129,14 @@ class GmailTarget:
     def _api(self) -> Any:
         """Return the connected Gmail API service, connecting first if needed.
 
-        googleapiclient is untyped, so self.service can only be Optional[Any].
+        googleapiclient is untyped, so self.service can only be Any | None.
         Going through here keeps the None out of the call chains below without
         a suppression at every use site.
         """
         self.connect()
         return self.service
 
-    def list_labels(self) -> List[Dict[str, str]]:
+    def list_labels(self) -> list[dict[str, str]]:
         """List all labels in the user's mailbox.
 
         Returns:
@@ -144,13 +144,13 @@ class GmailTarget:
         """
         try:
             results = self._api().users().labels().list(userId='me').execute()
-            labels: List[Dict[str, str]] = results.get('labels', [])
+            labels: list[dict[str, str]] = results.get('labels', [])
             return labels
 
         except HttpError as error:
             raise RemoteError(f'An error occurred: {error}') from error
 
-    def translate_labels(self, labels: List[str]) -> List[str]:
+    def translate_labels(self, labels: list[str]) -> list[str]:
         """Translate label names to Gmail label IDs.
 
         Args:
@@ -166,7 +166,7 @@ class GmailTarget:
         if self._label_map is None:
             # Get all labels from Gmail
             self._label_map = {label['name']: label['id'] for label in self.list_labels()}
-        translated: List[str] = []
+        translated: list[str] = []
         for label in labels:
             label_id = self._label_map.get(label, None)
             if label_id is None:
@@ -177,10 +177,10 @@ class GmailTarget:
     def import_message(
         self,
         raw_message: bytes,
-        labels: List[str],
-        feed_name: Optional[str] = None,
-        delivery_name: Optional[str] = None,
-        subfolder: Optional[str] = None,
+        labels: list[str],
+        feed_name: str | None = None,
+        delivery_name: str | None = None,
+        subfolder: str | None = None,
     ) -> Any:
         """Import a raw email message into Gmail.
 
@@ -202,7 +202,7 @@ class GmailTarget:
 
             msg = RawMessage(raw_message)
             encoded_message = base64.urlsafe_b64encode(msg.as_bytes(feed_name, delivery_name)).decode()
-            message_body: Dict[str, Any] = {'raw': encoded_message}
+            message_body: dict[str, Any] = {'raw': encoded_message}
 
             if labels:
                 label_ids = self.translate_labels(labels)

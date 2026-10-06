@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -50,7 +49,7 @@ class TestRunGitCommandConfig:
         ],
     )
     def test_command_line(
-        self, git_dir: Optional[str], args: list[str], git_config: Optional[Dict[str, str]], expected: list[str]
+        self, git_dir: str | None, args: list[str], git_config: dict[str, str] | None, expected: list[str]
     ) -> None:
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=b'', stderr=b'')
@@ -75,7 +74,7 @@ class TestGitMirrorConfig:
             pytest.param([], {}, id='no-origins'),
         ],
     )
-    def test_mirror_config(self, origins: list[str], expected: Dict[str, str]) -> None:
+    def test_mirror_config(self, origins: list[str], expected: dict[str, str]) -> None:
         mock_node = MagicMock()
         mock_node.origins = origins
         mock_node.canonical_origin = CANONICAL
@@ -100,7 +99,7 @@ class TestCloneEpochMirror:
         ],
     )
     def test_clone_fallback_also_gets_mirror_config(
-        self, tmp_path: Path, origins: list[str], expected_config: Dict[str, str]
+        self, tmp_path: Path, origins: list[str], expected_config: dict[str, str]
     ) -> None:
         """A shallow clone that fails and retries with --depth=1 reuses the mirror config."""
         mock_node = MagicMock()

@@ -10,10 +10,11 @@ import secrets
 import threading
 import urllib.parse
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 import requests
 
@@ -46,9 +47,9 @@ class OAuth2Token:
 
     def is_expired(self, buffer_seconds: int = 300) -> bool:
         """Check if token is expired or will expire within buffer_seconds."""
-        return datetime.now(timezone.utc).timestamp() >= (self.expires_at - buffer_seconds)
+        return datetime.now(UTC).timestamp() >= (self.expires_at - buffer_seconds)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             'access_token': self.access_token,
@@ -59,7 +60,7 @@ class OAuth2Token:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OAuth2Token':
+    def from_dict(cls, data: dict[str, Any]) -> 'OAuth2Token':
         """Create from dictionary (JSON deserialization)."""
         return cls(
             access_token=data['access_token'],
@@ -81,7 +82,7 @@ class ImapOAuth2Authenticator:
     tenant: str = 'common'
     interactive: bool = True
 
-    _token: Optional[OAuth2Token] = field(default=None, init=False, repr=False)
+    _token: OAuth2Token | None = field(default=None, init=False, repr=False)
     _needs_auth: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
@@ -93,7 +94,7 @@ class ImapOAuth2Authenticator:
         """Load token from file if it exists."""
         if os.path.exists(self.token_file):
             try:
-                with open(self.token_file, 'r') as f:
+                with open(self.token_file) as f:
                     data = json.load(f)
                 self._token = OAuth2Token.from_dict(data)
                 logger.debug('Loaded OAuth2 token for %s from %s', self.identifier, self.token_file)
@@ -219,7 +220,7 @@ class ImapOAuth2Authenticator:
 
         # Calculate expiry time
         expires_in = token_data.get('expires_in', 3600)
-        expires_at = datetime.now(timezone.utc).timestamp() + expires_in
+        expires_at = datetime.now(UTC).timestamp() + expires_in
 
         self._token = OAuth2Token(
             access_token=token_data['access_token'],
@@ -250,7 +251,7 @@ class ImapOAuth2Authenticator:
         state = secrets.token_urlsafe(32)
 
         # Result container for callback
-        auth_result: Dict[str, Any] = {'code': None, 'error': None}
+        auth_result: dict[str, Any] = {'code': None, 'error': None}
         server_ready = threading.Event()
 
         class CallbackHandler(http.server.BaseHTTPRequestHandler):
@@ -362,7 +363,7 @@ class ImapOAuth2Authenticator:
 
         # Calculate expiry time
         expires_in = token_response.get('expires_in', 3600)
-        expires_at = datetime.now(timezone.utc).timestamp() + expires_in
+        expires_at = datetime.now(UTC).timestamp() + expires_in
 
         self._token = OAuth2Token(
             access_token=token_response['access_token'],

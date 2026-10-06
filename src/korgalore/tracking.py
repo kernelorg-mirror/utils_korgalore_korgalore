@@ -9,10 +9,10 @@ import logging
 import shutil
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from korgalore import run_lei_command
 
@@ -38,7 +38,7 @@ class TrackedThread:
     msgid: str
     subject: str
     target: str
-    labels: List[str]
+    labels: list[str]
     lei_path: Path
     created: datetime
     last_update: datetime
@@ -46,7 +46,7 @@ class TrackedThread:
     status: TrackStatus
     message_count: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             'msgid': self.msgid,
@@ -62,7 +62,7 @@ class TrackedThread:
         }
 
     @classmethod
-    def from_dict(cls, track_id: str, data: Dict[str, Any]) -> 'TrackedThread':
+    def from_dict(cls, track_id: str, data: dict[str, Any]) -> 'TrackedThread':
         """Create TrackedThread from dictionary."""
         return cls(
             track_id=track_id,
@@ -97,7 +97,7 @@ class TrackingManifest:
         self.data_dir = data_dir
         self.manifest_path = data_dir / 'tracking.json'
         self.lei_base_dir = data_dir / 'lei'
-        self._threads: Dict[str, TrackedThread] = {}
+        self._threads: dict[str, TrackedThread] = {}
         self._load()
 
     def _load(self) -> None:
@@ -107,7 +107,7 @@ class TrackingManifest:
             return
 
         try:
-            with open(self.manifest_path, 'r', encoding='utf-8') as f:
+            with open(self.manifest_path, encoding='utf-8') as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning('Failed to load tracking manifest: %s', e)
@@ -145,7 +145,7 @@ class TrackingManifest:
         logger.debug('Saved tracking manifest with %d threads', len(self._threads))
 
     def add_thread(
-        self, track_id: str, msgid: str, subject: str, target: str, labels: List[str], lei_path: Path
+        self, track_id: str, msgid: str, subject: str, target: str, labels: list[str], lei_path: Path
     ) -> TrackedThread:
         """Add a new thread to track.
 
@@ -160,7 +160,7 @@ class TrackingManifest:
         Returns:
             The newly created TrackedThread.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         thread = TrackedThread(
             track_id=track_id,
@@ -237,7 +237,7 @@ class TrackingManifest:
 
         thread = self._threads[track_id]
         thread.status = TrackStatus.ACTIVE
-        thread.last_new_message = datetime.now(timezone.utc)
+        thread.last_new_message = datetime.now(UTC)
         self._save()
 
         logger.info('Resumed tracking for thread %s', track_id)
@@ -258,7 +258,7 @@ class TrackingManifest:
             raise KeyError(f"Tracked thread '{track_id}' not found")
         return self._threads[track_id]
 
-    def get_thread_by_msgid(self, msgid: str) -> Optional[TrackedThread]:
+    def get_thread_by_msgid(self, msgid: str) -> TrackedThread | None:
         """Find a tracked thread by message ID.
 
         Args:
@@ -272,7 +272,7 @@ class TrackingManifest:
                 return thread
         return None
 
-    def get_all_threads(self) -> List[TrackedThread]:
+    def get_all_threads(self) -> list[TrackedThread]:
         """Get all tracked threads.
 
         Returns:
@@ -280,7 +280,7 @@ class TrackingManifest:
         """
         return list(self._threads.values())
 
-    def get_active_threads(self) -> List[TrackedThread]:
+    def get_active_threads(self) -> list[TrackedThread]:
         """Get only active tracked threads.
 
         Returns:
@@ -288,7 +288,7 @@ class TrackingManifest:
         """
         return [t for t in self._threads.values() if t.status == TrackStatus.ACTIVE]
 
-    def get_inactive_threads(self) -> List[TrackedThread]:
+    def get_inactive_threads(self) -> list[TrackedThread]:
         """Get inactive and paused tracked threads.
 
         Returns:
@@ -296,7 +296,7 @@ class TrackingManifest:
         """
         return [t for t in self._threads.values() if t.status in (TrackStatus.INACTIVE, TrackStatus.PAUSED)]
 
-    def check_and_expire_threads(self) -> List[str]:
+    def check_and_expire_threads(self) -> list[str]:
         """Check for threads that should be auto-expired.
 
         Threads with no new messages for EXPIRE_DAYS are marked inactive.
@@ -304,8 +304,8 @@ class TrackingManifest:
         Returns:
             List of track_ids that were expired.
         """
-        expired: List[str] = []
-        cutoff = datetime.now(timezone.utc) - timedelta(days=EXPIRE_DAYS)
+        expired: list[str] = []
+        cutoff = datetime.now(UTC) - timedelta(days=EXPIRE_DAYS)
 
         for track_id, thread in self._threads.items():
             if thread.status == TrackStatus.ACTIVE and thread.last_new_message < cutoff:
@@ -332,7 +332,7 @@ class TrackingManifest:
             raise KeyError(f"Tracked thread '{track_id}' not found")
 
         thread = self._threads[track_id]
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         thread.last_update = now
 
         if new_messages > 0:
@@ -370,7 +370,7 @@ def write_archive_description(archive_path: Path, description: str) -> None:
         logger.warning('Could not describe archive %s: %s', archive_path, e)
 
 
-def create_lei_thread_search(msgid: str, output_path: Path) -> Tuple[int, bytes]:
+def create_lei_thread_search(msgid: str, output_path: Path) -> tuple[int, bytes]:
     """Create a new lei search for a thread by message ID.
 
     Uses: lei q "dt:19700101000000.." --only https://lore.kernel.org/all/<msgid> -o v2:<output_path>
@@ -397,7 +397,7 @@ def create_lei_thread_search(msgid: str, output_path: Path) -> Tuple[int, bytes]
     return run_lei_command(args)
 
 
-def create_lei_query_search(query: str, output_path: Path, threads: bool = False) -> Tuple[int, bytes]:
+def create_lei_query_search(query: str, output_path: Path, threads: bool = False) -> tuple[int, bytes]:
     """Create a new lei search with an arbitrary query string.
 
     Uses: lei q --stdin [--threads] --only https://lore.kernel.org/all -o v2:<output_path>
@@ -432,7 +432,7 @@ def create_lei_query_search(query: str, output_path: Path, threads: bool = False
     return run_lei_command(args, stdin=query.encode())
 
 
-def update_lei_search(search_path: Path) -> Tuple[int, bytes]:
+def update_lei_search(search_path: Path) -> tuple[int, bytes]:
     """Update an existing lei search.
 
     Args:
@@ -448,7 +448,7 @@ def update_lei_search(search_path: Path) -> Tuple[int, bytes]:
     return run_lei_command(args)
 
 
-def forget_lei_search(search_path: Path) -> Tuple[int, bytes]:
+def forget_lei_search(search_path: Path) -> tuple[int, bytes]:
     """Forget a lei search and remove its data.
 
     Runs 'lei forget-search' to remove the search from lei's tracking

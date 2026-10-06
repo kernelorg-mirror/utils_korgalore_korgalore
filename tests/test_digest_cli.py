@@ -4,7 +4,8 @@ Everything the commands call is mocked, so these tests check which
 deliveries and options reach which function, not what the functions do.
 """
 
-from typing import Any, Dict, Iterator, List, Tuple
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import click
@@ -29,7 +30,7 @@ def _target(identifier: str) -> MagicMock:
 
 class TestRunDueDigests:
     @staticmethod
-    def _obj(targets: Dict[str, MagicMock]) -> Dict[str, Any]:
+    def _obj(targets: dict[str, MagicMock]) -> dict[str, Any]:
         return {
             'deliveries': {name: (MagicMock(feed_key=name), t, [], None) for name, t in targets.items()},
             'digest_schedules': {name: DAILY for name in targets},
@@ -78,7 +79,7 @@ def lei_feed() -> MagicMock:
 
 class TestMapDeliveries:
     @staticmethod
-    def _map(details: Dict[str, Any]) -> click.Context:
+    def _map(details: dict[str, Any]) -> click.Context:
         ctx = make_ctx({'config': {'targets': {}}, 'targets': {}, 'feeds': {}})
         with (
             patch('korgalore.cli.get_feed_for_delivery', return_value=MagicMock(feed_key='lkml')),
@@ -89,7 +90,7 @@ class TestMapDeliveries:
 
     @staticmethod
     def _map_summarized(
-        summarizers: Dict[str, Any], feed: Any = None, names: Tuple[str, ...] = (DNAME,)
+        summarizers: dict[str, Any], feed: Any = None, names: tuple[str, ...] = (DNAME,)
     ) -> click.Context:
         ctx = make_ctx({'config': {'targets': {}, 'summarizers': summarizers}, 'targets': {}, 'feeds': {}})
         if feed is None:
@@ -118,7 +119,7 @@ class TestMapDeliveries:
             pytest.param({'send_at': '07:00'}, 'send_at', id='digest-keys-need-digest-mode'),
         ],
     )
-    def test_bad_delivery_config(self, details: Dict[str, Any], match: str) -> None:
+    def test_bad_delivery_config(self, details: dict[str, Any], match: str) -> None:
         with pytest.raises(ConfigurationError, match=match):
             self._map(details)
 
@@ -147,7 +148,7 @@ class TestMapDeliveries:
             pytest.param({'local': COMMAND}, True, 'allow_private_feeds', id='lei-command'),
         ],
     )
-    def test_summarizer_refused(self, summarizers: Dict[str, Any], lei: bool, match: str) -> None:
+    def test_summarizer_refused(self, summarizers: dict[str, Any], lei: bool, match: str) -> None:
         with pytest.raises(ConfigurationError, match=match):
             self._map_summarized(summarizers, feed=lei_feed() if lei else None)
 
@@ -158,7 +159,7 @@ class TestMapDeliveries:
             pytest.param({**COMMAND, 'allow_private_feeds': True}, CommandSummarizer, False, id='allow-private-feeds'),
         ],
     )
-    def test_lei_feed_summarizer_accepted(self, details: Dict[str, Any], kind: type, local: bool) -> None:
+    def test_lei_feed_summarizer_accepted(self, details: dict[str, Any], kind: type, local: bool) -> None:
         summarizer = self._map_summarized({'local': details}, feed=lei_feed()).obj['summarizers']['local']
         assert isinstance(summarizer, kind)
         if local:
@@ -166,7 +167,7 @@ class TestMapDeliveries:
             assert summarizer.is_local
 
 
-def _pull_obj() -> Dict[str, Any]:
+def _pull_obj() -> dict[str, Any]:
     feed = MagicMock(feed_key='lkml')
     feed.update_feed.return_value = PIFeed.STATUS_UPDATED
     feed.STATUS_UPDATED = PIFeed.STATUS_UPDATED
@@ -186,7 +187,7 @@ def _pull_obj() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def pull_env() -> Iterator[Tuple[MagicMock, MagicMock]]:
+def pull_env() -> Iterator[tuple[MagicMock, MagicMock]]:
     """Stub out mapping, locking and tracking; yield (deliver_commit, run_due_digests)."""
     deliver = MagicMock(return_value='<m@x>')
     digests = MagicMock(return_value={DNAME: ['<digest-1@x>', '<digest-2@x>']})
@@ -211,7 +212,7 @@ class TestPullHook:
         [pytest.param(False, False, id='plain'), pytest.param(True, True, id='force-no-update')],
     )
     def test_digest_not_delivered_per_message(
-        self, pull_env: Tuple[MagicMock, MagicMock], no_update: bool, force: bool
+        self, pull_env: tuple[MagicMock, MagicMock], no_update: bool, force: bool
     ) -> None:
         deliver, digests = pull_env
         changes, msgids = perform_pull(make_ctx(_pull_obj()), no_update=no_update, force=force, delivery_name=None)
@@ -222,7 +223,7 @@ class TestPullHook:
         assert changes == {'lkml-all': 1, DNAME: 2}
         assert msgids == {'<m@x>', '<digest-1@x>', '<digest-2@x>'}
 
-    def test_digests_checked_without_updates(self, pull_env: Tuple[MagicMock, MagicMock]) -> None:
+    def test_digests_checked_without_updates(self, pull_env: tuple[MagicMock, MagicMock]) -> None:
         # A digest can be due on a quiet day, when no feed has news
         deliver, digests = pull_env
         obj = _pull_obj()
@@ -234,7 +235,7 @@ class TestPullHook:
         digests.assert_called_once()
         assert changes == {DNAME: 2}
 
-    def test_auth_error_unlocks(self, pull_env: Tuple[MagicMock, MagicMock]) -> None:
+    def test_auth_error_unlocks(self, pull_env: tuple[MagicMock, MagicMock]) -> None:
         _, digests = pull_env
         digests.side_effect = AuthenticationError('expired', target_id='local')
         with pytest.raises(AuthenticationError):
@@ -242,7 +243,7 @@ class TestPullHook:
         digests.unlock.assert_called_once()
 
 
-def cli_obj() -> Dict[str, Any]:
+def cli_obj() -> dict[str, Any]:
     """The ctx.obj of kgl: one message delivery and two digests."""
     return {
         'config': {
@@ -259,8 +260,8 @@ def cli_obj() -> Dict[str, Any]:
 
 class TestDigestCommand:
     @pytest.fixture
-    def env(self) -> Iterator[Dict[str, MagicMock]]:
-        def fake_update(ctx: click.Context, **kwargs: Any) -> Tuple[List[str], List[str]]:
+    def env(self) -> Iterator[dict[str, MagicMock]]:
+        def fake_update(ctx: click.Context, **kwargs: Any) -> tuple[list[str], list[str]]:
             ctx.obj['failed_feeds'] = ['netdev']
             return [], []
 
@@ -269,7 +270,7 @@ class TestDigestCommand:
             mocks['due'].return_value = {}
             yield mocks
 
-    def test_runs_only_digests(self, env: Dict[str, MagicMock]) -> None:
+    def test_runs_only_digests(self, env: dict[str, MagicMock]) -> None:
         result = invoke_digest(cli_obj())
         assert result.exit_code == 0, result.output
         assert list(env['map'].call_args.args[1]) == DIGESTS
@@ -278,7 +279,7 @@ class TestDigestCommand:
         env['update'].assert_called_once()
         env['unlock'].assert_called_once()
 
-    def test_named_and_forced(self, env: Dict[str, MagicMock]) -> None:
+    def test_named_and_forced(self, env: dict[str, MagicMock]) -> None:
         result = invoke_digest(cli_obj(), '--force', '--no-update', DNAME)
         assert result.exit_code == 0, result.output
         assert env['due'].call_args.args[1] == [DNAME]
@@ -286,25 +287,25 @@ class TestDigestCommand:
         env['update'].assert_not_called()
 
     @pytest.mark.parametrize('name', ['nope', 'lkml-all'], ids=['unknown', 'message-delivery'])
-    def test_delivery_refused(self, env: Dict[str, MagicMock], name: str) -> None:
+    def test_delivery_refused(self, env: dict[str, MagicMock], name: str) -> None:
         result = invoke_digest(cli_obj(), name)
         assert result.exit_code != 0
         env['due'].assert_not_called()
 
-    def test_fail_on_feed_error(self, env: Dict[str, MagicMock]) -> None:
+    def test_fail_on_feed_error(self, env: dict[str, MagicMock]) -> None:
         assert invoke_digest(cli_obj()).exit_code == 0
         result = invoke_digest(cli_obj(), '--fail-on-feed-error')
         assert result.exit_code == 3
         # The digests were still sent
         assert env['due'].call_count == 2
 
-    def test_unlocks_on_error(self, env: Dict[str, MagicMock]) -> None:
+    def test_unlocks_on_error(self, env: dict[str, MagicMock]) -> None:
         env['due'].side_effect = AuthenticationError('expired', target_id='local')
         result = invoke_digest(cli_obj())
         assert result.exit_code != 0
         env['unlock'].assert_called_once()
 
-    def test_no_digests_configured(self, env: Dict[str, MagicMock]) -> None:
+    def test_no_digests_configured(self, env: dict[str, MagicMock]) -> None:
         obj = cli_obj()
         del obj['config']['deliveries'][DNAME]
         del obj['config']['deliveries']['netdev-digest']
@@ -315,11 +316,11 @@ class TestDigestCommand:
 
 class TestEstimateCommand:
     @pytest.fixture
-    def env(self) -> Iterator[Dict[str, MagicMock]]:
+    def env(self) -> Iterator[dict[str, MagicMock]]:
         with digest_cli_env('map', 'lock', 'unlock', 'update', 'estimate', 'due', 'work') as mocks:
             yield mocks
 
-    def test_estimate_sends_nothing(self, env: Dict[str, MagicMock]) -> None:
+    def test_estimate_sends_nothing(self, env: dict[str, MagicMock]) -> None:
         result = invoke_digest(cli_obj(), '--estimate')
         assert result.exit_code == 0, result.output
         assert env['estimate'].call_args.args[1] == DIGESTS
@@ -329,13 +330,13 @@ class TestEstimateCommand:
         env['unlock'].assert_called_once()
         env['update'].assert_called_once()
 
-    def test_no_update(self, env: Dict[str, MagicMock]) -> None:
+    def test_no_update(self, env: dict[str, MagicMock]) -> None:
         assert invoke_digest(cli_obj(), '--estimate', '--no-update').exit_code == 0
         env['update'].assert_not_called()
         env['estimate'].assert_called_once()
 
     @pytest.mark.parametrize('other', ['--force', '--work'])
-    def test_estimate_only_reports(self, env: Dict[str, MagicMock], other: str) -> None:
+    def test_estimate_only_reports(self, env: dict[str, MagicMock], other: str) -> None:
         result = invoke_digest(cli_obj(), '--estimate', other)
         assert result.exit_code == 2
         assert 'only reports' in result.output
@@ -347,18 +348,18 @@ class TestEstimateCommand:
 
 class TestWorkCommand:
     @pytest.fixture
-    def env(self) -> Iterator[Dict[str, MagicMock]]:
+    def env(self) -> Iterator[dict[str, MagicMock]]:
         with digest_cli_env('map', 'lock', 'update', 'work') as mocks:
             yield mocks
 
-    def test_work_takes_no_feed_locks(self, env: Dict[str, MagicMock]) -> None:
+    def test_work_takes_no_feed_locks(self, env: dict[str, MagicMock]) -> None:
         result = invoke_digest(cli_obj(), '--work')
         assert result.exit_code == 0, result.output
         assert env['work'].call_args.args[1] == DIGESTS
         env['lock'].assert_not_called()
         env['update'].assert_not_called()
 
-    def test_work_with_force_is_refused(self, env: Dict[str, MagicMock]) -> None:
+    def test_work_with_force_is_refused(self, env: dict[str, MagicMock]) -> None:
         result = invoke_digest(cli_obj(), '--work', '--force')
         assert result.exit_code == 2
         env['work'].assert_not_called()

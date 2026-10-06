@@ -1,7 +1,7 @@
 """Helpers for the GUI tests, which build a KorgaloreApp without GTK."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 from tests.digest_helpers import make_ctx
@@ -11,9 +11,9 @@ if TYPE_CHECKING:
 
 
 def make_app(
-    config: Optional[Dict[str, Any]] = None,
-    cfgpath: Optional[Path] = None,
-    nodes: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
+    cfgpath: Path | None = None,
+    nodes: dict[str, Any] | None = None,
     **overrides: Any,
 ) -> 'KorgaloreApp':
     """Construct a KorgaloreApp without GTK by stubbing __init__.
@@ -28,7 +28,7 @@ def make_app(
     from korgalore.gui import KorgaloreApp
 
     config = config if config is not None else {}
-    obj: Dict[str, Any] = {
+    obj: dict[str, Any] = {
         'config': config,
         'targets': {},
         'feeds': {},

@@ -1,7 +1,6 @@
 """Tests for User-Agent handling across korgalore."""
 
 import os
-from typing import List, Optional
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -85,7 +84,7 @@ class TestInitGitUserAgent:
         [(None, ''), ('testid', '+testid')],
         ids=['no-plus', 'with-plus'],
     )
-    def test_sets_environment_variable(self, plus: Optional[str], suffix: str) -> None:
+    def test_sets_environment_variable(self, plus: str | None, suffix: str) -> None:
         """GIT_HTTP_USER_AGENT is git/{version} (korgalore/{version}[+plus])."""
         korgalore._user_agent_plus = plus
         with mock.patch('subprocess.run') as mock_run:
@@ -127,7 +126,7 @@ class TestRunLeiCommand:
         ],
         ids=['q', 'up', 'ls-search', 'forget-search'],
     )
-    def test_user_agent_flag_by_subcommand(self, args: List[str], expects_ua: bool) -> None:
+    def test_user_agent_flag_by_subcommand(self, args: list[str], expects_ua: bool) -> None:
         """--user-agent follows the subcommand for q/up, and is absent for the rest."""
         with mock.patch('subprocess.run') as mock_run:
             mock_run.return_value = mock.Mock(returncode=0, stdout=b'')

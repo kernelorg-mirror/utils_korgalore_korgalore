@@ -1,7 +1,6 @@
 import json
 import logging
 from pathlib import Path
-from typing import List, Tuple
 
 from korgalore import ConfigurationError, GitError, PublicInboxError, StateError, run_git_command, run_lei_command
 from korgalore.pi_feed import PIFeed
@@ -22,7 +21,7 @@ class LeiFeed(PIFeed):
         Raises:
             ConfigurationError: If the LEI search is not known to lei.
         """
-        self.known_searches: List[str] = list()
+        self.known_searches: list[str] = list()
         self._load_known_searches()
         feed_dir = Path(lei_url[4:])  # Strip 'lei:' prefix
         if str(feed_dir) not in self.known_searches:
@@ -62,7 +61,7 @@ class LeiFeed(PIFeed):
 
         raise PublicInboxError(f'Path not found as a v2 lei search: {path}')
 
-    def get_latest_epoch_info(self) -> List[Tuple[int, str]]:
+    def get_latest_epoch_info(self) -> list[tuple[int, str]]:
         """Get current ref information for all epochs.
 
         Returns:
@@ -72,7 +71,7 @@ class LeiFeed(PIFeed):
             GitError: If git show-ref fails on any epoch.
         """
         epochs = self.find_epochs()
-        epoch_info: List[Tuple[int, str]] = list()
+        epoch_info: list[tuple[int, str]] = list()
         for epoch in epochs:
             epoch_dir = self.get_gitdir(epoch)
             gitargs = ['show-ref']

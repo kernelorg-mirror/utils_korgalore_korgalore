@@ -2,7 +2,6 @@
 
 import logging
 import threading
-from typing import Set
 from unittest import mock
 
 import pytest
@@ -18,7 +17,7 @@ def korgalore_logs(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture
     return caplog
 
 
-def heartbeat_threads() -> Set[threading.Thread]:
+def heartbeat_threads() -> set[threading.Thread]:
     """Every heartbeat thread currently alive."""
     return {t for t in threading.enumerate() if t.name == 'lei-heartbeat'}
 

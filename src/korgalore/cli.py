@@ -10,14 +10,15 @@ import sys
 import tomllib
 import urllib.parse
 import uuid
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Mapping, Optional, Sequence, Set, TextIO, Tuple, Union
+from typing import Any, TextIO
 
 import click
 import click_log  # type: ignore[import-untyped]
@@ -101,7 +102,7 @@ MAINTAINERS_URL = 'https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linu
 MAINTAINERS_CACHE_MAX_AGE = 24 * 60 * 60
 
 
-def progress_file(hide_bar: bool) -> Optional[TextIO]:
+def progress_file(hide_bar: bool) -> TextIO | None:
     """Pick the stream a progress bar should render to.
 
     Click grew a ``progressbar(hidden=...)`` argument in 8.3.0, but every
@@ -170,7 +171,7 @@ def get_maintainers_file(data_dir: Path) -> Path:
     return cache_path
 
 
-def parse_labels(labels: Tuple[str, ...]) -> List[str]:
+def parse_labels(labels: tuple[str, ...]) -> list[str]:
     """Parse labels from command line, supporting both repeated -l and comma-separated.
 
     Args:
@@ -187,7 +188,7 @@ def parse_labels(labels: Tuple[str, ...]) -> List[str]:
         >>> parse_labels(('INBOX', 'UNREAD,CATEGORY_FORUMS'))
         ['INBOX', 'UNREAD', 'CATEGORY_FORUMS']
     """
-    result: List[str] = []
+    result: list[str] = []
     for label in labels:
         # Split by comma and strip whitespace
         result.extend(part.strip() for part in label.split(',') if part.strip())
@@ -230,7 +231,7 @@ def get_xdg_config_dir() -> Path:
     return korgalore_config_dir
 
 
-def resolve_target_name(target: Optional[str], targets: Dict[str, Any]) -> str:
+def resolve_target_name(target: str | None, targets: dict[str, Any]) -> str:
     """Return the target name to use, defaulting to the first one configured.
 
     Click passes None for an omitted --target, so every command taking one
@@ -333,7 +334,7 @@ def get_target(ctx: click.Context, identifier: str) -> Any:
 
 
 def get_gmail_target(
-    identifier: str, credentials_file: str, token_file: Optional[str], interactive: bool = True
+    identifier: str, credentials_file: str, token_file: str | None, interactive: bool = True
 ) -> GmailTarget:
     """Create a Gmail target service instance."""
     if not credentials_file:
@@ -377,10 +378,10 @@ def get_jmap_target(
     identifier: str,
     server: str,
     username: str,
-    token: Optional[str],
-    token_file: Optional[str],
+    token: str | None,
+    token_file: str | None,
     timeout: int,
-    reqsession: Optional[requests.Session] = None,
+    reqsession: requests.Session | None = None,
 ) -> JmapTarget:
     """Create a JMAP target service instance."""
     if not server:
@@ -418,13 +419,13 @@ def get_imap_target(
     server: str,
     username: str,
     folder: str,
-    password: Optional[str],
-    password_file: Optional[str],
+    password: str | None,
+    password_file: str | None,
     timeout: int,
     auth_type: str = 'password',
-    client_id: Optional[str] = None,
+    client_id: str | None = None,
     tenant: str = 'common',
-    token: Optional[str] = None,
+    token: str | None = None,
     interactive: bool = True,
 ) -> ImapTarget:
     """Create an IMAP target service instance."""
@@ -480,7 +481,7 @@ def get_pipe_target(identifier: str, command: str) -> PipeTarget:
     return pt
 
 
-def resolve_feed_url(feed_value: str, config: Dict[str, Any]) -> str:
+def resolve_feed_url(feed_value: str, config: dict[str, Any]) -> str:
     """Resolve a feed name or URL to its full URL."""
     # If it's already a URL, return as-is
     if feed_value.startswith(('https:', 'lei:')):
@@ -504,7 +505,7 @@ def resolve_feed_url(feed_value: str, config: Dict[str, Any]) -> str:
     return feed_url
 
 
-def get_feed_identifier(feed_value: str, config: Dict[str, Any]) -> Optional[str]:
+def get_feed_identifier(feed_value: str, config: dict[str, Any]) -> str | None:
     """Get a stable identifier for a feed to use as directory name.
 
     Args:
@@ -542,7 +543,7 @@ def get_feed_identifier(feed_value: str, config: Dict[str, Any]) -> Optional[str
     return sanitized
 
 
-def validate_config_file(cfgpath: Path) -> Tuple[bool, str]:
+def validate_config_file(cfgpath: Path) -> tuple[bool, str]:
     """Validate a TOML configuration file.
 
     Args:
@@ -564,7 +565,7 @@ def validate_config_file(cfgpath: Path) -> Tuple[bool, str]:
         return False, f'Error reading config: {e}'
 
 
-def merge_config(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
+def merge_config(base: dict[str, Any], extra: dict[str, Any]) -> None:
     """Merge extra config into base config (modifies base in-place).
 
     Merges 'targets', 'feeds', 'deliveries', and 'gui' sections.
@@ -579,9 +580,9 @@ def merge_config(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
         base['gui'] = extra['gui']
 
 
-def load_config(cfgfile: Path) -> Dict[str, Any]:
+def load_config(cfgfile: Path) -> dict[str, Any]:
     """Load and parse the TOML configuration file and conf.d/*.toml files."""
-    config: Dict[str, Any] = dict()
+    config: dict[str, Any] = dict()
 
     if not cfgfile.exists():
         logger.error('Config file not found: %s', str(cfgfile))
@@ -625,11 +626,11 @@ def load_config(cfgfile: Path) -> Dict[str, Any]:
 
 def retry_failed_commits(
     feed_dir: Path,
-    pi_feed: Union[LeiFeed, LoreFeed],
+    pi_feed: LeiFeed | LoreFeed,
     target_service: Any,
-    labels: List[str],
+    labels: list[str],
     delivery_name: str,
-    subfolder: Optional[str] = None,
+    subfolder: str | None = None,
 ) -> None:
     """Retry previously failed message deliveries for a specific delivery."""
     failed_commits = pi_feed.get_failed_commits_for_delivery(delivery_name)
@@ -665,14 +666,14 @@ def retry_failed_commits(
 def deliver_commit(
     delivery_name: str,
     target: Any,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     epoch: int,
     commit: str,
-    labels: List[str],
+    labels: list[str],
     was_failing: bool = False,
-    bozofilter: Optional[Set[str]] = None,
-    subfolder: Optional[str] = None,
-) -> Optional[str]:
+    bozofilter: set[str] | None = None,
+    subfolder: str | None = None,
+) -> str | None:
     """Deliver a single message to the target.
 
     Args:
@@ -693,7 +694,7 @@ def deliver_commit(
     # is_noop_commit raises GitError when the commit object is missing
     # locally (bad object), so the check must be inside the try/except
     # to avoid crashing the retry loop.
-    raw_message: Optional[bytes] = None
+    raw_message: bytes | None = None
     try:
         if feed.is_noop_commit(epoch, commit):
             logger.debug('Skipping no-op commit %s in epoch %d', commit, epoch)
@@ -745,12 +746,12 @@ ROOT_LOOKUPS_MAX = 25
 
 def collect_digest(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     schedule: DigestSchedule,
     job: DigestJob,
-    bozofilter: Optional[Set[str]] = None,
+    bozofilter: set[str] | None = None,
     force: bool = False,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> bool:
     """Start a digest job when a digest is due: the collect stage.
 
@@ -768,7 +769,7 @@ def collect_digest(
         state is saved right away.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     last_sent = feed.load_digest_sent(delivery_name)
     if not force and not schedule.is_due(last_sent, now):
         logger.debug('Digest %s is not due yet', delivery_name)
@@ -793,9 +794,7 @@ def collect_digest(
     return True
 
 
-def look_up_root_subjects(
-    delivery_name: str, feed: Union[LeiFeed, LoreFeed], messages: Sequence[bytes]
-) -> Dict[str, str]:
+def look_up_root_subjects(delivery_name: str, feed: LeiFeed | LoreFeed, messages: Sequence[bytes]) -> dict[str, str]:
     """Fetch the subjects of the roots that roots_to_look_up() names.
 
     Only a lore feed can fetch messages. The lookups happen while the
@@ -810,7 +809,7 @@ def look_up_root_subjects(
     """
     if not isinstance(feed, LoreFeed):
         return {}
-    subjects: Dict[str, str] = dict()
+    subjects: dict[str, str] = dict()
     roots = roots_to_look_up(group_threads([parse_message(raw) for raw in messages]))
     if len(roots) > ROOT_LOOKUPS_MAX:
         logger.debug('Digest %s: looking up %d of %d thread roots', delivery_name, ROOT_LOOKUPS_MAX, len(roots))
@@ -827,12 +826,12 @@ def look_up_root_subjects(
     return subjects
 
 
-def _job_root_subjects(job: DigestJob, state: Mapping[str, Any]) -> Dict[str, str]:
+def _job_root_subjects(job: DigestJob, state: Mapping[str, Any]) -> dict[str, str]:
     """The root subjects saved in a job. Older jobs have none."""
     saved = state.get('root_subjects') or {}
     if not isinstance(saved, dict):
         raise StateError(f'Bad digest job in {job.path}: root_subjects is not a map of subjects')
-    subjects: Dict[str, str] = dict()
+    subjects: dict[str, str] = dict()
     for msgid, subject in saved.items():
         if not isinstance(subject, str):
             raise StateError(f'Bad digest job in {job.path}: root_subjects has a subject that is not text')
@@ -845,20 +844,20 @@ class DigestPeriod:
     """The messages of one digest period, as read from the feed."""
 
     start: datetime
-    messages: List[bytes]
+    messages: list[bytes]
     # Where the delivery pointer goes once the digest is sent
-    pointer: Optional[Dict[str, Any]]
+    pointer: dict[str, Any] | None
     # Set when the feed history has a gap: the oldest message we still have
-    history_start: Optional[datetime] = None
+    history_start: datetime | None = None
 
 
 def read_digest_period(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     schedule: DigestSchedule,
-    bozofilter: Optional[Set[str]],
+    bozofilter: set[str] | None,
     now: datetime,
-    last_sent: Optional[datetime],
+    last_sent: datetime | None,
 ) -> DigestPeriod:
     """Read the messages for a digest that ends now, without saving anything.
 
@@ -866,7 +865,7 @@ def read_digest_period(
     for this delivery, which the caller has already read for the due check.
     """
     period_start = schedule.period_start(last_sent, now)
-    history_start: Optional[datetime] = None
+    history_start: datetime | None = None
     # Without a pointer (the first digest, or a feed that was empty last
     # time), collect by commit date instead
     if last_sent is None or not feed.has_delivery_pointer(delivery_name):
@@ -882,7 +881,7 @@ def read_digest_period(
                 history_start.isoformat(),
             )
 
-    messages: List[bytes] = list()
+    messages: list[bytes] = list()
     for epoch, commit in commits:
         try:
             if feed.is_noop_commit(epoch, commit):
@@ -902,7 +901,7 @@ def read_digest_period(
     else:
         last_epoch = feed.get_highest_epoch()
         last_commit = feed.get_top_commit(last_epoch)
-    pointer: Optional[Dict[str, Any]] = None
+    pointer: dict[str, Any] | None = None
     if last_commit:
         pointer = {'epoch': last_epoch, 'entry': feed.make_delivery_entry(last_epoch, last_commit)}
     return DigestPeriod(period_start, messages, pointer, history_start)
@@ -913,7 +912,7 @@ def summarize_digest_job(
     schedule: DigestSchedule,
     job: DigestJob,
     run: SummaryRun,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> None:
     """Summarize the threads of a collected job: the summarize stage.
 
@@ -922,7 +921,7 @@ def summarize_digest_job(
     stopped halfway does not have to start again.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     msgs = [parse_message(raw) for raw in job.messages()]
     threads = group_threads(msgs, _job_root_subjects(job, job.load()))
     summaries = run.summarize_threads(
@@ -938,10 +937,10 @@ def summarize_digest_job(
 
 def render_digest_job(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     schedule: DigestSchedule,
     job: DigestJob,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> None:
     """Turn a collected or summarized job into digest parts: the render stage.
 
@@ -975,12 +974,12 @@ def render_digest_job(
 
 def deliver_digest_job(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     target: Any,
-    labels: List[str],
-    subfolder: Optional[str],
+    labels: list[str],
+    subfolder: str | None,
     job: DigestJob,
-) -> List[EmailMessage]:
+) -> list[EmailMessage]:
     """Send the parts of a rendered job, in order: the deliver stage.
 
     Each part is removed from the job as soon as the target accepts it.
@@ -996,7 +995,7 @@ def deliver_digest_job(
     except (KeyError, TypeError, ValueError) as e:
         raise StateError(f'Bad digest job in {job.path}: {e}') from e
 
-    sent: List[EmailMessage] = list()
+    sent: list[EmailMessage] = list()
     pending = job.pending()
     if pending:
         target.connect()
@@ -1020,15 +1019,15 @@ def deliver_digest_job(
 
 def finish_digest_job(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     target: Any,
-    labels: List[str],
-    subfolder: Optional[str],
+    labels: list[str],
+    subfolder: str | None,
     schedule: DigestSchedule,
     job: DigestJob,
-    now: Optional[datetime] = None,
-    run: Optional[SummaryRun] = None,
-) -> List[EmailMessage]:
+    now: datetime | None = None,
+    run: SummaryRun | None = None,
+) -> list[EmailMessage]:
     """Run the stages that are left in a job, from where it stopped.
 
     The caller must hold the job lock. The feed lock is not needed. The
@@ -1059,15 +1058,15 @@ def finish_digest_job(
 
 def send_digest(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     target: Any,
-    labels: List[str],
-    subfolder: Optional[str],
+    labels: list[str],
+    subfolder: str | None,
     schedule: DigestSchedule,
-    bozofilter: Optional[Set[str]] = None,
+    bozofilter: set[str] | None = None,
     force: bool = False,
-    now: Optional[datetime] = None,
-) -> List[EmailMessage]:
+    now: datetime | None = None,
+) -> list[EmailMessage]:
     """Build and deliver a digest when one is due, running all job stages.
 
     A job left from an earlier run goes first and resumes from its last
@@ -1101,11 +1100,11 @@ def send_digest(
 
 def queue_digest(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     schedule: DigestSchedule,
-    bozofilter: Optional[Set[str]] = None,
+    bozofilter: set[str] | None = None,
     force: bool = False,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> bool:
     """Collect a digest for the digest worker, when one is due.
 
@@ -1137,10 +1136,10 @@ SUMMARY_CACHE_DIR = 'summaries'
 DIGEST_WORKER_MODES = ('spawn', 'external')
 # Workers started by this process. The GUI runs for days, so finished
 # workers must be reaped, or they stay around as zombies.
-_digest_workers: List['subprocess.Popen[bytes]'] = []
+_digest_workers: list['subprocess.Popen[bytes]'] = []
 
 
-def get_digest_worker_mode(config: Dict[str, Any]) -> str:
+def get_digest_worker_mode(config: dict[str, Any]) -> str:
     """Read how the digest worker is started from the [digests] section."""
     mode = config.get('digests', {}).get('worker', 'spawn')
     if mode not in DIGEST_WORKER_MODES:
@@ -1166,7 +1165,7 @@ def poke_digest_worker(data_dir: Path) -> None:
     (data_dir / DIGEST_WORKER_POKE).touch()
 
 
-def spawn_digest_worker(data_dir: Path, cfgpath: Optional[Path]) -> bool:
+def spawn_digest_worker(data_dir: Path, cfgpath: Path | None) -> bool:
     """Start the digest worker in the background, unless one is running.
 
     The worker runs as "python -m korgalore digest --work" in its own
@@ -1209,10 +1208,10 @@ def start_digest_worker(ctx: click.Context) -> None:
 
 def run_due_digests(
     ctx: click.Context,
-    delivery_names: List[str],
+    delivery_names: list[str],
     force: bool = False,
-    status_callback: Optional[Callable[[str], None]] = None,
-) -> Dict[str, List[str]]:
+    status_callback: Callable[[str], None] | None = None,
+) -> dict[str, list[str]]:
     """Send the digests that are due, logging failures and moving on.
 
     Feeds must already be locked and updated. Digests that need the digest
@@ -1222,10 +1221,10 @@ def run_due_digests(
         A mapping of delivery name to the Message-IDs of the digest parts
         sent. Digests that sent nothing are left out.
     """
-    schedules: Dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
+    schedules: dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
     bozo_set = ctx.obj.get('bozofilter', set())
-    sent: Dict[str, List[str]] = dict()
-    used_targets: Dict[str, Any] = dict()
+    sent: dict[str, list[str]] = dict()
+    used_targets: dict[str, Any] = dict()
     waiting = False
     for dname in delivery_names:
         feed, target, labels, subfolder = ctx.obj['deliveries'][dname]
@@ -1263,7 +1262,7 @@ def run_due_digests(
     return sent
 
 
-def run_digest_worker(ctx: click.Context, delivery_names: List[str]) -> Dict[str, List[str]]:
+def run_digest_worker(ctx: click.Context, delivery_names: list[str]) -> dict[str, list[str]]:
     """Finish the waiting digest jobs, one after another, until none are left.
 
     This is the digest worker. It does not lock or update feeds: jobs
@@ -1280,16 +1279,16 @@ def run_digest_worker(ctx: click.Context, delivery_names: List[str]) -> Dict[str
         A mapping of delivery name to the Message-IDs of the digest parts
         sent. Nothing is sent when another worker is running.
     """
-    schedules: Dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
-    sent: Dict[str, List[str]] = dict()
+    schedules: dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
+    sent: dict[str, list[str]] = dict()
     with flocked(ctx.obj['data_dir'] / DIGEST_WORKER_LOCK) as have_lock:
         if not have_lock:
             logger.info('Another digest worker is running')
             return sent
-        used_targets: Dict[str, Any] = dict()
-        failed: Set[str] = set()
+        used_targets: dict[str, Any] = dict()
+        failed: set[str] = set()
         cache = SummaryCache(ctx.obj['data_dir'] / SUMMARY_CACHE_DIR)
-        summarizers: Dict[str, Summarizer] = ctx.obj.get('summarizers', {})
+        summarizers: dict[str, Summarizer] = ctx.obj.get('summarizers', {})
         # One run per summarizer, so failures in a row count across digests
         runs = {name: SummaryRun(summarizer, cache) for name, summarizer in summarizers.items()}
         poke = ctx.obj['data_dir'] / DIGEST_WORKER_POKE
@@ -1327,7 +1326,7 @@ def run_digest_worker(ctx: click.Context, delivery_names: List[str]) -> Dict[str
         for target in used_targets.values():
             if hasattr(target, 'disconnect'):
                 target.disconnect()
-        removed = cache.prune(datetime.now(timezone.utc))
+        removed = cache.prune(datetime.now(UTC))
         if removed:
             logger.debug('Removed %d old cached summaries', removed)
     return sent
@@ -1335,13 +1334,13 @@ def run_digest_worker(ctx: click.Context, delivery_names: List[str]) -> Dict[str
 
 def estimate_digest(
     delivery_name: str,
-    feed: Union[LeiFeed, LoreFeed],
+    feed: LeiFeed | LoreFeed,
     schedule: DigestSchedule,
-    summarizer: Optional[Summarizer],
+    summarizer: Summarizer | None,
     cache: SummaryCache,
-    bozofilter: Optional[Set[str]] = None,
-    now: Optional[datetime] = None,
-) -> List[str]:
+    bozofilter: set[str] | None = None,
+    now: datetime | None = None,
+) -> list[str]:
     """Describe what the next digest would send to its summarizer.
 
     A waiting job is what the worker summarizes next, so it is used when
@@ -1353,7 +1352,7 @@ def estimate_digest(
         The report, one line per item.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     job = DigestJob(feed.get_digest_job_dir(delivery_name))
     with job.locked() as have_lock:
         if not have_lock:
@@ -1400,10 +1399,10 @@ def estimate_digest(
     return lines
 
 
-def run_digest_estimates(ctx: click.Context, delivery_names: List[str], now: Optional[datetime] = None) -> None:
+def run_digest_estimates(ctx: click.Context, delivery_names: list[str], now: datetime | None = None) -> None:
     """Print estimate_digest() for each digest. Feeds must already be locked."""
-    schedules: Dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
-    summarizers: Dict[str, Summarizer] = ctx.obj.get('summarizers', {})
+    schedules: dict[str, DigestSchedule] = ctx.obj.get('digest_schedules', {})
+    summarizers: dict[str, Summarizer] = ctx.obj.get('summarizers', {})
     bozo_set = ctx.obj.get('bozofilter', set())
     cache = SummaryCache(ctx.obj['data_dir'] / SUMMARY_CACHE_DIR)
     for dname in delivery_names:
@@ -1442,7 +1441,7 @@ def normalize_feed_key(feed_url: str) -> str:
     return sanitized
 
 
-def generate_subscription_config(feed_key: str, url: str, target: str, labels: List[str]) -> str:
+def generate_subscription_config(feed_key: str, url: str, target: str, labels: list[str]) -> str:
     """Generate TOML config content for a feed subscription.
 
     Args:
@@ -1482,7 +1481,7 @@ def generate_subscription_config(feed_key: str, url: str, target: str, labels: L
     return '\n'.join(lines)
 
 
-def find_subscription_file(conf_d: Path, feed_key: str) -> Optional[Path]:
+def find_subscription_file(conf_d: Path, feed_key: str) -> Path | None:
     """Find an existing subscription config file for a feed key.
 
     Looks for sub-{feed_key}.toml (active) or sub-{feed_key}.toml.paused.
@@ -1512,7 +1511,7 @@ def get_lore_node(ctx: click.Context, url: str = 'https://lore.kernel.org/all') 
     """
     parsed = urllib.parse.urlparse(url)
     origin = f'{parsed.scheme}://{parsed.netloc}'
-    nodes: Dict[str, liblore.LoreNode] = ctx.obj['lore_nodes']
+    nodes: dict[str, liblore.LoreNode] = ctx.obj['lore_nodes']
     if origin not in nodes:
         node = make_lore_node(url=url)
         nodes[origin] = node
@@ -1520,7 +1519,7 @@ def get_lore_node(ctx: click.Context, url: str = 'https://lore.kernel.org/all') 
     return nodes[origin]
 
 
-def get_feed_for_delivery(delivery_details: Dict[str, Any], ctx: click.Context) -> Union[LeiFeed, LoreFeed]:
+def get_feed_for_delivery(delivery_details: dict[str, Any], ctx: click.Context) -> LeiFeed | LoreFeed:
     """Get or create a feed instance for a delivery configuration."""
     config = ctx.obj.get('config', {})
     feed_value = delivery_details.get('feed', '')
@@ -1528,7 +1527,7 @@ def get_feed_for_delivery(delivery_details: Dict[str, Any], ctx: click.Context) 
         raise ConfigurationError('No feed specified for delivery.')
     feed_url = resolve_feed_url(feed_value, config)
     feed_key = normalize_feed_key(feed_url)
-    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
+    feeds: dict[str, LeiFeed | LoreFeed] = ctx.obj.get('feeds', {})
     if feed_key in feeds:
         return feeds[feed_key]
 
@@ -1548,19 +1547,19 @@ def get_feed_for_delivery(delivery_details: Dict[str, Any], ctx: click.Context) 
     raise ConfigurationError(f'Unknown feed type for delivery: {feed_url}')
 
 
-def map_deliveries(ctx: click.Context, deliveries: Dict[str, Any]) -> None:
+def map_deliveries(ctx: click.Context, deliveries: dict[str, Any]) -> None:
     """Map delivery configurations to their feed and target instances."""
     from datetime import datetime
 
-    # 'deliveries' is a mapping: delivery_name -> Tuple[feed, target, labels, subfolder]
-    dmap: Dict[str, Tuple[Union[LeiFeed, LoreFeed], Any, List[str], Optional[str]]] = dict()
+    # 'deliveries' is a mapping: delivery_name -> tuple[feed, target, labels, subfolder]
+    dmap: dict[str, tuple[LeiFeed | LoreFeed, Any, list[str], str | None]] = dict()
     # Store original strftime templates for refresh (used by GUI for long-running processes)
-    templates: Dict[str, str] = dict()
+    templates: dict[str, str] = dict()
     # Deliveries with mode = 'digest', and when they send
-    schedules: Dict[str, DigestSchedule] = dict()
+    schedules: dict[str, DigestSchedule] = dict()
     # The [summarizers] entries that digests use
-    summarizers: Dict[str, Summarizer] = dict()
-    summarizer_cfg: Dict[str, Any] = ctx.obj.get('config', {}).get('summarizers', {})
+    summarizers: dict[str, Summarizer] = dict()
+    summarizer_cfg: dict[str, Any] = ctx.obj.get('config', {}).get('summarizers', {})
     logger.debug('Mapping deliveries to their feeds and targets')
     # Pre-map deliveries to their feeds and targets for later use.
     for delivery_name, details in deliveries.items():
@@ -1677,8 +1676,8 @@ def lock_all_feeds(ctx: click.Context) -> None:
     Raises:
         FeedLockedError: Another process is using one of the feeds.
     """
-    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
-    locked: List[Union[LeiFeed, LoreFeed]] = []
+    feeds: dict[str, LeiFeed | LoreFeed] = ctx.obj.get('feeds', {})
+    locked: list[LeiFeed | LoreFeed] = []
     try:
         for feed in feeds.values():
             feed.feed_lock()
@@ -1701,19 +1700,19 @@ def abort_if_feed_locked() -> Generator[None, None, None]:
 
 def unlock_all_feeds(ctx: click.Context) -> None:
     """Release exclusive locks on all feeds in the context."""
-    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
+    feeds: dict[str, LeiFeed | LoreFeed] = ctx.obj.get('feeds', {})
     for feed in feeds.values():
         feed.feed_unlock()
 
 
-def digest_history_needs(ctx: click.Context) -> Dict[str, datetime]:
+def digest_history_needs(ctx: click.Context) -> dict[str, datetime]:
     """How far back each lore feed must keep its history for its digests.
 
     Lore clones only keep one week of history, and a digest that was last
     sent longer ago than that would miss messages. Returns a mapping of
     feed key to the oldest commit date that any of its digests needs.
     """
-    needs: Dict[str, datetime] = dict()
+    needs: dict[str, datetime] = dict()
     for dname in ctx.obj.get('digest_schedules', {}):
         feed = ctx.obj['deliveries'][dname][0]
         if not isinstance(feed, LoreFeed):
@@ -1730,18 +1729,18 @@ def digest_history_needs(ctx: click.Context) -> Dict[str, datetime]:
 
 def update_all_feeds(
     ctx: click.Context,
-    status_callback: Optional[Callable[[str], None]] = None,
-) -> Tuple[List[str], List[str]]:
+    status_callback: Callable[[str], None] | None = None,
+) -> tuple[list[str], list[str]]:
     """Update all feeds and return (updated_feeds, initialized_feeds).
 
     Feeds that failed to update are recorded in ctx.obj['failed_feeds'],
     which is replaced on every call.
     """
-    updated_feeds: List[str] = []
-    initialized_feeds: List[str] = []
-    failed_feeds: List[str] = []
+    updated_feeds: list[str] = []
+    initialized_feeds: list[str] = []
+    failed_feeds: list[str] = []
     ctx.obj['failed_feeds'] = failed_feeds
-    feeds: Dict[str, Union[LeiFeed, LoreFeed]] = ctx.obj.get('feeds', {})
+    feeds: dict[str, LeiFeed | LoreFeed] = ctx.obj.get('feeds', {})
     history_needs = digest_history_needs(ctx)
 
     if status_callback:
@@ -1783,10 +1782,10 @@ def retry_all_failed_deliveries(ctx: click.Context) -> None:
     """Retry all previously failed deliveries across all feeds."""
     bozo_set = ctx.obj.get('bozofilter', set())
 
-    # 'deliveries' is a mapping: delivery_name -> Tuple[feed, target, labels, subfolder]
+    # 'deliveries' is a mapping: delivery_name -> tuple[feed, target, labels, subfolder]
     deliveries = ctx.obj['deliveries']
     digest_names = ctx.obj.get('digest_schedules', {})
-    retry_list: List[Tuple[str, Any, Union[LeiFeed, LoreFeed], int, str, List[str], Optional[str]]] = list()
+    retry_list: list[tuple[str, Any, LeiFeed | LoreFeed, int, str, list[str], str | None]] = list()
     for delivery_name, (feed, target, labels, subfolder) in deliveries.items():
         if delivery_name in digest_names:
             # Digests never deliver single messages, not even ones left
@@ -1827,7 +1826,7 @@ def retry_all_failed_deliveries(ctx: click.Context) -> None:
 @click.option('--cfgfile', '-c', help='Path to configuration file.')
 @click.option('-l', '--logfile', default=None, type=click.Path(), help='Path to log file.')
 @click.pass_context
-def main(ctx: click.Context, cfgfile: str, logfile: Optional[click.Path]) -> None:
+def main(ctx: click.Context, cfgfile: str, logfile: click.Path | None) -> None:
     ctx.ensure_object(dict)
 
     # Load configuration file
@@ -1881,7 +1880,7 @@ def main(ctx: click.Context, cfgfile: str, logfile: Optional[click.Path]) -> Non
     ctx.obj['targets'] = dict()
     # 'feeds' is a mapping: feed_key -> feed instance
     ctx.obj['feeds'] = dict()
-    # 'deliveries' is a mapping: delivery_name -> Tuple[feed_instance, target_instance, labels, subfolder]
+    # 'deliveries' is a mapping: delivery_name -> tuple[feed_instance, target_instance, labels, subfolder]
     ctx.obj['deliveries'] = dict()
 
     # Hide progress bar at the DEBUG level
@@ -1898,7 +1897,7 @@ def main(ctx: click.Context, cfgfile: str, logfile: Optional[click.Path]) -> Non
 @main.command()
 @click.argument('target', required=False)
 @click.pass_context
-def auth(ctx: click.Context, target: Optional[str]) -> None:
+def auth(ctx: click.Context, target: str | None) -> None:
     """Authenticate with configured targets.
 
     If TARGET is specified, authenticate only that target.
@@ -2058,9 +2057,9 @@ def perform_pull(
     ctx: click.Context,
     no_update: bool,
     force: bool,
-    delivery_name: Optional[str],
-    status_callback: Optional[Callable[[str], None]] = None,
-) -> Tuple[Dict[str, int], Set[str]]:
+    delivery_name: str | None,
+    status_callback: Callable[[str], None] | None = None,
+) -> tuple[dict[str, int], set[str]]:
     """Execute the pull logic and return changes.
 
     Returns:
@@ -2092,13 +2091,13 @@ def perform_pull(
     retry_all_failed_deliveries(ctx)
     if no_update:
         logger.debug('No-update flag set, skipping feed updates')
-        updated_feeds: List[str] = list()
-        initialized_feeds: List[str] = list()
+        updated_feeds: list[str] = list()
+        initialized_feeds: list[str] = list()
     else:
         updated_feeds, initialized_feeds = update_all_feeds(ctx, status_callback=status_callback)
 
     # Build reverse index once: feed_key -> delivery names
-    feed_to_deliveries: Dict[str, List[str]] = dict()
+    feed_to_deliveries: dict[str, list[str]] = dict()
     for dname, (feed, _, _, _) in ctx.obj['deliveries'].items():
         feed_to_deliveries.setdefault(feed.feed_key, []).append(dname)
 
@@ -2114,7 +2113,7 @@ def perform_pull(
                     logger.info('Initializing delivery state: %s', dname)
                     feed.save_delivery_info(dname)
 
-    run_deliveries: List[str] = list()
+    run_deliveries: list[str] = list()
     if not force:
         logger.debug('Updated feeds: %s', ', '.join(updated_feeds))
         for feed_key in updated_feeds:
@@ -2137,20 +2136,20 @@ def perform_pull(
         return {}, set()
 
     # Build a worklist of updates per target
-    by_target: Dict[str, List[str]] = dict()
+    by_target: dict[str, list[str]] = dict()
     for dname in run_deliveries:
         target_name = ctx.obj['deliveries'][dname][1].identifier
         if target_name not in by_target:
             by_target[target_name] = list()
         by_target[target_name].append(dname)
 
-    changes: Dict[str, int] = dict()
-    unique_msgids: Set[str] = set()
+    changes: dict[str, int] = dict()
+    unique_msgids: set[str] = set()
 
     # Process deliveries now
     for target_name, delivery_names in by_target.items():
         logger.debug('Processing deliveries for target: %s', target_name)
-        run_list: List[Tuple[str, Any, Union[LeiFeed, LoreFeed], int, str, List[str], Optional[str]]] = list()
+        run_list: list[tuple[str, Any, LeiFeed | LoreFeed, int, str, list[str], str | None]] = list()
         for dname in delivery_names:
             feed, target, labels, subfolder = ctx.obj['deliveries'][dname]
             commits = feed.get_latest_commits_for_delivery(dname)
@@ -2173,7 +2172,7 @@ def perform_pull(
         ) as bar:
             # We bail on a target if we have more than 5 consecutive failures
             consecutive_failures = 0
-            prev_dname: Optional[str] = None
+            prev_dname: str | None = None
             for dname, target, feed, epoch, commit, labels, subfolder in bar:
                 if status_callback and dname != prev_dname:
                     status_callback(f'Delivering {format_key_for_display(dname)}...')
@@ -2250,7 +2249,7 @@ def pull(
     no_update: bool,
     force: bool,
     fail_on_feed_error: bool,
-    delivery_name: Optional[str],
+    delivery_name: str | None,
 ) -> None:
     """Pull messages from configured lore and LEI deliveries.
 
@@ -2277,7 +2276,7 @@ def pull(
     else:
         logger.info('Pull complete with no updates.')
 
-    failed_feeds: List[str] = ctx.obj.get('failed_feeds', [])
+    failed_feeds: list[str] = ctx.obj.get('failed_feeds', [])
     if fail_on_feed_error and failed_feeds:
         logger.error('Feeds that failed to update:')
         for feed_key in failed_feeds:
@@ -2308,7 +2307,7 @@ def digest_cmd(
     fail_on_feed_error: bool,
     work: bool,
     estimate: bool,
-    delivery_names: Tuple[str, ...],
+    delivery_names: tuple[str, ...],
 ) -> None:
     """Send the digests that are due.
 
@@ -2322,7 +2321,7 @@ def digest_cmd(
         raise click.UsageError('--estimate only reports, it cannot be used with --work or --force')
     ctx.obj['failed_feeds'] = []
     cfg = ctx.obj.get('config', {})
-    all_deliveries: Dict[str, Any] = cfg.get('deliveries', {})
+    all_deliveries: dict[str, Any] = cfg.get('deliveries', {})
     digests = {name: details for name, details in all_deliveries.items() if details.get('mode') == 'digest'}
     if delivery_names:
         for name in delivery_names:
@@ -2364,7 +2363,7 @@ def digest_cmd(
         close_requests_session()
         ctx.obj['targets'] = {}
 
-    failed_feeds: List[str] = ctx.obj.get('failed_feeds', [])
+    failed_feeds: list[str] = ctx.obj.get('failed_feeds', [])
     if fail_on_feed_error and failed_feeds:
         logger.error('Feeds that failed to update:')
         for feed_key in failed_feeds:
@@ -2377,8 +2376,8 @@ def perform_yank(
     target_name: str,
     msgid_or_url: str,
     thread: bool = False,
-    labels_list: Optional[List[str]] = None,
-) -> Tuple[int, int]:
+    labels_list: list[str] | None = None,
+) -> tuple[int, int]:
     """Perform yank operation (usable from CLI and GUI).
 
     Args:
@@ -2445,7 +2444,7 @@ def perform_yank(
 @click.option('--labels', '-l', multiple=True, help='Labels to apply (repeatable or comma-separated)')
 @click.option('--thread', '-T', is_flag=True, help='Fetch and upload the entire thread')
 @click.argument('msgid_or_url', type=str, nargs=1)
-def yank(ctx: click.Context, target: Optional[str], labels: Tuple[str, ...], thread: bool, msgid_or_url: str) -> None:
+def yank(ctx: click.Context, target: str | None, labels: tuple[str, ...], thread: bool, msgid_or_url: str) -> None:
     """Yank a single message or entire thread to a target."""
     # Get the target service
     config = ctx.obj.get('config', {})
@@ -2539,7 +2538,7 @@ def get_tracking_manifest(ctx: click.Context) -> TrackingManifest:
     return manifest
 
 
-def map_tracked_threads(ctx: click.Context) -> List[str]:
+def map_tracked_threads(ctx: click.Context) -> list[str]:
     """Map active tracked threads as ephemeral deliveries.
 
     Adds tracked threads to ctx.obj['feeds'] and ctx.obj['deliveries']
@@ -2564,7 +2563,7 @@ def map_tracked_threads(ctx: click.Context) -> List[str]:
 
     feeds = ctx.obj.get('feeds', {})
     deliveries = ctx.obj.get('deliveries', {})
-    mapped: List[str] = []
+    mapped: list[str] = []
 
     for tracked in active:
         lei_url = f'lei:{tracked.lei_path}'
@@ -2588,7 +2587,7 @@ def map_tracked_threads(ctx: click.Context) -> List[str]:
     return mapped
 
 
-def update_tracked_thread_activity(ctx: click.Context, changes: Dict[str, int]) -> None:
+def update_tracked_thread_activity(ctx: click.Context, changes: dict[str, int]) -> None:
     """Update tracking manifest activity for tracked threads that had deliveries."""
     manifest = get_tracking_manifest(ctx)
 
@@ -2610,7 +2609,7 @@ def track(ctx: click.Context) -> None:
 @click.option('--target', '-t', default=None, help='Target for deliveries (default: first configured)')
 @click.option('--labels', '-l', multiple=True, help='Labels to apply (repeatable or comma-separated)')
 @click.pass_context
-def track_add(ctx: click.Context, msgid_or_url: str, target: Optional[str], labels: Tuple[str, ...]) -> None:
+def track_add(ctx: click.Context, msgid_or_url: str, target: str | None, labels: tuple[str, ...]) -> None:
     """Start tracking a thread by message ID or lore URL."""
     config = ctx.obj.get('config', {})
     targets = config.get('targets', {})
@@ -2834,7 +2833,7 @@ class DefaultCommandGroup(click.Group):
         super().__init__(*args, **kwargs)
         self.default_cmd_name = default_cmd_name
 
-    def resolve_command(self, ctx: click.Context, args: List[str]) -> Any:
+    def resolve_command(self, ctx: click.Context, args: list[str]) -> Any:
         try:
             return super().resolve_command(ctx, args)
         except click.UsageError:
@@ -2853,7 +2852,7 @@ def subscribe(ctx: click.Context) -> None:
 @click.option('--target', '-t', default=None, help='Target for deliveries (default: first configured)')
 @click.option('--labels', '-l', multiple=True, help='Labels to apply (repeatable or comma-separated)')
 @click.pass_context
-def subscribe_add(ctx: click.Context, url: str, target: Optional[str], labels: Tuple[str, ...]) -> None:
+def subscribe_add(ctx: click.Context, url: str, target: str | None, labels: tuple[str, ...]) -> None:
     """Add a new mailing list subscription.
 
     URL can be a lore.kernel.org URL (e.g. https://lore.kernel.org/lkml/)
@@ -2957,7 +2956,7 @@ def subscribe_list(ctx: click.Context, paused: bool) -> None:
             deliveries = sub_config.get('deliveries', {})
             feed_url = ''
             sub_target = ''
-            sub_labels: List[str] = []
+            sub_labels: list[str] = []
             for fval in feeds.values():
                 feed_url = fval.get('url', '')
             for dval in deliveries.values():
@@ -3090,7 +3089,7 @@ def gui(ctx: click.Context) -> None:
         raise click.Abort() from e
 
 
-def find_tracked_subsystem_config(conf_d: Path, subsystem_name: str) -> Tuple[str, Path]:
+def find_tracked_subsystem_config(conf_d: Path, subsystem_name: str) -> tuple[str, Path]:
     """Find the conf.d file that tracks a subsystem.
 
     The user may supply a substring (e.g., "REGISTER MAP") that was
@@ -3140,10 +3139,10 @@ def find_tracked_subsystem_config(conf_d: Path, subsystem_name: str) -> Tuple[st
 @click.pass_context
 def track_subsystem(
     ctx: click.Context,
-    subsystem_name: Optional[str],
-    maintainers: Optional[str],
-    target: Optional[str],
-    labels: Tuple[str, ...],
+    subsystem_name: str | None,
+    maintainers: str | None,
+    target: str | None,
+    labels: tuple[str, ...],
     since: str,
     threads: bool,
     forget: bool,
@@ -3280,7 +3279,7 @@ def track_subsystem(
     main_config = config.get('main', {})
     catchall_lists_config = main_config.get('catchall_lists')
     if catchall_lists_config is not None:
-        catchall_lists: Set[str] = set(catchall_lists_config)
+        catchall_lists: set[str] = set(catchall_lists_config)
         logger.debug('Using catchall_lists from config: %s', catchall_lists)
     else:
         catchall_lists = set(DEFAULT_CATCHALL_LISTS)
@@ -3316,7 +3315,7 @@ def track_subsystem(
 
     # Build and create queries
     queries_created = 0
-    skipped_patterns: List[str] = []
+    skipped_patterns: list[str] = []
     mailinglist_created = False
     patches_created = False
 
@@ -3427,9 +3426,7 @@ def track_subsystem(
 @click.option('--edit', '-e', 'do_edit', is_flag=True, help='Edit the bozofilter file in $EDITOR')
 @click.option('--list', '-l', 'do_list', is_flag=True, help='List all addresses in the bozofilter')
 @click.pass_context
-def bozofilter(
-    ctx: click.Context, addresses: Optional[str], reason: Optional[str], do_edit: bool, do_list: bool
-) -> None:
+def bozofilter(ctx: click.Context, addresses: str | None, reason: str | None, do_edit: bool, do_list: bool) -> None:
     """Manage the bozofilter for blocking unwanted senders.
 
     The bozofilter is a simple list of email addresses that will be

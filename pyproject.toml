@@ -137,8 +137,7 @@ select = [
     "SIM105",  # https://docs.astral.sh/ruff/rules/suppressible-exception/
     "SIM115",  # https://docs.astral.sh/ruff/rules/open-file-with-context-handler/
     "TC006",   # https://docs.astral.sh/ruff/rules/runtime-cast-value/
-    "UP024",   # https://docs.astral.sh/ruff/rules/os-error-alias/
-    "UP037",   # https://docs.astral.sh/ruff/rules/quoted-annotation/
+    "UP",      # https://docs.astral.sh/ruff/rules/#pyupgrade-up
     "RET505",  # https://docs.astral.sh/ruff/rules/superfluous-else-return/
     "RET506",  # https://docs.astral.sh/ruff/rules/superfluous-else-raise/
     "RET507",  # https://docs.astral.sh/ruff/rules/superfluous-else-continue/

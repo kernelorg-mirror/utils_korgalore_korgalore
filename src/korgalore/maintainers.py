@@ -6,14 +6,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parseaddr
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger('korgalore')
 
 # Default catch-all mailing lists to exclude from subsystem queries.
 # These lists receive copies of most/all kernel patches and would flood
 # subsystem-specific queries with irrelevant messages.
-DEFAULT_CATCHALL_LISTS: List[str] = [
+DEFAULT_CATCHALL_LISTS: list[str] = [
     'linux-kernel@vger.kernel.org',
     'patches@lists.linux.dev',
 ]
@@ -26,7 +25,7 @@ KNOWN_VCS_TYPES = {'git', 'hg', 'quilt', 'stgit', 'topgit'}
 
 # Fields whose value is an address, wrapped in a display name (M:, R:) or
 # followed by a comment (L:), mapped to the SubsystemEntry list it fills.
-EMAIL_FIELDS: Dict[str, str] = {
+EMAIL_FIELDS: dict[str, str] = {
     'M': 'maintainers',
     'R': 'reviewers',
     'L': 'mailing_lists',
@@ -45,7 +44,7 @@ class Tree:
 
     vcs: str
     url: str
-    branch: Optional[str] = None
+    branch: str | None = None
 
 
 def parse_tree(value: str) -> Tree:
@@ -74,15 +73,15 @@ class SubsystemEntry:
     """Represents a subsystem entry from the MAINTAINERS file."""
 
     name: str
-    maintainers: List[str] = field(default_factory=list)  # M: emails
-    reviewers: List[str] = field(default_factory=list)  # R: emails
-    mailing_lists: List[str] = field(default_factory=list)  # L: addresses
-    files: List[str] = field(default_factory=list)  # F: patterns
-    excluded: List[str] = field(default_factory=list)  # X: patterns
-    file_regex: List[str] = field(default_factory=list)  # N: patterns
-    content_regex: List[str] = field(default_factory=list)  # K: patterns
-    status: Optional[str] = None  # S: value
-    trees: List[Tree] = field(default_factory=list)  # T: entries
+    maintainers: list[str] = field(default_factory=list)  # M: emails
+    reviewers: list[str] = field(default_factory=list)  # R: emails
+    mailing_lists: list[str] = field(default_factory=list)  # L: addresses
+    files: list[str] = field(default_factory=list)  # F: patterns
+    excluded: list[str] = field(default_factory=list)  # X: patterns
+    file_regex: list[str] = field(default_factory=list)  # N: patterns
+    content_regex: list[str] = field(default_factory=list)  # K: patterns
+    status: str | None = None  # S: value
+    trees: list[Tree] = field(default_factory=list)  # T: entries
 
 
 def normalize_subsystem_name(name: str) -> str:
@@ -104,7 +103,7 @@ def normalize_subsystem_name(name: str) -> str:
     return key
 
 
-def extract_email(line: str) -> Optional[str]:
+def extract_email(line: str) -> str | None:
     """Extract email address from a maintainer, reviewer or list line.
 
     Handles formats like:
@@ -165,7 +164,7 @@ def has_fields(entry: SubsystemEntry) -> bool:
     )
 
 
-def parse_maintainers(path: Path) -> Dict[str, SubsystemEntry]:
+def parse_maintainers(path: Path) -> dict[str, SubsystemEntry]:
     """Parse entire MAINTAINERS file into dict of entries.
 
     Args:
@@ -175,11 +174,11 @@ def parse_maintainers(path: Path) -> Dict[str, SubsystemEntry]:
         Dict mapping subsystem names to SubsystemEntry objects.
         Entries without any fields are skipped.
     """
-    entries: Dict[str, SubsystemEntry] = {}
-    current_entry: Optional[SubsystemEntry] = None
+    entries: dict[str, SubsystemEntry] = {}
+    current_entry: SubsystemEntry | None = None
     prev_line_empty = True  # Start as true to catch first entry
 
-    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    with open(path, encoding='utf-8', errors='replace') as f:
         for raw_line in f:
             line = raw_line.rstrip('\n')
 
@@ -197,7 +196,7 @@ def parse_maintainers(path: Path) -> Dict[str, SubsystemEntry]:
                     if prefix in EMAIL_FIELDS:
                         email = extract_email(value)
                         if email:
-                            emails: List[str] = getattr(current_entry, EMAIL_FIELDS[prefix])
+                            emails: list[str] = getattr(current_entry, EMAIL_FIELDS[prefix])
                             emails.append(email)
                         else:
                             logger.warning('Ignoring unparsable %s: line in %s: %s', prefix, current_entry.name, value)
@@ -260,7 +259,7 @@ def get_subsystem(path: Path, name: str) -> SubsystemEntry:
             return entry
 
     # Try substring match (case-insensitive)
-    matches: List[Tuple[str, SubsystemEntry]] = []
+    matches: list[tuple[str, SubsystemEntry]] = []
     for entry_name, entry in entries.items():
         if name_upper in entry_name.upper():
             matches.append((entry_name, entry))
@@ -294,7 +293,7 @@ def email_to_list_id(email: str) -> str:
     return email.replace('@', '.')
 
 
-def build_maintainers_query(entry: SubsystemEntry, since: str) -> Optional[str]:
+def build_maintainers_query(entry: SubsystemEntry, since: str) -> str | None:
     """Build lei query for maintainer/reviewer messages.
 
     Args:
@@ -320,8 +319,8 @@ def build_maintainers_query(entry: SubsystemEntry, since: str) -> Optional[str]:
 
 
 def build_mailinglist_query(
-    entry: SubsystemEntry, since: str, catchall_lists: Optional[Set[str]] = None
-) -> Tuple[Optional[str], List[str]]:
+    entry: SubsystemEntry, since: str, catchall_lists: set[str] | None = None
+) -> tuple[str | None, list[str]]:
     """Build lei query for mailing list messages.
 
     Args:
@@ -339,8 +338,8 @@ def build_mailinglist_query(
     if catchall_lists is None:
         catchall_lists = set(DEFAULT_CATCHALL_LISTS)
 
-    excluded: List[str] = []
-    usable_lists: List[str] = []
+    excluded: list[str] = []
+    usable_lists: list[str] = []
 
     for ml in entry.mailing_lists:
         if ml in catchall_lists:
@@ -359,7 +358,7 @@ def build_mailinglist_query(
     return f'{list_query} AND d:{since}..', excluded
 
 
-def build_patches_query(entry: SubsystemEntry, since: str) -> Tuple[Optional[str], List[str]]:
+def build_patches_query(entry: SubsystemEntry, since: str) -> tuple[str | None, list[str]]:
     """Build lei query for patches touching subsystem files.
 
     Args:
@@ -372,9 +371,9 @@ def build_patches_query(entry: SubsystemEntry, since: str) -> Tuple[Optional[str
 
     Note: d: is placed last to work around a lei bug with d: as first param.
     """
-    skipped: List[str] = []
-    include_parts: List[str] = []
-    exclude_parts: List[str] = []
+    skipped: list[str] = []
+    include_parts: list[str] = []
+    exclude_parts: list[str] = []
 
     # Process F: file patterns (preserve trailing slash for directory matching)
     include_parts.extend(f'dfn:{pattern}' for pattern in entry.files if pattern)
@@ -421,7 +420,7 @@ def build_patches_query(entry: SubsystemEntry, since: str) -> Tuple[Optional[str
 def generate_subsystem_config(
     key: str,
     target: str,
-    labels: List[str],
+    labels: list[str],
     lei_base_path: Path,
     since: str,
     subsystem_name: str,

@@ -3,7 +3,7 @@
 import logging
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any
 
 import pytest
 
@@ -57,7 +57,7 @@ def test_normalize_subsystem_name(name: str, expected: str) -> None:
         pytest.param('Name <user+tag@sub.domain.org>', 'user+tag@sub.domain.org', id='complex'),
     ],
 )
-def test_extract_email(value: str, expected: Optional[str]) -> None:
+def test_extract_email(value: str, expected: str | None) -> None:
     assert extract_email(value) == expected
 
 
@@ -203,7 +203,7 @@ def test_email_to_list_id(email: str, expected: str) -> None:
         pytest.param({}, '30.days.ago', None, id='nobody'),
     ],
 )
-def test_build_maintainers_query(kwargs: Dict[str, Any], since: str, expected: Optional[str]) -> None:
+def test_build_maintainers_query(kwargs: dict[str, Any], since: str, expected: str | None) -> None:
     assert build_maintainers_query(SubsystemEntry(name='TEST', **kwargs), since) == expected
 
 
@@ -263,7 +263,7 @@ class TestBuildMailinglistQuery:
         assert excluded == ['linux-kernel@vger.kernel.org']
 
     @pytest.mark.parametrize('catchall', [{'custom@example.com'}, set()], ids=['custom', 'empty'])
-    def test_catchall_override_is_used(self, catchall: Set[str]) -> None:
+    def test_catchall_override_is_used(self, catchall: set[str]) -> None:
         """A custom or empty catchall set replaces the default, so nothing is excluded."""
         entry = SubsystemEntry(name='TEST', mailing_lists=['subsystem@lists.linux.dev', 'linux-kernel@vger.kernel.org'])
         query, excluded = build_mailinglist_query(entry, '30.days.ago', catchall_lists=catchall)
@@ -308,7 +308,7 @@ class TestBuildMailinglistQuery:
         ),
     ],
 )
-def test_build_patches_query(kwargs: Dict[str, Any], query: Optional[str], skipped: List[str]) -> None:
+def test_build_patches_query(kwargs: dict[str, Any], query: str | None, skipped: list[str]) -> None:
     assert build_patches_query(SubsystemEntry(name='TEST', **kwargs), '30.days.ago') == (query, skipped)
 
 
@@ -488,13 +488,13 @@ class TestGetSubsystem:
             pytest.param('802.11', ValueError, 'Ambiguous.*matches 2 entries', id='ambiguous-substring'),
         ],
     )
-    def test_no_single_match(self, shared_maintainers: Path, query: str, exc: Type[Exception], match: str) -> None:
+    def test_no_single_match(self, shared_maintainers: Path, query: str, exc: type[Exception], match: str) -> None:
         with pytest.raises(exc, match=match):
             get_subsystem(shared_maintainers, query)
 
 
 def generate(tmp_path: Path, **overrides: Any) -> str:
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         'key': 'test',
         'target': 'personal',
         'labels': ['INBOX'],
@@ -547,7 +547,7 @@ class TestGenerateSubsystemConfig:
             pytest.param({'include_patches': False}, 'test-patches', 'test-mailinglist', id='no-patches'),
         ],
     )
-    def test_excluded_feed(self, tmp_path: Path, include: Dict[str, bool], gone: str, kept: str) -> None:
+    def test_excluded_feed(self, tmp_path: Path, include: dict[str, bool], gone: str, kept: str) -> None:
         config = tomllib.loads(generate(tmp_path, **include))
         for section in ('feeds', 'deliveries'):
             assert gone not in config.get(section, {})

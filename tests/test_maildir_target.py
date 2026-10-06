@@ -3,7 +3,6 @@
 import logging
 import mailbox
 from pathlib import Path
-from typing import List
 from unittest.mock import patch
 
 import pytest
@@ -168,7 +167,7 @@ class TestMaildirTargetIntegration:
         target = MaildirTarget('integration', str(maildir_path))
         target.connect()
 
-        messages: List[bytes] = [
+        messages: list[bytes] = [
             b'From: alice@example.com\nSubject: Hello\n\nHi there!',
             b'From: bob@example.com\nSubject: Re: Hello\n\nHi back!',
             b"From: charlie@example.com\nSubject: Meeting\n\nLet's meet.",

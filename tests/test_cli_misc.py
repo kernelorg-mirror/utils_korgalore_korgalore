@@ -10,7 +10,6 @@ noise into somebody's debug log.
 """
 
 import io
-from typing import Optional
 
 import click
 import pytest
@@ -45,7 +44,7 @@ from korgalore.cli import progress_file
         'none',
     ],
 )
-def test_format_key_for_display(key: Optional[str], expected: str) -> None:
+def test_format_key_for_display(key: str | None, expected: str) -> None:
     assert format_key_for_display(key) == expected
 
 

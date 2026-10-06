@@ -3,11 +3,11 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, lockf
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from liblore.utils import clean_header, msg_get_subject, parse_message
 
@@ -17,8 +17,8 @@ logger = logging.getLogger('korgalore')
 
 # We use this to cache commit messages to avoid reparsing them multiple times
 # during delivery just to get the subject
-COMMIT_SUBJECT_CACHE: Dict[str, str] = dict()
-LOCKED_FEEDS: Dict[str, Any] = dict()
+COMMIT_SUBJECT_CACHE: dict[str, str] = dict()
+LOCKED_FEEDS: dict[str, Any] = dict()
 # We retry failed deliveries for 5 days and then give up
 RETRY_FAILED_INTERVAL = 5 * 24 * 60 * 60  # 5 days in seconds
 
@@ -37,19 +37,19 @@ class PIFeed:
     STATUS_INITIALIZED: int = 4
 
     def __init__(self, feed_key: str, feed_dir: Path) -> None:
-        self._branch_cache: Dict[str, str] = dict()
-        self._empty_repo_cache: Dict[int, bool] = dict()
+        self._branch_cache: dict[str, str] = dict()
+        self._empty_repo_cache: dict[int, bool] = dict()
         self.feed_key: str = feed_key
         self.feed_dir: Path = feed_dir
         self.feed_type: str = 'unknown'
         self.feed_url: str = ''
 
-    def _read_jsonl_file(self, filepath: Path) -> List[Tuple[Union[int, str], ...]]:
+    def _read_jsonl_file(self, filepath: Path) -> list[tuple[int | str, ...]]:
         """Read a JSONL state file and return a list of tuples."""
-        results: List[Tuple[Union[int, str], ...]] = list()
+        results: list[tuple[int | str, ...]] = list()
         if not filepath.exists():
             return results
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             for raw_line in f:
                 line = raw_line.strip()
                 if not line:
@@ -58,7 +58,7 @@ class PIFeed:
                 results.append(tuple(obj))
         return results
 
-    def _write_jsonl_file(self, filepath: Path, data: List[Tuple[Union[int, str], ...]]) -> None:
+    def _write_jsonl_file(self, filepath: Path, data: list[tuple[int | str, ...]]) -> None:
         """Write a list of tuples to a JSONL state file."""
         if not len(data):
             # Remove the file if it exists
@@ -86,7 +86,7 @@ class PIFeed:
         """Return the path to the git directory for a specific epoch."""
         return self.feed_dir / 'git' / f'{epoch}.git'
 
-    def _append_to_jsonl_file(self, filepath: Path, obj: Tuple[Union[int, str], ...]) -> None:
+    def _append_to_jsonl_file(self, filepath: Path, obj: tuple[int | str, ...]) -> None:
         """Append a tuple as a JSONL entry to a state file."""
         with open(filepath, 'a') as f:
             line = json.dumps(obj)
@@ -150,7 +150,7 @@ class PIFeed:
         delivery_name = self.feed_dir.name
 
         # Read the legacy info
-        with open(legacy_info_path, 'r') as f:
+        with open(legacy_info_path) as f:
             lgi = json.load(f)
 
         latest_commit = lgi.get('last')
@@ -163,7 +163,7 @@ class PIFeed:
             success=True,
         )
 
-    def _get_state_file_path(self, delivery_name: Optional[str] = None, suffix: str = 'info') -> Path:
+    def _get_state_file_path(self, delivery_name: str | None = None, suffix: str = 'info') -> Path:
         if not delivery_name:
             return self.feed_dir / f'korgalore.{suffix}'
         return self.feed_dir / f'korgalore.{delivery_name}.{suffix}'
@@ -200,13 +200,13 @@ class PIFeed:
         self._branch_cache[gitdir_str] = branch_name
         return branch_name
 
-    def find_epochs(self) -> List[int]:
+    def find_epochs(self) -> list[int]:
         """Find all epoch directories in the feed and return sorted list."""
         epochs_dir = self.feed_dir / 'git'
         if not epochs_dir.exists():
             raise PublicInboxError(f'No existing epochs found in {epochs_dir}.')
         # List this directory for existing epochs
-        existing_epochs: List[int] = list()
+        existing_epochs: list[int] = list()
         for item in epochs_dir.iterdir():
             if item.is_dir() and item.name.endswith('.git'):
                 epoch_str = item.name.replace('.git', '')
@@ -224,7 +224,7 @@ class PIFeed:
         epochs = self.find_epochs()
         return max(epochs)
 
-    def get_all_commits_in_epoch(self, epoch: int) -> List[str]:
+    def get_all_commits_in_epoch(self, epoch: int) -> list[str]:
         """Return all commits in an epoch in chronological order."""
         gitdir = self.get_gitdir(epoch)
         branch = self._get_default_branch(gitdir)
@@ -277,7 +277,7 @@ class PIFeed:
         # Holds the parsed message for whichever commit we settle on. Tracking
         # it separately from the loop variable keeps it unambiguously bound on
         # both paths out of the loop.
-        matched_msg: Optional[EmailMessage] = None
+        matched_msg: EmailMessage | None = None
         for commit in possible_commits:
             raw_message = self.get_message_at_commit(epoch, commit)
             msg = parse_message(raw_message)
@@ -305,7 +305,7 @@ class PIFeed:
         self.save_delivery_info(delivery_name, epoch, latest_commit=last_commit, message=matched_msg)
         return last_commit
 
-    def get_latest_commits_for_delivery(self, delivery_name: str) -> List[Tuple[int, str]]:
+    def get_latest_commits_for_delivery(self, delivery_name: str) -> list[tuple[int, str]]:
         """Return list of (epoch, commit) tuples for new commits since last delivery."""
         try:
             dinfo = self.load_delivery_info(delivery_name)
@@ -351,7 +351,7 @@ class PIFeed:
 
         return new_commits
 
-    def get_commits_since(self, since: datetime) -> List[Tuple[int, str]]:
+    def get_commits_since(self, since: datetime) -> list[tuple[int, str]]:
         """Return (epoch, commit) tuples for the commits made after since.
 
         Every local epoch is walked, oldest first, so a feed that rolled
@@ -359,7 +359,7 @@ class PIFeed:
         commit date, which public-inbox sets when a message arrives, so it
         is not affected by wrong Date headers.
         """
-        commits: List[Tuple[int, str]] = []
+        commits: list[tuple[int, str]] = []
         for epoch in self.find_epochs():
             if self.is_empty_repo(epoch):
                 continue
@@ -512,7 +512,7 @@ class PIFeed:
         except KeyError as e:
             raise PublicInboxError(f"Feed '{key}' is not locked.") from e
 
-    def get_failed_commits_for_delivery(self, delivery_name: str) -> List[Tuple[int, str]]:
+    def get_failed_commits_for_delivery(self, delivery_name: str) -> list[tuple[int, str]]:
         """Return list of (epoch, commit) tuples that previously failed delivery."""
         state_file = self._get_state_file_path(delivery_name, 'failed')
         failed = self._read_jsonl_file(state_file)
@@ -523,7 +523,7 @@ class PIFeed:
         delivery_name: str,
         epoch: int,
         commit_hash: str,
-        message: Optional[bytes] = None,
+        message: bytes | None = None,
         was_failing: bool = False,
     ) -> None:
         """Mark a commit as successfully delivered and remove from failed list if present."""
@@ -568,7 +568,7 @@ class PIFeed:
         # korgalore.{delivery_name}.failed file.
         state_file = self._get_state_file_path(delivery_name, 'failed')
         failed = self._read_jsonl_file(state_file)
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         # Find existing entry by index (avoids O(n) remove() in loop)
         found_idx = None
         for idx, entry in enumerate(failed):
@@ -606,10 +606,10 @@ class PIFeed:
     def save_delivery_info(
         self,
         delivery_name: str,
-        epoch: Optional[int] = None,
-        latest_commit: Optional[str] = None,
-        message: Optional[Union[bytes, EmailMessage]] = None,
-        digest_sent: Optional[datetime] = None,
+        epoch: int | None = None,
+        latest_commit: str | None = None,
+        message: bytes | EmailMessage | None = None,
+        digest_sent: datetime | None = None,
     ) -> None:
         """Save delivery progress state to disk.
 
@@ -636,8 +636,8 @@ class PIFeed:
         self,
         epoch: int,
         commit: str,
-        message: Optional[Union[bytes, EmailMessage]] = None,
-    ) -> Dict[str, str]:
+        message: bytes | EmailMessage | None = None,
+    ) -> dict[str, str]:
         """Build the state entry that points a delivery at this commit."""
         gitdir = self.get_gitdir(epoch)
         gitargs = ['show', '-s', '--format=%ci', commit]
@@ -675,8 +675,8 @@ class PIFeed:
     def save_delivery_entry(
         self,
         delivery_name: str,
-        pointer: Optional[Dict[str, Any]],
-        digest_sent: Optional[datetime] = None,
+        pointer: dict[str, Any] | None,
+        digest_sent: datetime | None = None,
     ) -> None:
         """Write a pointer made by make_delivery_entry() to the state file.
 
@@ -693,7 +693,7 @@ class PIFeed:
 
         self._atomic_write(state_file, json.dumps(state_info, indent=2))
 
-    def get_delivery_info_for_epoch(self, delivery_name: str, epoch: Optional[int] = None) -> Dict[str, Any]:
+    def get_delivery_info_for_epoch(self, delivery_name: str, epoch: int | None = None) -> dict[str, Any]:
         """Retrieve saved delivery state for a specific epoch."""
         info = self.load_delivery_info(delivery_name)
         if epoch is None:
@@ -707,35 +707,35 @@ class PIFeed:
             if not gitdir.exists():
                 raise StateError(f'Epoch {epoch} does not exist in feed {self.feed_dir}.')
             raise StateError(f'No delivery info found for epoch {epoch} in delivery {delivery_name}.')
-        epoch_info: Dict[str, Any] = info['epochs'][str(epoch)]
+        epoch_info: dict[str, Any] = info['epochs'][str(epoch)]
         return epoch_info
 
-    def load_delivery_info(self, delivery_name: str) -> Dict[str, Any]:
+    def load_delivery_info(self, delivery_name: str) -> dict[str, Any]:
         """Load delivery progress state from disk."""
         state_file = self._get_state_file_path(delivery_name, 'info')
         if not state_file.exists():
             logger.debug('Initializing new state file for delivery: %s', delivery_name)
             self.save_delivery_info(delivery_name)
 
-        with open(state_file, 'r') as gf:
-            info: Dict[str, Any] = json.load(gf)
+        with open(state_file) as gf:
+            info: dict[str, Any] = json.load(gf)
 
         return info
 
-    def _read_delivery_info(self, delivery_name: str) -> Optional[Dict[str, Any]]:
+    def _read_delivery_info(self, delivery_name: str) -> dict[str, Any] | None:
         """Read the delivery state file as it is, or None if there is none."""
         state_file = self._get_state_file_path(delivery_name, 'info')
         if not state_file.exists():
             return None
-        with open(state_file, 'r') as gf:
-            info: Dict[str, Any] = json.load(gf)
+        with open(state_file) as gf:
+            info: dict[str, Any] = json.load(gf)
         return info
 
     def get_digest_job_dir(self, delivery_name: str) -> Path:
         """Where a digest delivery keeps a digest until it is sent."""
         return self._get_state_file_path(delivery_name, 'digest-job')
 
-    def find_history_gap(self, delivery_name: str, commits: List[Tuple[int, str]]) -> Optional[datetime]:
+    def find_history_gap(self, delivery_name: str, commits: list[tuple[int, str]]) -> datetime | None:
         """Find out if commits between the delivery pointer and HEAD are missing.
 
         Lore clones are shallow, and every fetch moves the cut to one week
@@ -779,7 +779,7 @@ class PIFeed:
         info = self._read_delivery_info(delivery_name)
         return bool(info and info.get('epochs'))
 
-    def load_digest_sent(self, delivery_name: str) -> Optional[datetime]:
+    def load_digest_sent(self, delivery_name: str) -> datetime | None:
         """Return when the last digest of a delivery was sent, or None if never."""
         info = self._read_delivery_info(delivery_name)
         if info is None:
@@ -793,7 +793,7 @@ class PIFeed:
         except ValueError as e:
             raise StateError(f'Bad digest last_sent {value!r} in {state_file}') from e
 
-    def get_digest_history_start(self, delivery_name: str) -> Optional[datetime]:
+    def get_digest_history_start(self, delivery_name: str) -> datetime | None:
         """How far back a digest delivery needs the feed history.
 
         The next digest starts at the pointer, so its commit must stay in
@@ -806,7 +806,7 @@ class PIFeed:
         info = self._read_delivery_info(delivery_name)
         if not info:
             return None
-        starts: List[datetime] = []
+        starts: list[datetime] = []
         last_sent = self.load_digest_sent(delivery_name)
         if last_sent is not None:
             starts.append(last_sent)
@@ -822,7 +822,7 @@ class PIFeed:
             return None
         return min(starts) - timedelta(days=1)
 
-    def feed_updated(self, epoch: Optional[int] = None) -> bool:
+    def feed_updated(self, epoch: int | None = None) -> bool:
         """Check if feed has new commits since last recorded state."""
         try:
             feed_state = self.load_feed_state()
@@ -835,7 +835,7 @@ class PIFeed:
             if str(epoch) not in epochs:
                 # No state for this epoch, so treat as updated
                 return True
-            known_top_commit: Optional[str] = epochs[str(epoch)].get('latest_commit')
+            known_top_commit: str | None = epochs[str(epoch)].get('latest_commit')
             current_top_commit = self.get_top_commit(epoch)
 
             return known_top_commit != current_top_commit
@@ -853,7 +853,7 @@ class PIFeed:
 
         return False
 
-    def load_feed_state(self) -> Dict[str, Any]:
+    def load_feed_state(self) -> dict[str, Any]:
         """Load feed-level state (epochs and metadata) from disk."""
         state_file = self._get_state_file_path(delivery_name=None, suffix='feed')
 
@@ -862,14 +862,12 @@ class PIFeed:
             if not state_file.exists():
                 raise StateError(f'Feed state not found: {state_file}')
 
-        with open(state_file, 'r') as f:
+        with open(state_file) as f:
             result = json.load(f)
             assert isinstance(result, dict)
             return result
 
-    def save_feed_state(
-        self, epoch: Optional[int] = None, latest_commit: Optional[str] = None, success: bool = True
-    ) -> None:
+    def save_feed_state(self, epoch: int | None = None, latest_commit: str | None = None, success: bool = True) -> None:
         """Save feed-level state to disk."""
         state_file = self._get_state_file_path(delivery_name=None, suffix='feed')
 
@@ -879,9 +877,9 @@ class PIFeed:
         if latest_commit is None:
             latest_commit = self.get_top_commit(epoch)
 
-        state: Dict[str, Any]
+        state: dict[str, Any]
         if state_file.exists():
-            with open(state_file, 'r') as f:
+            with open(state_file) as f:
                 state = json.load(f)
         else:
             state = {
@@ -893,7 +891,7 @@ class PIFeed:
             }
 
         state['epochs'][str(epoch)] = {
-            'last_update': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S %z'),
+            'last_update': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S %z'),
             'update_successful': success,
             'latest_commit': latest_commit,
         }

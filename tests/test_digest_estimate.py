@@ -7,7 +7,7 @@ leaves no trace: no job, no saved state, no cached summaries.
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -42,10 +42,10 @@ def repo(repo: InboxRepo) -> InboxRepo:
 def estimate(
     repo: InboxRepo,
     cache: SummaryCache,
-    fake: Optional[RecordingSummarizer] = None,
+    fake: RecordingSummarizer | None = None,
     schedule: DigestSchedule = SUMMARIZED,
     **kwargs: Any,
-) -> List[str]:
+) -> list[str]:
     kwargs.setdefault('now', NOW)
     return estimate_digest(DNAME, repo.feed(), schedule, fake, cache, **kwargs)
 
