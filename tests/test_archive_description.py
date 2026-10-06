@@ -8,6 +8,9 @@ failing to write one must never raise.
 """
 
 from pathlib import Path
+from typing import Optional
+
+import pytest
 
 from korgalore.tracking import write_archive_description
 
@@ -19,28 +22,27 @@ def read_description(archive: Path) -> str:
 class TestWriteArchiveDescription:
     """Writing public-inbox descriptions into lei-created v2 archives."""
 
-    def test_writes_single_trailing_newline(self, tmp_path: Path) -> None:
-        write_archive_description(tmp_path, 'DOCUMENTATION patches')
+    @pytest.mark.parametrize(
+        ('given', 'expected'),
+        [
+            pytest.param('DOCUMENTATION patches', 'DOCUMENTATION patches\n', id='single-trailing-newline'),
+            # public-inbox flattens the file anyway, so write it already flat
+            pytest.param(
+                '  [PATCH v2 1/3]\tadd\n\n  driver  ', '[PATCH v2 1/3] add driver\n', id='collapses-whitespace'
+            ),
+            # Subjects carry maintainer names, which are routinely non-ASCII
+            pytest.param('Café patches from Ævar', 'Café patches from Ævar\n', id='non-ascii'),
+            # An empty file reads back as missing, so nothing is written
+            pytest.param('   \n\t ', None, id='blank-writes-nothing'),
+        ],
+    )
+    def test_description_file(self, tmp_path: Path, given: str, expected: Optional[str]) -> None:
+        write_archive_description(tmp_path, given)
 
-        assert read_description(tmp_path) == 'DOCUMENTATION patches\n'
-
-    def test_collapses_whitespace_to_one_line(self, tmp_path: Path) -> None:
-        """public-inbox flattens the file anyway, so write it already flat."""
-        write_archive_description(tmp_path, '  [PATCH v2 1/3]\tadd\n\n  driver  ')
-
-        assert read_description(tmp_path) == '[PATCH v2 1/3] add driver\n'
-
-    def test_preserves_non_ascii(self, tmp_path: Path) -> None:
-        """Subjects carry maintainer names, which are routinely non-ASCII."""
-        write_archive_description(tmp_path, 'Café patches from Ævar')
-
-        assert read_description(tmp_path) == 'Café patches from Ævar\n'
-
-    def test_blank_description_writes_nothing(self, tmp_path: Path) -> None:
-        """An empty file reads back as missing, so skip it and keep the dir clean."""
-        write_archive_description(tmp_path, '   \n\t ')
-
-        assert not (tmp_path / 'description').exists()
+        if expected is None:
+            assert not (tmp_path / 'description').exists()
+        else:
+            assert read_description(tmp_path) == expected
 
     def test_overwrites_previous_description(self, tmp_path: Path) -> None:
         write_archive_description(tmp_path, 'old name')

@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import click
 
 from korgalore.cli import perform_yank
+from tests.digest_helpers import make_ctx
 
 
 def _mbox_message(msgid: str, listid: str, body: str) -> bytes:
@@ -32,12 +33,7 @@ def _mbox_message(msgid: str, listid: str, body: str) -> bytes:
 
 def _make_context() -> click.Context:
     """Create a minimal Click context for perform_yank."""
-    ctx = click.Context(click.Command('test'))
-    ctx.ensure_object(dict)
-    ctx.obj['config'] = {'targets': {}}
-    ctx.obj['targets'] = {}
-    ctx.obj['hide_bar'] = True
-    return ctx
+    return make_ctx({'config': {'targets': {}}, 'targets': {}, 'hide_bar': True})
 
 
 def _imported(target: MagicMock) -> List[bytes]:
@@ -54,21 +50,24 @@ class TestYankThreadDeduplication:
     def test_crossposted_message_delivered_once(
         self, mock_get_target: MagicMock, mock_get_node: MagicMock, _mock_close: MagicMock
     ) -> None:
-        """The same Message-ID arriving from two lists yields one delivery."""
-        mbox = _mbox_message('one@example.com', 'linux-crypto.vger.kernel.org', 'first message') + _mbox_message(
-            'two@example.com', 'linux-crypto.vger.kernel.org', 'second message'
+        """The same Message-ID arriving from two lists yields one delivery, in mbox order."""
+        mbox = b''.join(
+            _mbox_message(f'msg{n}@example.com', 'linux-crypto.vger.kernel.org', f'body {n}') for n in range(1, 4)
         )
         # The cross-posted copy of the first message, from another list.
-        mbox += _mbox_message('one@example.com', 'crypto.lists.example.com', 'first message')
+        mbox += _mbox_message('msg1@example.com', 'crypto.lists.example.com', 'body 1')
 
         target = MagicMock()
         mock_get_target.return_value = target
         mock_get_node.return_value.get_mbox_by_msgid.return_value = mbox
 
-        uploaded, failed = perform_yank(_make_context(), 'local', '<one@example.com>', thread=True, labels_list=[])
+        uploaded, failed = perform_yank(_make_context(), 'local', '<msg1@example.com>', thread=True, labels_list=[])
 
-        assert (uploaded, failed) == (2, 0)
-        assert target.import_message.call_count == 2
+        assert (uploaded, failed) == (3, 0)
+        delivered = _imported(target)
+        assert len(delivered) == 3
+        # Deduplication must not reorder a thread
+        assert [b'body 1' in delivered[0], b'body 2' in delivered[1], b'body 3' in delivered[2]] == [True] * 3
 
     @patch('korgalore.cli.close_requests_session')
     @patch('korgalore.cli.get_lore_node')
@@ -95,24 +94,3 @@ class TestYankThreadDeduplication:
         assert len(delivered) == 1
         assert b'pristine copy' in delivered[0]
         assert b'MANGLED' not in delivered[0]
-
-    @patch('korgalore.cli.close_requests_session')
-    @patch('korgalore.cli.get_lore_node')
-    @patch('korgalore.cli.get_target')
-    def test_distinct_messages_keep_mbox_order(
-        self, mock_get_target: MagicMock, mock_get_node: MagicMock, _mock_close: MagicMock
-    ) -> None:
-        """Deduplication must not reorder a thread."""
-        mbox = b''.join(
-            _mbox_message(f'msg{n}@example.com', 'linux-crypto.vger.kernel.org', f'body {n}') for n in range(1, 4)
-        )
-
-        target = MagicMock()
-        mock_get_target.return_value = target
-        mock_get_node.return_value.get_mbox_by_msgid.return_value = mbox
-
-        uploaded, failed = perform_yank(_make_context(), 'local', '<msg1@example.com>', thread=True, labels_list=[])
-
-        assert (uploaded, failed) == (3, 0)
-        delivered = _imported(target)
-        assert [b'body 1' in delivered[0], b'body 2' in delivered[1], b'body 3' in delivered[2]] == [True] * 3

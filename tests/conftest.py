@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -64,31 +64,53 @@ def temp_feed_dir(tmp_path: Path) -> Path:
     return feed_dir
 
 
-@pytest.fixture
-def mock_feed(temp_feed_dir: Path) -> 'PIFeed':
-    """Create a PIFeed instance with mocked git operations."""
+def make_pi_feed(
+    feed_dir: Path,
+    key: str = 'test-feed',
+    highest_epoch: Optional[int] = 0,
+    top_commit: Optional[str] = 'abc123',
+    subject: Optional[str] = 'Test subject for {commitish}',
+    default_branch: Optional[str] = None,
+) -> PIFeed:
+    """A PIFeed with feed_type 'test', for tests that need no archive.
+
+    Each keyword stubs out the matching git lookup. Pass None to keep the
+    real implementation, which reads the repositories under feed_dir:
+
+    - highest_epoch: what get_highest_epoch() returns
+    - top_commit: what get_top_commit() returns
+    - subject: template for get_subject_at_commit(), given ``commitish``
+    - default_branch: what _get_default_branch() returns, which saves a git
+      call per lookup when run_git_command is mocked
+    """
     from korgalore.pi_feed import PIFeed
 
-    class TestPIFeed(PIFeed):
-        """PIFeed subclass for testing that doesn't require real git repos."""
-
-        def __init__(self, feed_dir: Path) -> None:
-            super().__init__(feed_key='test-feed', feed_dir=feed_dir)
+    class StubPIFeed(PIFeed):
+        def __init__(self) -> None:
+            super().__init__(feed_key=key, feed_dir=feed_dir)
             self.feed_type = 'test'
 
         def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-            """Mock implementation that returns a test subject."""
-            return f'Test subject for {commitish}'
+            if subject is None:
+                return super().get_subject_at_commit(epoch, commitish)
+            return subject.format(commitish=commitish)
 
         def get_highest_epoch(self) -> int:
-            """Mock implementation."""
-            return 0
+            return super().get_highest_epoch() if highest_epoch is None else highest_epoch
 
         def get_top_commit(self, epoch: int) -> str:
-            """Mock implementation."""
-            return 'abc123'
+            return super().get_top_commit(epoch) if top_commit is None else top_commit
 
-    return TestPIFeed(temp_feed_dir)
+        def _get_default_branch(self, gitdir: Path) -> str:
+            return super()._get_default_branch(gitdir) if default_branch is None else default_branch
+
+    return StubPIFeed()
+
+
+@pytest.fixture
+def mock_feed(temp_feed_dir: Path) -> PIFeed:
+    """A PIFeed with mocked git lookups, over an empty feed directory."""
+    return make_pi_feed(temp_feed_dir)
 
 
 @pytest.fixture

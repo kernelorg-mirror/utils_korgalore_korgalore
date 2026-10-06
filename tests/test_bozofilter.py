@@ -1,12 +1,13 @@
 """Tests for the bozofilter module."""
 
 from pathlib import Path
-from typing import cast
+from typing import Optional, Set, cast
+
+import pytest
 
 from korgalore.bozofilter import (
     add_to_bozofilter,
     extract_email_address,
-    get_bozofilter_path,
     is_bozofied,
     load_bozofilter,
 )
@@ -15,48 +16,16 @@ from korgalore.bozofilter import (
 class TestLoadBozofilter:
     """Tests for load_bozofilter function."""
 
-    def test_empty_when_file_missing(self, tmp_path: Path) -> None:
-        """Returns empty set when bozofilter file doesn't exist."""
-        result = load_bozofilter(tmp_path)
-        assert result == set()
-
-    def test_empty_when_file_empty(self, tmp_path: Path) -> None:
-        """Returns empty set when bozofilter file is empty."""
-        (tmp_path / 'bozofilter.txt').touch()
-        result = load_bozofilter(tmp_path)
-        assert result == set()
-
-    def test_parses_simple_addresses(self, tmp_path: Path) -> None:
-        """Parses simple email addresses."""
-        content = 'spam@example.com\ntroll@example.org\n'
-        (tmp_path / 'bozofilter.txt').write_text(content)
-        result = load_bozofilter(tmp_path)
-        assert result == {'spam@example.com', 'troll@example.org'}
-
-    def test_skips_comment_lines(self, tmp_path: Path) -> None:
-        """Skips lines that start with #."""
-        content = '# This is a comment\nspam@example.com\n# Another comment\n'
-        (tmp_path / 'bozofilter.txt').write_text(content)
-        result = load_bozofilter(tmp_path)
-        assert result == {'spam@example.com'}
-
-    def test_strips_trailing_comments(self, tmp_path: Path) -> None:
-        """Strips trailing comments from entries."""
-        content = 'spam@example.com # sends junk\ntroll@example.org # annoying\n'
-        (tmp_path / 'bozofilter.txt').write_text(content)
-        result = load_bozofilter(tmp_path)
-        assert result == {'spam@example.com', 'troll@example.org'}
+    @pytest.mark.parametrize('content', [None, ''], ids=['file-missing', 'file-empty'])
+    def test_empty(self, tmp_path: Path, content: Optional[str]) -> None:
+        """Returns empty set when the bozofilter file is missing or empty."""
+        if content is not None:
+            (tmp_path / 'bozofilter.txt').write_text(content)
+        assert load_bozofilter(tmp_path) == set()
 
     def test_lowercases_addresses(self, tmp_path: Path) -> None:
         """Normalizes addresses to lowercase."""
         content = 'SPAM@EXAMPLE.COM\nTroll@Example.Org\n'
-        (tmp_path / 'bozofilter.txt').write_text(content)
-        result = load_bozofilter(tmp_path)
-        assert result == {'spam@example.com', 'troll@example.org'}
-
-    def test_skips_blank_lines(self, tmp_path: Path) -> None:
-        """Skips blank lines."""
-        content = 'spam@example.com\n\n\ntroll@example.org\n'
         (tmp_path / 'bozofilter.txt').write_text(content)
         result = load_bozofilter(tmp_path)
         assert result == {'spam@example.com', 'troll@example.org'}
@@ -86,16 +55,11 @@ bot2@example.net
 class TestAddToBozofilter:
     """Tests for add_to_bozofilter function."""
 
-    def test_creates_file_if_missing(self, tmp_path: Path) -> None:
-        """Creates bozofilter file if it doesn't exist."""
+    def test_creates_file_with_single_address(self, tmp_path: Path) -> None:
+        """Creates the bozofilter file if missing and adds the address to it."""
         added = add_to_bozofilter(tmp_path, ['spam@example.com'])
         assert added == 1
         assert (tmp_path / 'bozofilter.txt').exists()
-
-    def test_adds_single_address(self, tmp_path: Path) -> None:
-        """Adds a single address to empty filter."""
-        added = add_to_bozofilter(tmp_path, ['spam@example.com'])
-        assert added == 1
         result = load_bozofilter(tmp_path)
         assert 'spam@example.com' in result
 
@@ -143,78 +107,39 @@ class TestAddToBozofilter:
 class TestExtractEmailAddress:
     """Tests for extract_email_address function."""
 
-    def test_extracts_from_angle_brackets(self) -> None:
-        """Extracts address from angle bracket format."""
-        result = extract_email_address('John Doe <john@example.com>')
-        assert result == 'john@example.com'
-
-    def test_extracts_bare_address(self) -> None:
-        """Extracts bare email address."""
-        result = extract_email_address('john@example.com')
-        assert result == 'john@example.com'
-
-    def test_lowercases_result(self) -> None:
-        """Returns lowercase address."""
-        result = extract_email_address('JOHN@EXAMPLE.COM')
-        assert result == 'john@example.com'
-
-    def test_returns_none_for_empty(self) -> None:
-        """Returns None for empty input."""
-        assert extract_email_address('') is None
-        # Passing None is not part of the signature, but callers feed this
-        # straight from header lookups, so the guard has to hold.
-        assert extract_email_address(cast(str, None)) is None
-
-    def test_handles_complex_names(self) -> None:
-        """Handles names with special characters."""
-        result = extract_email_address('"Doe, John" <john@example.com>')
-        assert result == 'john@example.com'
-
-    def test_handles_no_name(self) -> None:
-        """Handles just angle brackets without name."""
-        result = extract_email_address('<john@example.com>')
-        assert result == 'john@example.com'
+    @pytest.mark.parametrize(
+        ('header', 'expected'),
+        [
+            pytest.param('John Doe <john@example.com>', 'john@example.com', id='angle-brackets'),
+            pytest.param('john@example.com', 'john@example.com', id='bare-address'),
+            pytest.param('JOHN@EXAMPLE.COM', 'john@example.com', id='lowercased'),
+            pytest.param('"Doe, John" <john@example.com>', 'john@example.com', id='complex-name'),
+            pytest.param('<john@example.com>', 'john@example.com', id='no-name'),
+            pytest.param('', None, id='empty'),
+            # Passing None is not part of the signature, but callers feed this
+            # straight from header lookups, so the guard has to hold.
+            pytest.param(cast(str, None), None, id='none'),
+        ],
+    )
+    def test_extract(self, header: str, expected: Optional[str]) -> None:
+        assert extract_email_address(header) == expected
 
 
 class TestIsBozofied:
     """Tests for is_bozofied function."""
 
-    def test_returns_false_for_empty_filter(self) -> None:
-        """Returns False when filter is empty."""
-        assert is_bozofied('spam@example.com', set()) is False
-
-    def test_matches_exact_address(self) -> None:
-        """Matches exact email address."""
-        bozo = {'spam@example.com'}
-        assert is_bozofied('spam@example.com', bozo) is True
-
-    def test_matches_with_display_name(self) -> None:
-        """Matches when From header has display name."""
-        bozo = {'spam@example.com'}
-        assert is_bozofied('Spammer <spam@example.com>', bozo) is True
-
-    def test_case_insensitive_match(self) -> None:
-        """Matches regardless of case."""
-        bozo = {'spam@example.com'}
-        assert is_bozofied('SPAM@EXAMPLE.COM', bozo) is True
-        assert is_bozofied('Spammer <SPAM@Example.Com>', bozo) is True
-
-    def test_no_match_returns_false(self) -> None:
-        """Returns False when address not in filter."""
-        bozo = {'spam@example.com'}
-        assert is_bozofied('good@example.com', bozo) is False
-        assert is_bozofied('Good User <good@example.com>', bozo) is False
-
-    def test_handles_empty_header(self) -> None:
-        """Returns False for empty From header."""
-        bozo = {'spam@example.com'}
-        assert is_bozofied('', bozo) is False
-
-
-class TestGetBozofilterPath:
-    """Tests for get_bozofilter_path function."""
-
-    def test_returns_correct_path(self, tmp_path: Path) -> None:
-        """Returns correct path in config directory."""
-        result = get_bozofilter_path(tmp_path)
-        assert result == tmp_path / 'bozofilter.txt'
+    @pytest.mark.parametrize(
+        ('header', 'bozo', 'expected'),
+        [
+            pytest.param('spam@example.com', set(), False, id='empty-filter'),
+            pytest.param('spam@example.com', {'spam@example.com'}, True, id='exact-address'),
+            pytest.param('Spammer <spam@example.com>', {'spam@example.com'}, True, id='display-name'),
+            pytest.param('SPAM@EXAMPLE.COM', {'spam@example.com'}, True, id='upper-case'),
+            pytest.param('Spammer <SPAM@Example.Com>', {'spam@example.com'}, True, id='upper-case-display-name'),
+            pytest.param('good@example.com', {'spam@example.com'}, False, id='no-match'),
+            pytest.param('Good User <good@example.com>', {'spam@example.com'}, False, id='no-match-display-name'),
+            pytest.param('', {'spam@example.com'}, False, id='empty-header'),
+        ],
+    )
+    def test_is_bozofied(self, header: str, bozo: Set[str], expected: bool) -> None:
+        assert is_bozofied(header, bozo) is expected

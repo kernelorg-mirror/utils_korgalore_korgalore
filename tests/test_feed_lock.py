@@ -5,67 +5,17 @@ command typed by hand finds the feeds busy. It should say so in one
 line, not with a traceback, and leave no feed locked behind it.
 """
 
-import subprocess
-import sys
-from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
-from korgalore import FeedLockedError, PublicInboxError
+from korgalore import FeedLockedError
 from korgalore.cli import digest_cmd, lock_all_feeds, pull
-from korgalore.pi_feed import LOCKED_FEEDS, PIFeed
 from tests.digest_helpers import make_ctx
 
-# Holds the lock in another process, because a process never blocks on
-# its own POSIX locks
-_HOLD_LOCK = """
-import sys
-from fcntl import LOCK_EX, lockf
-fh = open(sys.argv[1], 'w')
-lockf(fh, LOCK_EX)
-print('locked', flush=True)
-sys.stdin.read()
-"""
-
 BUSY = FeedLockedError("Another kgl process is using feed 'git' (/x/git). Try again when it is done.")
-
-
-@pytest.fixture
-def held_lock(temp_feed_dir: Path) -> Iterator[None]:
-    """Another process holds the lock of temp_feed_dir until the test ends."""
-    holder = subprocess.Popen(
-        [sys.executable, '-c', _HOLD_LOCK, str(temp_feed_dir / 'korgalore.lock')],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert holder.stdout is not None
-        assert holder.stdout.readline() == 'locked\n'
-        yield
-    finally:
-        holder.communicate('')
-
-
-class TestFeedLock:
-    """Tests for PIFeed.feed_lock() when the feed is busy."""
-
-    @pytest.mark.usefixtures('held_lock')
-    def test_busy_feed(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """The error names the feed and says what to do."""
-        with pytest.raises(FeedLockedError) as info:
-            mock_feed.feed_lock()
-        assert str(info.value) == (
-            f"Another kgl process is using feed 'test-feed' ({temp_feed_dir}). Try again when it is done."
-        )
-        assert str(temp_feed_dir) not in LOCKED_FEEDS
-
-    def test_still_a_public_inbox_error(self) -> None:
-        """Code that catches PublicInboxError keeps working."""
-        assert issubclass(FeedLockedError, PublicInboxError)
 
 
 class TestLockAllFeeds:

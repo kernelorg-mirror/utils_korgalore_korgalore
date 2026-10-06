@@ -1,80 +1,74 @@
 """Tests for RawMessage wrapper class."""
 
+import email
+from email.utils import parsedate_to_datetime
+from typing import Optional
+from unittest.mock import patch
+
+import pytest
+from liblore.utils import get_clean_msgid
+
 from korgalore.message import RawMessage
+
+
+def trace_value(result: bytes) -> str:
+    """The unfolded value of the X-Korgalore-Trace header of a serialized message."""
+    value = email.message_from_bytes(result)['X-Korgalore-Trace']
+    assert value is not None
+    return ' '.join(value.split())
 
 
 class TestRawMessage:
     """Tests for the RawMessage wrapper class."""
 
-    def test_message_id_extraction(self) -> None:
-        """Message-ID is correctly extracted from raw email."""
-        raw = b'From: test@example.com\r\nMessage-ID: <abc123@example.com>\r\n\r\nBody'
+    @pytest.mark.parametrize(
+        ('raw', 'expected'),
+        [
+            pytest.param(
+                b'From: test@example.com\r\nMessage-ID: <abc123@example.com>\r\n\r\nBody',
+                '<abc123@example.com>',
+                id='plain',
+            ),
+            pytest.param(b'From: test@example.com\r\n\r\nBody', None, id='missing'),
+            pytest.param(
+                b'From: test@example.com\r\nMessage-ID:  <spaced@example.com>  \r\n\r\nBody',
+                '<spaced@example.com>',
+                id='surrounding-whitespace-stripped',
+            ),
+            # Gnus writes these. The whole header value used to come back, which
+            # made the IMAP and JMAP duplicate lookups search for a string no
+            # stored message has, so every run delivered the message again.
+            pytest.param(
+                b'From: test@example.com\r\nMessage-ID: <abc123@example.com> (raw)\r\n\r\nBody',
+                '<abc123@example.com>',
+                id='trailing-comment-dropped',
+            ),
+            pytest.param(
+                b'From: test@example.com\r\nMessage-ID:\r\n <folded@example.com>\r\n\r\nBody',
+                '<folded@example.com>',
+                id='folded-onto-its-own-line',
+            ),
+            # The header is malformed, but returning None would skip the
+            # duplicate check entirely and redeliver the message on every run.
+            # The bare value is returned as-is: the IMAP and JMAP lookups match
+            # on the header as written, so invented brackets would not match.
+            pytest.param(
+                b'From: test@example.com\r\nMessage-ID: bare@example.com\r\n\r\nBody',
+                'bare@example.com',
+                id='bracketless-kept',
+            ),
+            pytest.param(b'From: test@example.com\r\nMessage-ID: \r\n\r\nBody', None, id='empty-header-is-none'),
+            pytest.param(b'\xff\xfe invalid utf-8 with Message-ID: maybe', None, id='invalid-content-does-not-crash'),
+        ],
+    )
+    def test_message_id(self, raw: bytes, expected: Optional[str]) -> None:
         msg = RawMessage(raw)
-        assert msg.message_id == '<abc123@example.com>'
 
-    def test_message_id_missing(self) -> None:
-        """Returns None when Message-ID is missing."""
-        raw = b'From: test@example.com\r\n\r\nBody'
-        msg = RawMessage(raw)
-        assert msg.message_id is None
-
-    def test_message_id_cached(self) -> None:
-        """Message-ID extraction is cached."""
-        raw = b'From: test@example.com\r\nMessage-ID: <test@example.com>\r\n\r\nBody'
-        msg = RawMessage(raw)
-        # Access twice
-        _ = msg.message_id
-        msgid = msg.message_id
-        assert msgid == '<test@example.com>'
-        # Verify it was extracted only once
-        assert msg._message_id_extracted is True
-
-    def test_message_id_with_whitespace(self) -> None:
-        """Message-ID with surrounding whitespace is stripped."""
-        raw = b'From: test@example.com\r\nMessage-ID:  <spaced@example.com>  \r\n\r\nBody'
-        msg = RawMessage(raw)
-        assert msg.message_id == '<spaced@example.com>'
-
-    def test_message_id_ignores_trailing_comment(self) -> None:
-        """A comment after the ID is dropped, not returned as part of it.
-
-        Gnus writes these. The whole header value used to come back, which
-        made the IMAP and JMAP duplicate lookups search for a string no
-        stored message has, so every run delivered the message again.
-        """
-        raw = b'From: test@example.com\r\nMessage-ID: <abc123@example.com> (raw)\r\n\r\nBody'
-        msg = RawMessage(raw)
-        assert msg.message_id == '<abc123@example.com>'
-
-    def test_message_id_folded_across_lines(self) -> None:
-        """A Message-ID folded onto its own line is unfolded."""
-        raw = b'From: test@example.com\r\nMessage-ID:\r\n <folded@example.com>\r\n\r\nBody'
-        msg = RawMessage(raw)
-        assert msg.message_id == '<folded@example.com>'
-
-    def test_message_id_without_brackets_is_kept(self) -> None:
-        """A bracketless Message-ID still identifies the message.
-
-        The header is malformed, but returning None here would skip the
-        duplicate check entirely and redeliver the message on every run.
-        The bare value is returned as-is: the IMAP and JMAP lookups match
-        on the header as written, so invented brackets would not match.
-        """
-        raw = b'From: test@example.com\r\nMessage-ID: bare@example.com\r\n\r\nBody'
-        msg = RawMessage(raw)
-        assert msg.message_id == 'bare@example.com'
-
-    def test_message_id_empty_header_is_none(self) -> None:
-        """A present but empty Message-ID header yields None, not ''."""
-        raw = b'From: test@example.com\r\nMessage-ID: \r\n\r\nBody'
-        msg = RawMessage(raw)
-        assert msg.message_id is None
-
-    def test_raw_property(self) -> None:
-        """Raw property returns original bytes."""
-        raw = b'From: test@example.com\r\n\r\nBody'
-        msg = RawMessage(raw)
-        assert msg.raw is raw
+        with patch('korgalore.message.get_clean_msgid', wraps=get_clean_msgid) as extract:
+            assert msg.message_id == expected
+            # A second access is answered from the cache
+            assert msg.message_id == expected
+        assert extract.call_count <= 1
 
     def test_parsed_property(self) -> None:
         """Parsed property returns EmailMessage object."""
@@ -92,132 +86,79 @@ class TestRawMessage:
         parsed2 = msg.parsed
         assert parsed1 is parsed2
 
-    def test_as_bytes_from_lf(self) -> None:
-        """Unix LF endings are converted to CRLF."""
-        raw = b'From: test@example.com\nSubject: Test\n\nBody\nLine2'
-        msg = RawMessage(raw)
-        normalized = msg.as_bytes()
-        assert normalized == b'From: test@example.com\r\nSubject: Test\r\n\r\nBody\r\nLine2'
-
-    def test_as_bytes_already_normalized(self) -> None:
-        """Already-normalized CRLF content is unchanged."""
-        raw = b'From: test@example.com\r\nSubject: Test\r\n\r\nBody'
-        msg = RawMessage(raw)
-        normalized = msg.as_bytes()
-        assert normalized == raw
-
-    def test_as_bytes_mixed_endings(self) -> None:
-        """Mixed line endings are all converted to CRLF."""
-        raw = b'From: test@example.com\r\nSubject: Test\n\nBody\r\nLine2\nLine3'
-        msg = RawMessage(raw)
-        normalized = msg.as_bytes()
-        assert b'\r\n' in normalized
-        # All \n should be \r\n now
-        assert normalized.replace(b'\r\n', b'').find(b'\n') == -1
-
-    def test_invalid_message_message_id(self) -> None:
-        """Invalid message content doesn't crash message_id extraction."""
-        raw = b'\xff\xfe invalid utf-8 with Message-ID: maybe'
-        msg = RawMessage(raw)
-        # Should not raise, may return None or partial result
-        _ = msg.message_id
+    @pytest.mark.parametrize(
+        ('raw', 'expected'),
+        [
+            pytest.param(
+                b'From: test@example.com\nSubject: Test\n\nBody\nLine2',
+                b'From: test@example.com\r\nSubject: Test\r\n\r\nBody\r\nLine2',
+                id='lf-converted',
+            ),
+            pytest.param(
+                b'From: test@example.com\r\nSubject: Test\r\n\r\nBody',
+                b'From: test@example.com\r\nSubject: Test\r\n\r\nBody',
+                id='crlf-unchanged',
+            ),
+            pytest.param(
+                b'From: test@example.com\r\nSubject: Test\n\nBody\r\nLine2\nLine3',
+                b'From: test@example.com\r\nSubject: Test\r\n\r\nBody\r\nLine2\r\nLine3',
+                id='mixed-all-converted',
+            ),
+        ],
+    )
+    def test_as_bytes_line_endings(self, raw: bytes, expected: bytes) -> None:
+        assert RawMessage(raw).as_bytes() == expected
 
 
 class TestRawMessageTraceHeader:
     """Tests for X-Korgalore-Trace header injection."""
 
-    def test_trace_header_injected(self) -> None:
-        """Trace header is injected when feed_name and delivery_name provided."""
+    def test_trace_header_fields(self) -> None:
+        """Trace header names the feed and delivery, a version and an RFC 2822 date."""
         raw = b'From: test@example.com\nSubject: Test\n\nBody'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='linux-kernel', delivery_name='my-delivery')
+        result = RawMessage(raw).as_bytes(feed_name='linux-kernel', delivery_name='my-delivery')
 
-        assert b'X-Korgalore-Trace:' in result
-        assert b'from feed=linux-kernel' in result
-        assert b'for delivery=my-delivery' in result
-        # Header may be wrapped, so check with continuation unfolded
-        unfolded = result.replace(b'\r\n ', b' ')
-        assert b'; v' in unfolded  # version marker
+        value = trace_value(result)
+        feed_part, version, date = value.split('; ')
+        assert feed_part == 'from feed=linux-kernel for delivery=my-delivery'
+        assert version.startswith('v')
+        # Raises ValueError unless this is a real RFC 2822 date
+        assert parsedate_to_datetime(date).tzinfo is not None
 
-    def test_trace_header_not_injected_without_params(self) -> None:
-        """Trace header is not injected when parameters are None."""
+    @pytest.mark.parametrize(
+        'names',
+        [
+            pytest.param({}, id='no-params'),
+            pytest.param({'feed_name': 'test-feed'}, id='feed-only'),
+            pytest.param({'delivery_name': 'test-delivery'}, id='delivery-only'),
+        ],
+    )
+    def test_trace_header_not_injected_without_both_params(self, names: dict[str, str]) -> None:
         raw = b'From: test@example.com\nSubject: Test\n\nBody'
-        msg = RawMessage(raw)
-        result = msg.as_bytes()
 
-        assert b'X-Korgalore-Trace:' not in result
+        assert b'X-Korgalore-Trace:' not in RawMessage(raw).as_bytes(**names)
 
-    def test_trace_header_not_injected_with_partial_params(self) -> None:
-        """Trace header is not injected when only one parameter is provided."""
-        raw = b'From: test@example.com\nSubject: Test\n\nBody'
-        msg = RawMessage(raw)
+    @pytest.mark.parametrize(
+        'raw',
+        [
+            pytest.param(b'From: test@example.com\nSubject: Test\n\nBody content', id='lf'),
+            pytest.param(b'From: test@example.com\r\nSubject: Test\r\n\r\nBody content', id='crlf'),
+        ],
+    )
+    def test_trace_header_is_last_header_with_crlf(self, raw: bytes) -> None:
+        """Trace header goes at the end of the headers, before the body, with CRLF throughout."""
+        result = RawMessage(raw).as_bytes(feed_name='feed', delivery_name='delivery')
 
-        result1 = msg.as_bytes(feed_name='test-feed')
-        assert b'X-Korgalore-Trace:' not in result1
-
-        result2 = msg.as_bytes(delivery_name='test-delivery')
-        assert b'X-Korgalore-Trace:' not in result2
-
-    def test_trace_header_position(self) -> None:
-        """Trace header is inserted at end of headers, before body."""
-        raw = b'From: test@example.com\nSubject: Test\n\nBody content'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='feed', delivery_name='delivery')
-
-        # Find positions
-        trace_pos = result.find(b'X-Korgalore-Trace:')
-        body_separator = result.find(b'\r\n\r\n')
-        body_pos = result.find(b'Body content')
-
-        # Trace should be in headers (before blank line)
-        assert trace_pos < body_separator
-        # Body should be after blank line
-        assert body_pos > body_separator
-
-    def test_trace_header_with_crlf_normalization(self) -> None:
-        """Trace header injection works with CRLF normalization."""
-        raw = b'From: test@example.com\r\nSubject: Test\r\n\r\nBody'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='feed', delivery_name='delivery')
-
-        # Should have proper CRLF after trace header
-        assert b'X-Korgalore-Trace:' in result
+        parsed = email.message_from_bytes(result)
+        assert list(parsed.keys()) == ['From', 'Subject', 'X-Korgalore-Trace']
+        assert parsed.get_payload() == 'Body content'
         # All line endings should be CRLF
         assert result.replace(b'\r\n', b'').find(b'\n') == -1
-
-    def test_trace_header_contains_date(self) -> None:
-        """Trace header contains RFC 2822 formatted date."""
-        raw = b'From: test@example.com\nSubject: Test\n\nBody'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='feed', delivery_name='delivery')
-
-        # RFC 2822 dates contain day abbreviations and timezone
-        # e.g., "Tue, 27 Jan 2026 16:56:44 -0500"
-        # Check for semicolon separator before date
-        assert b'; ' in result
-        # Extract full trace header (may be multi-line with continuations)
-        trace_start = result.find(b'X-Korgalore-Trace:')
-        trace_end = trace_start
-        while True:
-            next_line = result.find(b'\r\n', trace_end)
-            if next_line == -1:
-                break
-            # Check if next line is a continuation (starts with whitespace)
-            if next_line + 2 < len(result) and result[next_line + 2 : next_line + 3] in (b' ', b'\t'):
-                trace_end = next_line + 2
-            else:
-                trace_end = next_line
-                break
-        trace_header = result[trace_start:trace_end]
-        # Unfold continuations for checking
-        trace_unfolded = trace_header.replace(b'\r\n ', b' ')
-        assert b', ' in trace_unfolded  # Day name comma, e.g., "Tue, "
 
     def test_trace_header_message_without_body(self) -> None:
         """Trace header works on message with headers only (no body)."""
         raw = b'From: test@example.com\nSubject: Test'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='feed', delivery_name='delivery')
+        result = RawMessage(raw).as_bytes(feed_name='feed', delivery_name='delivery')
 
         assert b'X-Korgalore-Trace:' in result
         assert b'from feed=feed' in result
@@ -225,46 +166,21 @@ class TestRawMessageTraceHeader:
     def test_trace_header_special_characters_in_names(self) -> None:
         """Feed/delivery names with special characters are included as-is."""
         raw = b'From: test@example.com\n\nBody'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='lei:/path/to/feed', delivery_name='my-delivery_v2')
+        result = RawMessage(raw).as_bytes(feed_name='lei:/path/to/feed', delivery_name='my-delivery_v2')
 
         assert b'from feed=lei:/path/to/feed' in result
         assert b'for delivery=my-delivery_v2' in result
 
     def test_trace_header_wrapped_at_75_chars(self) -> None:
-        """Trace header lines are wrapped at 75 characters."""
+        """Trace header lines are wrapped at 75 characters, with space-prefixed continuations."""
         raw = b'From: test@example.com\nSubject: Test\n\nBody'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='linux-kernel', delivery_name='my-delivery')
+        result = RawMessage(raw).as_bytes(feed_name='linux-kernel', delivery_name='my-delivery')
 
-        # Find the trace header and check line lengths
-        trace_start = result.find(b'X-Korgalore-Trace:')
-        # Find the end of the trace header (next header or body separator)
-        trace_end = trace_start
-        while True:
-            next_line = result.find(b'\r\n', trace_end)
-            if next_line == -1:
-                break
-            # Check if next line is a continuation (starts with whitespace)
-            if next_line + 2 < len(result) and result[next_line + 2 : next_line + 3] in (b' ', b'\t'):
-                trace_end = next_line + 2
-            else:
-                trace_end = next_line
-                break
-
-        trace_header = result[trace_start:trace_end]
-        # Check each line (split by CRLF)
-        lines = trace_header.split(b'\r\n')
+        value = email.message_from_bytes(result)['X-Korgalore-Trace']
+        assert value is not None
+        lines = f'X-Korgalore-Trace: {value}'.split('\r\n')
+        # The header is too long for one line, so it must continue on the next
+        assert len(lines) > 1
+        assert all(line.startswith(' ') for line in lines[1:])
         for line in lines:
             assert len(line) <= 75, f'Line too long ({len(line)} chars): {line!r}'
-
-    def test_trace_header_continuation_format(self) -> None:
-        """Wrapped trace header uses proper continuation format (space prefix)."""
-        raw = b'From: test@example.com\nSubject: Test\n\nBody'
-        msg = RawMessage(raw)
-        result = msg.as_bytes(feed_name='linux-kernel', delivery_name='my-delivery')
-
-        # The trace header should span multiple lines due to length
-        trace_start = result.find(b'X-Korgalore-Trace:')
-        # Find continuation lines (CRLF followed by space)
-        assert b'\r\n ' in result[trace_start:], 'Header should have continuation lines'

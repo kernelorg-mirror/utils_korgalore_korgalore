@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from unittest import mock
 
+import pytest
+
 from korgalore.tracking import create_lei_query_search
 
 QUERY = '(dfn:Documentation/ OR dfn:Documentation/process/) AND d:30.days.ago..'
@@ -30,22 +32,14 @@ def run_search(tmp_path: Path, threads: bool = False) -> Tuple[List[str], Option
 class TestCreateLeiQuerySearch:
     """Handing lei a query it does not re-quote."""
 
-    def test_query_goes_to_stdin(self, tmp_path: Path) -> None:
+    def test_query_goes_to_stdin_only(self, tmp_path: Path) -> None:
         args, stdin = run_search(tmp_path)
 
         assert args[:2] == ['q', '--stdin']
         assert stdin == QUERY.encode()
-
-    def test_query_not_in_args(self, tmp_path: Path) -> None:
-        """lei refuses a command-line query together with --stdin."""
-        args, _ = run_search(tmp_path)
-
+        # lei refuses a command-line query together with --stdin
         assert not any(QUERY in arg or 'dfn:' in arg for arg in args)
-
-    def test_no_arg_contains_whitespace(self, tmp_path: Path) -> None:
-        """Any argument with a space would be at risk of phrase quoting."""
-        args, _ = run_search(tmp_path)
-
+        # Any argument with a space would be at risk of phrase quoting
         assert all(' ' not in arg for arg in args)
 
     def test_output_and_source(self, tmp_path: Path) -> None:
@@ -55,9 +49,9 @@ class TestCreateLeiQuerySearch:
         assert args[args.index('--only') + 1] == 'https://lore.kernel.org/all'
         assert args[args.index('-o') + 1] == f'v2:{output}'
 
-    def test_threads_flag(self, tmp_path: Path) -> None:
-        assert '--threads' in run_search(tmp_path, threads=True)[0]
-        assert '--threads' not in run_search(tmp_path, threads=False)[0]
+    @pytest.mark.parametrize('threads', [True, False], ids=['with-threads', 'without-threads'])
+    def test_threads_flag(self, tmp_path: Path, threads: bool) -> None:
+        assert ('--threads' in run_search(tmp_path, threads=threads)[0]) is threads
 
     def test_creates_parent_dir(self, tmp_path: Path) -> None:
         run_search(tmp_path)

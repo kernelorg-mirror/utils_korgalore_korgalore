@@ -1,21 +1,62 @@
-"""Tests for PIFeed state management functions.
+"""Tests for PIFeed state management that need no git repository.
 
 These tests cover the delivery tracking functionality including:
 - mark_successful_delivery: removing entries from failed list
 - mark_failed_delivery: adding/updating failed entries, rejection after timeout
 - JSONL file operations
+- feed locking, also when another process holds the lock
+
+The git-backed parts of PIFeed are tested in test_pi_feed_git.py.
 """
 
 import json
-import os
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Generator, List, Tuple
 from unittest.mock import patch
 
 import pytest
 
-from korgalore.pi_feed import RETRY_FAILED_INTERVAL, PIFeed
+from korgalore import FeedLockedError, PublicInboxError
+from korgalore.pi_feed import LOCKED_FEEDS, RETRY_FAILED_INTERVAL, PIFeed
+from tests.conftest import make_pi_feed
+
+# Holds the lock in another process, because a process never blocks on
+# its own POSIX locks
+_HOLD_LOCK = """
+import sys
+from fcntl import LOCK_EX, lockf
+fh = open(sys.argv[1], 'w')
+lockf(fh, LOCK_EX)
+print('locked', flush=True)
+sys.stdin.read()
+"""
+
+OLD = '2024-01-01T00:00:00'
+
+
+def write_state(path: Path, entries: List[Tuple[Any, ...]]) -> None:
+    """Write entries to a state file, one JSON list per line."""
+    path.write_text(''.join(json.dumps(e) + '\n' for e in entries))
+
+
+@pytest.fixture
+def held_lock(temp_feed_dir: Path) -> Generator[None, None, None]:
+    """Another process holds the lock of temp_feed_dir until the test ends."""
+    holder = subprocess.Popen(
+        [sys.executable, '-c', _HOLD_LOCK, str(temp_feed_dir / 'korgalore.lock')],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline() == 'locked\n'
+        yield
+    finally:
+        holder.communicate('')
 
 
 class TestJSONLOperations:
@@ -23,8 +64,7 @@ class TestJSONLOperations:
 
     def test_read_empty_file(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Reading non-existent file returns empty list."""
-        result = mock_feed._read_jsonl_file(temp_feed_dir / 'nonexistent.jsonl')
-        assert result == []
+        assert mock_feed._read_jsonl_file(temp_feed_dir / 'nonexistent.jsonl') == []
 
     def test_write_and_read_jsonl(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Write and read back JSONL data."""
@@ -35,16 +75,12 @@ class TestJSONLOperations:
         ]
         mock_feed._write_jsonl_file(filepath, data)
 
-        result = mock_feed._read_jsonl_file(filepath)
-        assert len(result) == 2
-        assert result[0] == (1, 'abc123', '2024-01-01T00:00:00', 1)
-        assert result[1] == (2, 'def456', '2024-01-02T00:00:00', 2)
+        assert mock_feed._read_jsonl_file(filepath) == data
 
     def test_write_empty_list_removes_file(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Writing empty list removes the file."""
         filepath = temp_feed_dir / 'test.jsonl'
         filepath.write_text('[1, "abc"]\n')
-        assert filepath.exists()
 
         mock_feed._write_jsonl_file(filepath, [])
         assert not filepath.exists()
@@ -55,70 +91,62 @@ class TestJSONLOperations:
         mock_feed._append_to_jsonl_file(filepath, (1, 'abc123'))
         mock_feed._append_to_jsonl_file(filepath, (2, 'def456'))
 
-        result = mock_feed._read_jsonl_file(filepath)
-        assert len(result) == 2
-        assert result[0] == (1, 'abc123')
-        assert result[1] == (2, 'def456')
+        assert mock_feed._read_jsonl_file(filepath) == [(1, 'abc123'), (2, 'def456')]
 
 
 class TestMarkSuccessfulDelivery:
-    """Tests for mark_successful_delivery function."""
+    """Tests for mark_successful_delivery function.
+
+    Regression: a retried commit is older than the delivery pointer, so
+    saving it with save_delivery_info would rewind the pointer and make
+    every later commit get delivered again on each pull. Only a fresh
+    success (was_failing=False) saves the pointer.
+
+    See: e77298ce-1e3e-449f-9864-b4fcf77a00b4@app.fastmail.com
+    """
 
     def test_success_without_prior_failure(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """Successful delivery without was_failing flag doesn't touch failed file."""
+        """A fresh success saves the pointer and doesn't touch the failed file."""
         failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        failed_file.write_text('[0, "abc123", "2024-01-01T00:00:00", 1]\n')
+        write_state(failed_file, [(0, 'abc123', OLD, 1)])
 
-        with patch.object(mock_feed, 'save_delivery_info'):
+        with patch.object(mock_feed, 'save_delivery_info') as mock_save:
             mock_feed.mark_successful_delivery('test-delivery', 0, 'abc123', was_failing=False)
 
-        # File should be unchanged
-        result = mock_feed._read_jsonl_file(failed_file)
-        assert len(result) == 1
+        mock_save.assert_called_once()
+        assert mock_feed._read_jsonl_file(failed_file) == [(0, 'abc123', OLD, 1)]
 
     def test_success_removes_from_failed_list(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Successful delivery with was_failing=True removes entry from failed list."""
         failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        entries = [
-            (0, 'abc123', '2024-01-01T00:00:00', 1),
-            (0, 'def456', '2024-01-01T00:00:00', 2),
-            (1, 'ghi789', '2024-01-01T00:00:00', 1),
-        ]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
+        write_state(failed_file, [(0, 'abc123', OLD, 1), (0, 'def456', OLD, 2), (1, 'ghi789', OLD, 1)])
 
-        with patch.object(mock_feed, 'save_delivery_info'):
+        with patch.object(mock_feed, 'save_delivery_info') as mock_save:
             mock_feed.mark_successful_delivery('test-delivery', 0, 'def456', was_failing=True)
 
-        result = mock_feed._read_jsonl_file(failed_file)
-        assert len(result) == 2
-        assert (0, 'abc123', '2024-01-01T00:00:00', 1) in result
-        assert (1, 'ghi789', '2024-01-01T00:00:00', 1) in result
-        assert (0, 'def456', '2024-01-01T00:00:00', 2) not in result
+        mock_save.assert_not_called()
+        assert mock_feed._read_jsonl_file(failed_file) == [(0, 'abc123', OLD, 1), (1, 'ghi789', OLD, 1)]
 
     def test_success_entry_not_in_failed_list(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """No error if entry not in failed list."""
         failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        entries = [(0, 'abc123', '2024-01-01T00:00:00', 1)]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
+        write_state(failed_file, [(0, 'abc123', OLD, 1)])
 
-        with patch.object(mock_feed, 'save_delivery_info'):
+        with patch.object(mock_feed, 'save_delivery_info') as mock_save:
             mock_feed.mark_successful_delivery('test-delivery', 0, 'nonexistent', was_failing=True)
 
-        result = mock_feed._read_jsonl_file(failed_file)
-        assert len(result) == 1  # Unchanged
+        mock_save.assert_not_called()
+        assert mock_feed._read_jsonl_file(failed_file) == [(0, 'abc123', OLD, 1)]
 
     def test_success_removes_last_entry_deletes_file(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Removing last entry from failed list deletes the file."""
         failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        entries = [(0, 'abc123', '2024-01-01T00:00:00', 1)]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
+        write_state(failed_file, [(0, 'abc123', OLD, 1)])
 
-        with patch.object(mock_feed, 'save_delivery_info'):
+        with patch.object(mock_feed, 'save_delivery_info') as mock_save:
             mock_feed.mark_successful_delivery('test-delivery', 0, 'abc123', was_failing=True)
 
+        mock_save.assert_not_called()
         assert not failed_file.exists()
 
 
@@ -127,31 +155,13 @@ class TestMarkFailedDelivery:
 
     def test_new_failure_creates_entry(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """First failure creates new entry with retry count 1."""
-        failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-
         mock_feed.mark_failed_delivery('test-delivery', 0, 'abc123')
 
-        result = mock_feed._read_jsonl_file(failed_file)
+        result = mock_feed._read_jsonl_file(temp_feed_dir / 'korgalore.test-delivery.failed')
         assert len(result) == 1
         assert result[0][0] == 0  # epoch
         assert result[0][1] == 'abc123'  # commit hash
         assert result[0][3] == 1  # retry count
-
-    def test_repeated_failure_increments_retry(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """Repeated failure increments retry count."""
-        failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        now = datetime.now(timezone.utc)
-        entries = [(0, 'abc123', now.isoformat(), 3)]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
-
-        mock_feed.mark_failed_delivery('test-delivery', 0, 'abc123')
-
-        result = mock_feed._read_jsonl_file(failed_file)
-        assert len(result) == 1
-        assert result[0][0] == 0
-        assert result[0][1] == 'abc123'
-        assert result[0][3] == 4  # incremented from 3
 
     def test_expired_failure_moves_to_rejected(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Failure past retry interval moves to rejected file."""
@@ -160,15 +170,12 @@ class TestMarkFailedDelivery:
 
         # Create failure from 6 days ago (past 5-day interval)
         old_time = datetime.now(timezone.utc) - timedelta(seconds=RETRY_FAILED_INTERVAL + 3600)
-        entries = [(0, 'abc123', old_time.isoformat(), 10)]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
+        write_state(failed_file, [(0, 'abc123', old_time.isoformat(), 10)])
 
         mock_feed.mark_failed_delivery('test-delivery', 0, 'abc123')
 
         # Should be removed from failed
-        failed_result = mock_feed._read_jsonl_file(failed_file)
-        assert len(failed_result) == 0
+        assert mock_feed._read_jsonl_file(failed_file) == []
 
         # Should be in rejected
         rejected_result = mock_feed._read_jsonl_file(rejected_file)
@@ -177,23 +184,15 @@ class TestMarkFailedDelivery:
         assert rejected_result[0][1] == 'abc123'
 
     def test_multiple_failures_only_updates_matching(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """Only the matching entry is updated when multiple failures exist."""
+        """Only the matching entry's retry count goes up when several failures exist."""
         failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        now = datetime.now(timezone.utc)
-        entries = [
-            (0, 'abc123', now.isoformat(), 1),
-            (0, 'def456', now.isoformat(), 2),
-            (1, 'ghi789', now.isoformat(), 3),
-        ]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
+        now = datetime.now(timezone.utc).isoformat()
+        write_state(failed_file, [(0, 'abc123', now, 1), (0, 'def456', now, 2), (1, 'ghi789', now, 3)])
 
         mock_feed.mark_failed_delivery('test-delivery', 0, 'def456')
 
         result = mock_feed._read_jsonl_file(failed_file)
         assert len(result) == 3
-
-        # Find each entry and verify
         by_commit = {r[1]: r for r in result}
         assert by_commit['abc123'][3] == 1  # unchanged
         assert by_commit['def456'][3] == 3  # incremented from 2
@@ -203,51 +202,37 @@ class TestMarkFailedDelivery:
 class TestGetFailedCommits:
     """Tests for get_failed_commits_for_delivery function."""
 
-    def test_no_failed_file(self, mock_feed: PIFeed) -> None:
-        """Returns empty list when no failed file exists."""
-        result = mock_feed.get_failed_commits_for_delivery('nonexistent')
-        assert result == []
-
     def test_returns_epoch_commit_tuples(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """Returns list of (epoch, commit) tuples."""
-        failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        entries = [
-            (0, 'abc123', '2024-01-01T00:00:00', 1),
-            (1, 'def456', '2024-01-02T00:00:00', 2),
-        ]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
+        """Returns list of (epoch, commit) tuples, and [] without a failed file."""
+        assert mock_feed.get_failed_commits_for_delivery('test-delivery') == []
 
-        result = mock_feed.get_failed_commits_for_delivery('test-delivery')
-        assert result == [(0, 'abc123'), (1, 'def456')]
+        write_state(
+            temp_feed_dir / 'korgalore.test-delivery.failed',
+            [(0, 'abc123', OLD, 1), (1, 'def456', '2024-01-02T00:00:00', 2)],
+        )
+
+        assert mock_feed.get_failed_commits_for_delivery('test-delivery') == [(0, 'abc123'), (1, 'def456')]
 
 
 class TestCleanupFailedState:
     """Tests for cleanup_failed_state function."""
 
-    def test_removes_empty_failed_file(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """Removes failed file if empty."""
+    @pytest.mark.parametrize(
+        ('content', 'kept'),
+        [
+            pytest.param(None, False, id='missing-file-is-no-error'),
+            pytest.param('', False, id='empty-file-removed'),
+            pytest.param(json.dumps([0, 'abc123', OLD, 1]) + '\n', True, id='nonempty-file-kept'),
+        ],
+    )
+    def test_cleanup(self, mock_feed: PIFeed, temp_feed_dir: Path, content: str | None, kept: bool) -> None:
         failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        failed_file.write_text('')
+        if content is not None:
+            failed_file.write_text(content)
 
         mock_feed.cleanup_failed_state('test-delivery')
 
-        assert not failed_file.exists()
-
-    def test_keeps_nonempty_failed_file(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """Keeps failed file if it has entries."""
-        failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        entries = [(0, 'abc123', '2024-01-01T00:00:00', 1)]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
-
-        mock_feed.cleanup_failed_state('test-delivery')
-
-        assert failed_file.exists()
-
-    def test_no_error_if_file_missing(self, mock_feed: PIFeed) -> None:
-        """No error if failed file doesn't exist."""
-        mock_feed.cleanup_failed_state('nonexistent')  # Should not raise
+        assert failed_file.exists() is kept
 
 
 class TestFeedLocking:
@@ -255,996 +240,57 @@ class TestFeedLocking:
 
     def test_lock_creates_directory_if_missing(self, tmp_path: Path) -> None:
         """Locking a feed creates the parent directory if it doesn't exist."""
-        from korgalore.pi_feed import PIFeed
-
-        # Create a feed pointing to a non-existent directory
         nonexistent_dir = tmp_path / 'nonexistent' / 'feed' / 'path'
-        assert not nonexistent_dir.exists()
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, feed_dir: Path) -> None:
-                super().__init__(feed_key='test-feed', feed_dir=feed_dir)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-            def get_highest_epoch(self) -> int:
-                return 0
-
-            def get_top_commit(self, epoch: int) -> str:
-                return 'abc123'
-
-        feed = TestPIFeed(nonexistent_dir)
+        feed = make_pi_feed(nonexistent_dir)
 
         # This should not raise FileNotFoundError
         feed.feed_lock()
-
         try:
-            # Directory should now exist
-            assert nonexistent_dir.exists()
-            # Lock file should exist
-            lock_file = nonexistent_dir / 'korgalore.lock'
-            assert lock_file.exists()
+            assert (nonexistent_dir / 'korgalore.lock').exists()
         finally:
-            # Clean up
             feed.feed_unlock()
-
-    def test_lock_and_unlock_cycle(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """Lock and unlock cycle works correctly."""
-        lock_file = temp_feed_dir / 'korgalore.lock'
-
-        # Lock the feed
-        mock_feed.feed_lock()
-        assert lock_file.exists()
-
-        # Unlock the feed
-        mock_feed.feed_unlock()
 
     def test_lock_is_stored_in_global_dict(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
         """Lock file handle is stored in LOCKED_FEEDS for later unlock."""
-        from korgalore.pi_feed import LOCKED_FEEDS
-
         key = str(temp_feed_dir)
         assert key not in LOCKED_FEEDS
 
         mock_feed.feed_lock()
         try:
-            assert key in LOCKED_FEEDS
+            assert (temp_feed_dir / 'korgalore.lock').exists()
             assert LOCKED_FEEDS[key] is not None
         finally:
             mock_feed.feed_unlock()
-            assert key not in LOCKED_FEEDS
+        assert key not in LOCKED_FEEDS
 
     def test_unlock_without_lock_raises_error(self, tmp_path: Path) -> None:
         """Attempting to unlock a feed that isn't locked raises an error."""
-        from korgalore import PublicInboxError
-        from korgalore.pi_feed import PIFeed
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, feed_dir: Path) -> None:
-                super().__init__(feed_key='unlocked-feed', feed_dir=feed_dir)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-            def get_highest_epoch(self) -> int:
-                return 0
-
-            def get_top_commit(self, epoch: int) -> str:
-                return 'abc123'
-
         feed_dir = tmp_path / 'unlocked-feed'
         feed_dir.mkdir()
-        feed = TestPIFeed(feed_dir)
 
         with pytest.raises(PublicInboxError, match='is not locked'):
-            feed.feed_unlock()
+            make_pi_feed(feed_dir, key='unlocked-feed').feed_unlock()
+
+    @pytest.mark.usefixtures('held_lock')
+    def test_busy_feed(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
+        """The error names the feed and says what to do."""
+        with pytest.raises(FeedLockedError) as info:
+            mock_feed.feed_lock()
+        assert str(info.value) == (
+            f"Another kgl process is using feed 'test-feed' ({temp_feed_dir}). Try again when it is done."
+        )
+        assert str(temp_feed_dir) not in LOCKED_FEEDS
 
 
 class TestLegacyMigration:
-    """Tests for legacy state migration."""
+    """Legacy state migration returns early when there is nothing to migrate."""
 
-    def test_migration_skips_when_no_git_directory(self, tmp_path: Path) -> None:
-        """Legacy migration does not crash when git directory doesn't exist."""
-        from korgalore.pi_feed import PIFeed
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, feed_dir: Path) -> None:
-                super().__init__(feed_key='new-feed', feed_dir=feed_dir)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-        # Create feed directory without git subdirectory
+    @pytest.mark.parametrize('git_dir', [False, True], ids=['no-git-dir', 'git-dir-without-epochs'])
+    def test_migration_skips(self, tmp_path: Path, git_dir: bool) -> None:
+        """No crash without git/, or with an empty git/ left by an interrupted clone."""
         feed_dir = tmp_path / 'new-feed'
         feed_dir.mkdir()
-        # Do NOT create feed_dir / "git"
+        if git_dir:
+            (feed_dir / 'git').mkdir()
 
-        feed = TestPIFeed(feed_dir)
-
-        # This should not raise an error - it should just return early
-        feed._perform_legacy_migration()  # Should not crash
-
-    def test_migration_skips_when_git_dir_has_no_epochs(self, tmp_path: Path) -> None:
-        """Legacy migration does not crash when git/ exists but has no epoch repos."""
-        from korgalore.pi_feed import PIFeed
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, feed_dir: Path) -> None:
-                super().__init__(feed_key='partial-feed', feed_dir=feed_dir)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-        # Create feed directory with empty git/ subdirectory (e.g. from a
-        # failed or interrupted clone that left the parent dir behind)
-        feed_dir = tmp_path / 'partial-feed'
-        feed_dir.mkdir()
-        (feed_dir / 'git').mkdir()
-
-        feed = TestPIFeed(feed_dir)
-
-        # This should not raise PublicInboxError - it should return early
-        feed._perform_legacy_migration()
-
-
-class TestGetFirstCommit:
-    """Tests for get_first_commit with empty and non-empty repositories."""
-
-    def _make_feed(self, feed_dir: Path) -> PIFeed:
-        """Create a concrete PIFeed subclass for testing.
-
-        Only overrides the abstract methods; get_top_commit and
-        get_first_commit use the real implementations so they can be
-        tested against actual git repositories.
-        """
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, fd: Path) -> None:
-                super().__init__(feed_key='test-feed', feed_dir=fd)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-            def get_highest_epoch(self) -> int:
-                return 0
-
-        return TestPIFeed(feed_dir)
-
-    def _init_bare_repo(self, gitdir: Path) -> None:
-        """Initialise a bare git repository at gitdir."""
-        import subprocess
-
-        subprocess.run(
-            ['git', 'init', '--bare', str(gitdir)],
-            check=True,
-            capture_output=True,
-        )
-
-    def _add_commit(self, gitdir: Path) -> str:
-        """Add a single commit to a bare repo and return its hash."""
-        import subprocess
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as work:
-            subprocess.run(
-                ['git', 'clone', str(gitdir), work],
-                check=True,
-                capture_output=True,
-            )
-            dummy = Path(work) / 'dummy'
-            dummy.write_text('content')
-            subprocess.run(
-                ['git', '-C', work, 'add', 'dummy'],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ['git', '-C', work, '-c', 'user.name=Test', '-c', 'user.email=test@test', 'commit', '-m', 'initial'],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ['git', '-C', work, 'push'],
-                check=True,
-                capture_output=True,
-            )
-            result = subprocess.run(
-                ['git', '-C', work, 'rev-parse', 'HEAD'],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            return result.stdout.strip()
-
-    def test_empty_repo_returns_empty_string(self, tmp_path: Path) -> None:
-        """get_first_commit returns '' for a repository with no commits."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        result = feed.get_first_commit(0)
-        assert result == ''
-
-    def test_nonempty_repo_returns_commit_hash(self, tmp_path: Path) -> None:
-        """get_first_commit returns the root commit hash."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-        expected = self._add_commit(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        result = feed.get_first_commit(0)
-        assert result == expected
-
-    def test_top_commit_empty_repo_returns_empty_string(self, tmp_path: Path) -> None:
-        """get_top_commit returns '' for a repository with no commits."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        result = feed.get_top_commit(0)
-        assert result == ''
-
-    def test_top_commit_nonempty_repo_returns_commit_hash(self, tmp_path: Path) -> None:
-        """get_top_commit returns the latest commit hash."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-        expected = self._add_commit(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        result = feed.get_top_commit(0)
-        assert result == expected
-
-
-class TestIsEmptyRepoCache:
-    """Tests for is_empty_repo caching and cache invalidation."""
-
-    def _make_feed(self, feed_dir: Path) -> PIFeed:
-        """Create a concrete PIFeed subclass for testing."""
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, fd: Path) -> None:
-                super().__init__(feed_key='test-feed', feed_dir=fd)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-            def get_highest_epoch(self) -> int:
-                return 0
-
-        return TestPIFeed(feed_dir)
-
-    def _init_bare_repo(self, gitdir: Path) -> None:
-        """Initialise a bare git repository at gitdir."""
-        import subprocess
-
-        subprocess.run(
-            ['git', 'init', '--bare', str(gitdir)],
-            check=True,
-            capture_output=True,
-        )
-
-    def _add_commit(self, gitdir: Path) -> str:
-        """Add a single commit to a bare repo and return its hash."""
-        import subprocess
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as work:
-            subprocess.run(
-                ['git', 'clone', str(gitdir), work],
-                check=True,
-                capture_output=True,
-            )
-            dummy = Path(work) / 'dummy'
-            dummy.write_text('content')
-            subprocess.run(
-                ['git', '-C', work, 'add', 'dummy'],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ['git', '-C', work, '-c', 'user.name=Test', '-c', 'user.email=test@test', 'commit', '-m', 'initial'],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ['git', '-C', work, 'push'],
-                check=True,
-                capture_output=True,
-            )
-            result = subprocess.run(
-                ['git', '-C', work, 'rev-parse', 'HEAD'],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            return result.stdout.strip()
-
-    def test_result_is_cached(self, tmp_path: Path) -> None:
-        """Repeated is_empty_repo calls use the cache."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        assert feed.is_empty_repo(0) is True
-        assert 0 in feed._empty_repo_cache
-        assert feed._empty_repo_cache[0] is True
-
-        # Second call should return cached value without git command
-        # Verify by checking the cache is still populated
-        assert feed.is_empty_repo(0) is True
-
-    def test_cache_cleared_on_unlock(self, tmp_path: Path) -> None:
-        """feed_unlock clears the is_empty_repo cache."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        assert feed.is_empty_repo(0) is True
-        assert 0 in feed._empty_repo_cache
-
-        feed.feed_lock()
-        try:
-            # Cache should still be present while locked
-            assert 0 in feed._empty_repo_cache
-        finally:
-            feed.feed_unlock()
-
-        # Cache should be cleared after unlock
-        assert 0 not in feed._empty_repo_cache
-
-    def test_cache_reflects_repo_state_after_unlock(self, tmp_path: Path) -> None:
-        """After unlock and adding a commit, is_empty_repo returns False."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        assert feed.is_empty_repo(0) is True
-
-        feed.feed_lock()
-        self._add_commit(gitdir)
-        feed.feed_unlock()
-
-        # Cache was cleared by unlock, so this re-checks the repo
-        assert feed.is_empty_repo(0) is False
-
-    def test_nonempty_repo_cached_as_false(self, tmp_path: Path) -> None:
-        """Non-empty repos are cached as False."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-        self._add_commit(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        assert feed.is_empty_repo(0) is False
-        assert feed._empty_repo_cache[0] is False
-
-
-class TestIsNoopCommit:
-    """Tests for is_noop_commit detection of public-inbox commits without 'm' files.
-
-    Detection is based on the absence of an 'm' object in the commit
-    tree, mirroring the real public-inbox v2 layout where normal
-    commits carry an 'm' (message) file, removal commits carry a 'd'
-    (deleted) file, and purge commits may have an empty tree.
-    """
-
-    def _make_feed(self, feed_dir: Path) -> PIFeed:
-        """Create a concrete PIFeed subclass for testing."""
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, fd: Path) -> None:
-                super().__init__(feed_key='test-feed', feed_dir=fd)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-            def get_highest_epoch(self) -> int:
-                return 0
-
-        return TestPIFeed(feed_dir)
-
-    def _init_bare_repo(self, gitdir: Path) -> None:
-        import subprocess
-
-        subprocess.run(
-            ['git', 'init', '--bare', str(gitdir)],
-            check=True,
-            capture_output=True,
-        )
-
-    def _add_commit_with_file(self, gitdir: Path, filename: str, subject: str) -> str:
-        """Add a commit whose tree contains a single file and return its hash.
-
-        This mirrors the public-inbox v2 tree layout where each commit
-        contains exactly one of 'm' (message) or 'd' (deleted).
-        """
-        import subprocess
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as work:
-            subprocess.run(
-                ['git', 'clone', str(gitdir), work],
-                check=True,
-                capture_output=True,
-            )
-            # Remove any files from previous commits so the tree
-            # contains only the intended file.
-            for existing in Path(work).iterdir():
-                if existing.name != '.git':
-                    existing.unlink()
-            target = Path(work) / filename
-            target.write_text('blob content\n')
-            subprocess.run(
-                ['git', '-C', work, 'add', '-A'],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                [
-                    'git',
-                    '-C',
-                    work,
-                    '-c',
-                    'user.name=Test',
-                    '-c',
-                    'user.email=test@test',
-                    'commit',
-                    '-m',
-                    subject,
-                    '--allow-empty',
-                ],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ['git', '-C', work, 'push'],
-                check=True,
-                capture_output=True,
-            )
-            result = subprocess.run(
-                ['git', '-C', work, 'rev-parse', 'HEAD'],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            return result.stdout.strip()
-
-    def test_commit_with_m_file_is_not_noop(self, tmp_path: Path) -> None:
-        """A commit whose tree contains 'm' is a normal message commit."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-        commit = self._add_commit_with_file(gitdir, 'm', 'Re: some thread')
-
-        feed = self._make_feed(feed_dir)
-        assert feed.is_noop_commit(0, commit) is False
-
-    def test_commit_with_d_file_is_noop(self, tmp_path: Path) -> None:
-        """A commit whose tree contains 'd' (rm commit) is a no-op."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-        commit = self._add_commit_with_file(gitdir, 'd', 'rm')
-
-        feed = self._make_feed(feed_dir)
-        assert feed.is_noop_commit(0, commit) is True
-
-    def test_invalid_commit_raises_git_error(self, tmp_path: Path) -> None:
-        """An invalid commit hash raises GitError (bad object)."""
-        from korgalore import GitError
-
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        with pytest.raises(GitError):
-            feed.is_noop_commit(0, 'deadbeef' * 5)
-
-    def test_bad_object_commit_raises_git_error(self, tmp_path: Path) -> None:
-        """A non-existent commit (bad object) must raise GitError.
-
-        Regression: is_noop_commit returned True for bad-object commits,
-        causing save_delivery_info to crash during failed delivery retry
-        when it tried to ``git show`` the missing commit.
-
-        See: c4de9f25-0c60-49e4-925f-7749eba57264@app.fastmail.com
-        """
-        from korgalore import GitError
-
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        self._init_bare_repo(gitdir)
-        # Add a real commit so the repo is not empty, then use a hash
-        # that definitely does not exist.
-        self._add_commit_with_file(gitdir, 'm', 'real commit')
-
-        feed = self._make_feed(feed_dir)
-        with pytest.raises(GitError):
-            feed.is_noop_commit(0, 'deadbeef' * 5)
-
-
-class TestDeliverBadObjectCommit:
-    """Regression: deliver_commit must handle bad-object commits gracefully.
-
-    When a commit in the failed delivery list is no longer available
-    locally (bad object / missing packfile), deliver_commit must not
-    crash the entire retry loop.  It should record the failure and
-    move on.
-
-    See: c4de9f25-0c60-49e4-925f-7749eba57264@app.fastmail.com
-    """
-
-    def test_bad_object_during_retry_records_failure(self) -> None:
-        """deliver_commit marks a bad-object commit as failed, not crashed."""
-        from unittest.mock import MagicMock
-
-        from korgalore import GitError
-        from korgalore.cli import deliver_commit
-
-        feed = MagicMock()
-        feed.is_noop_commit.side_effect = GitError('Bad object: deadbeef')
-        target = MagicMock()
-
-        result = deliver_commit(
-            'test-delivery',
-            target,
-            feed,
-            0,
-            'deadbeef' * 5,
-            ['label'],
-            was_failing=True,
-        )
-
-        assert result is None
-        feed.mark_failed_delivery.assert_called_once_with(
-            'test-delivery',
-            0,
-            'deadbeef' * 5,
-        )
-
-
-class TestRetryNoopDoesNotRewindPointer:
-    """Regression: retrying a noop commit must not rewind the delivery pointer.
-
-    When a noop commit (rm/purge) is in the failed list and gets retried,
-    deliver_commit must (a) pass was_failing through so the entry is
-    removed from the failed list, and (b) mark_successful_delivery must
-    not call save_delivery_info for retried commits, as that would
-    overwrite the delivery pointer with an older commit hash and cause
-    all subsequent commits to be re-delivered on every pull.
-
-    See: e77298ce-1e3e-449f-9864-b4fcf77a00b4@app.fastmail.com
-    """
-
-    def test_noop_retry_passes_was_failing(self) -> None:
-        """deliver_commit passes was_failing to mark_successful_delivery for noops."""
-        from unittest.mock import MagicMock
-
-        from korgalore.cli import SKIPPED_NOOP_COMMIT, deliver_commit
-
-        feed = MagicMock()
-        feed.is_noop_commit.return_value = True
-        target = MagicMock()
-
-        result = deliver_commit(
-            'test-delivery',
-            target,
-            feed,
-            0,
-            'abc123',
-            ['label'],
-            was_failing=True,
-        )
-
-        assert result == SKIPPED_NOOP_COMMIT
-        feed.mark_successful_delivery.assert_called_once_with(
-            'test-delivery',
-            0,
-            'abc123',
-            was_failing=True,
-        )
-
-    def test_retry_success_does_not_save_delivery_info(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """mark_successful_delivery with was_failing=True must not call save_delivery_info."""
-        failed_file = temp_feed_dir / 'korgalore.test-delivery.failed'
-        entries = [(0, 'abc123', '2024-01-01T00:00:00', 1)]
-        content = ''.join(json.dumps(e) + '\n' for e in entries)
-        failed_file.write_text(content)
-
-        with patch.object(mock_feed, 'save_delivery_info') as mock_save:
-            mock_feed.mark_successful_delivery('test-delivery', 0, 'abc123', was_failing=True)
-            mock_save.assert_not_called()
-
-    def test_fresh_success_still_saves_delivery_info(self, mock_feed: PIFeed, temp_feed_dir: Path) -> None:
-        """mark_successful_delivery with was_failing=False still calls save_delivery_info."""
-        with patch.object(mock_feed, 'save_delivery_info') as mock_save:
-            mock_feed.mark_successful_delivery('test-delivery', 0, 'abc123', was_failing=False)
-            mock_save.assert_called_once()
-
-
-class TestSaveDeliveryInfoEmptyMessage:
-    """Regression: save_delivery_info must not crash on an empty 'm' blob.
-
-    A commit whose tree contains an 'm' file is not a no-op, so
-    save_delivery_info() falls through to get_message_at_commit(). If that
-    blob happens to be empty, the returned bytes are falsy and the block
-    that derives 'subject' and 'msgid' is skipped, which used to leave both
-    names unbound and raise UnboundLocalError while writing the state file.
-    """
-
-    def _make_feed(self, feed_dir: Path) -> PIFeed:
-        class TestPIFeed(PIFeed):
-            def __init__(self, fd: Path) -> None:
-                super().__init__(feed_key='test-feed', feed_dir=fd)
-                self.feed_type = 'test'
-
-            def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-                return f'Test subject for {commitish}'
-
-            def get_highest_epoch(self) -> int:
-                return 0
-
-        return TestPIFeed(feed_dir)
-
-    def _repo_with_empty_m(self, gitdir: Path) -> str:
-        """Create a bare repo whose HEAD commit has an empty 'm' file."""
-        import subprocess
-        import tempfile
-
-        subprocess.run(['git', 'init', '--bare', str(gitdir)], check=True, capture_output=True)
-        with tempfile.TemporaryDirectory() as work:
-            subprocess.run(['git', 'clone', str(gitdir), work], check=True, capture_output=True)
-            # An 'm' that exists but is zero bytes: not a no-op commit, yet
-            # nothing to parse a Subject or Message-ID out of.
-            (Path(work) / 'm').write_bytes(b'')
-            subprocess.run(['git', '-C', work, 'add', '-A'], check=True, capture_output=True)
-            subprocess.run(
-                [
-                    'git',
-                    '-C',
-                    work,
-                    '-c',
-                    'user.name=Test',
-                    '-c',
-                    'user.email=test@test',
-                    'commit',
-                    '-m',
-                    'empty message blob',
-                ],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(['git', '-C', work, 'push'], check=True, capture_output=True)
-            result = subprocess.run(
-                ['git', '-C', work, 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True
-            )
-            return result.stdout.strip()
-
-    def test_empty_message_blob_writes_placeholder_state(self, tmp_path: Path) -> None:
-        """State is written with placeholders instead of raising."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        commit = self._repo_with_empty_m(gitdir)
-
-        feed = self._make_feed(feed_dir)
-        # The commit carries an 'm', so it must not be treated as a no-op.
-        assert feed.is_noop_commit(0, commit) is False
-
-        feed.save_delivery_info('test-delivery', 0, latest_commit=commit)
-
-        state = json.loads((feed_dir / 'korgalore.test-delivery.info').read_text())
-        entry = state['epochs']['0']
-        assert entry['last'] == commit
-        assert entry['subject'] == '(no subject)'
-        assert entry['msgid'] == '(no message-id)'
-
-
-class TestSubjectNormalization:
-    """Subjects flow through liblore's msg_get_subject().
-
-    ``emlpolicy`` already decodes RFC 2047 and unfolds continuation lines,
-    so the shared helper is not about decoding. What it adds on top is
-    whitespace-run collapsing, which matters because these subjects are
-    written into single-line state files and log messages.
-    """
-
-    def _make_feed(self, feed_dir: Path) -> PIFeed:
-        class TestPIFeed(PIFeed):
-            def __init__(self, fd: Path) -> None:
-                super().__init__(feed_key='test-feed', feed_dir=fd)
-                self.feed_type = 'test'
-
-            def get_highest_epoch(self) -> int:
-                return 0
-
-        return TestPIFeed(feed_dir)
-
-    def _repo_with_message(self, gitdir: Path, raw: bytes) -> str:
-        """Create a bare repo whose HEAD commit carries *raw* as its 'm' file."""
-        import subprocess
-        import tempfile
-
-        subprocess.run(['git', 'init', '--bare', str(gitdir)], check=True, capture_output=True)
-        with tempfile.TemporaryDirectory() as work:
-            subprocess.run(['git', 'clone', str(gitdir), work], check=True, capture_output=True)
-            (Path(work) / 'm').write_bytes(raw)
-            subprocess.run(['git', '-C', work, 'add', '-A'], check=True, capture_output=True)
-            subprocess.run(
-                [
-                    'git',
-                    '-C',
-                    work,
-                    '-c',
-                    'user.name=Test',
-                    '-c',
-                    'user.email=test@test',
-                    'commit',
-                    '-m',
-                    'add message',
-                ],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(['git', '-C', work, 'push'], check=True, capture_output=True)
-            result = subprocess.run(
-                ['git', '-C', work, 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True
-            )
-            return result.stdout.strip()
-
-    def _setup(self, tmp_path: Path, raw: bytes) -> tuple[PIFeed, str]:
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        commit = self._repo_with_message(gitdir, raw)
-        return self._make_feed(feed_dir), commit
-
-    def test_whitespace_runs_collapse_in_state_file(self, tmp_path: Path) -> None:
-        """Tabs and repeated spaces become single spaces in the state file."""
-        raw = b'Subject: [PATCH]\tcrypto:\t  fix   the   thing\nMessage-ID: <ws@example.com>\n\nbody\n'
-        feed, commit = self._setup(tmp_path, raw)
-
-        feed.save_delivery_info('test-delivery', 0, latest_commit=commit)
-
-        entry = json.loads((feed.feed_dir / 'korgalore.test-delivery.info').read_text())['epochs']['0']
-        assert entry['subject'] == '[PATCH] crypto: fix the thing'
-
-    def test_encoded_and_folded_subject_is_readable(self, tmp_path: Path) -> None:
-        """A folded, RFC 2047 encoded subject lands decoded and on one line."""
-        raw = b'Subject: =?utf-8?q?R=C3=A9paration_du?=\n =?utf-8?q?_pilote?=\nMessage-ID: <enc@example.com>\n\nbody\n'
-        feed, commit = self._setup(tmp_path, raw)
-
-        assert feed.get_subject_at_commit(0, commit) == 'Réparation du pilote'
-
-    def test_empty_subject_header_gets_placeholder(self, tmp_path: Path) -> None:
-        """A present but empty Subject falls back to the placeholder."""
-        raw = b'Subject:\nMessage-ID: <empty@example.com>\n\nbody\n'
-        feed, commit = self._setup(tmp_path, raw)
-
-        feed.save_delivery_info('test-delivery', 0, latest_commit=commit)
-
-        entry = json.loads((feed.feed_dir / 'korgalore.test-delivery.info').read_text())['epochs']['0']
-        assert entry['subject'] == '(no subject)'
-
-    def _repo_with_two_messages(self, gitdir: Path, first: bytes, second: bytes) -> tuple[str, str]:
-        """Create a bare repo with two commits sharing one committer date.
-
-        A shared date matters: recover_after_rebase() filters candidates
-        with ``--since-as-filter``, which has one-second granularity, so
-        both commits are candidates and the *second* one is not the
-        fallback. That is what makes an exact-match failure observable.
-        """
-        import subprocess
-        import tempfile
-
-        fixed_date = '2026-01-15 12:00:00 +0000'
-        env = {'GIT_COMMITTER_DATE': fixed_date, 'GIT_AUTHOR_DATE': fixed_date}
-        subprocess.run(['git', 'init', '--bare', str(gitdir)], check=True, capture_output=True)
-        hashes: list[str] = []
-        with tempfile.TemporaryDirectory() as work:
-            subprocess.run(['git', 'clone', str(gitdir), work], check=True, capture_output=True)
-            for raw in (first, second):
-                (Path(work) / 'm').write_bytes(raw)
-                subprocess.run(['git', '-C', work, 'add', '-A'], check=True, capture_output=True)
-                subprocess.run(
-                    [
-                        'git',
-                        '-C',
-                        work,
-                        '-c',
-                        'user.name=Test',
-                        '-c',
-                        'user.email=test@test',
-                        'commit',
-                        '-m',
-                        'add message',
-                    ],
-                    check=True,
-                    capture_output=True,
-                    env={**os.environ, **env},
-                )
-                result = subprocess.run(
-                    ['git', '-C', work, 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True
-                )
-                hashes.append(result.stdout.strip())
-            subprocess.run(['git', '-C', work, 'push'], check=True, capture_output=True)
-        return hashes[0], hashes[1]
-
-    def test_rebase_recovery_matches_legacy_unnormalized_subject(self, tmp_path: Path) -> None:
-        """State written before normalization still matches during recovery.
-
-        Pre-upgrade state files hold the un-collapsed subject. Recovery
-        cleans the stored side too, so the newer commit is still identified
-        exactly instead of falling back to the first candidate commit.
-        """
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        gitdir = feed_dir / 'git' / '0.git'
-        gitdir.mkdir(parents=True)
-        older, newer = self._repo_with_two_messages(
-            gitdir,
-            b'Subject: an earlier message\nMessage-ID: <older@example.com>\n\nbody\n',
-            b'Subject: crypto:\tfix   the   thing\nMessage-ID: <legacy@example.com>\n\nbody\n',
-        )
-        feed = self._make_feed(feed_dir)
-
-        # Write state the way an older korgalore would have: subject straight
-        # off the parsed header, with its whitespace runs intact.
-        feed.save_delivery_info('test-delivery', 0, latest_commit=newer)
-        state_file = feed_dir / 'korgalore.test-delivery.info'
-        state = json.loads(state_file.read_text())
-        state['epochs']['0']['subject'] = 'crypto:\tfix   the   thing'
-        state_file.write_text(json.dumps(state))
-
-        recovered = feed.recover_after_rebase('test-delivery', 0)
-
-        # Without cleaning the stored subject this returns *older*, the
-        # first candidate after the recorded date.
-        assert recovered == newer
-        assert recovered != older
-
-
-class TestSaveDeliveryInfoEpochZero:
-    """save_delivery_info() must honour an explicit epoch 0.
-
-    Epoch 0 is falsy, so a truthiness check mistakes it for "no epoch
-    given" and swaps in the highest epoch. After a rollover from 0.git to
-    1.git, saving a commit that lives in 0.git then looks it up in 1.git
-    and fails. These tests use two real epoch repositories so that the
-    lookup actually happens.
-    """
-
-    def _make_feed(self, feed_dir: Path) -> PIFeed:
-        """Create a PIFeed that finds its epochs on disk."""
-
-        class TestPIFeed(PIFeed):
-            def __init__(self, fd: Path) -> None:
-                super().__init__(feed_key='test-feed', feed_dir=fd)
-                self.feed_type = 'test'
-
-        return TestPIFeed(feed_dir)
-
-    def _make_epoch(self, gitdir: Path, raw: bytes, date: str) -> str:
-        """Create a bare epoch repo holding one message, return the commit."""
-        import subprocess
-
-        def git(*args: str, data: bytes = b'') -> str:
-            env = {
-                **os.environ,
-                'GIT_AUTHOR_NAME': 'Test',
-                'GIT_AUTHOR_EMAIL': 'test@test',
-                'GIT_COMMITTER_NAME': 'Test',
-                'GIT_COMMITTER_EMAIL': 'test@test',
-                'GIT_AUTHOR_DATE': date,
-                'GIT_COMMITTER_DATE': date,
-            }
-            result = subprocess.run(
-                ['git', '--git-dir', str(gitdir), *args],
-                input=data,
-                check=True,
-                capture_output=True,
-                env=env,
-            )
-            return result.stdout.decode().strip()
-
-        subprocess.run(['git', 'init', '--bare', str(gitdir)], check=True, capture_output=True)
-        blob = git('hash-object', '-w', '--stdin', data=raw)
-        tree = git('mktree', data=f'100644 blob {blob}\tm\n'.encode())
-        commit = git('commit-tree', tree, '-m', 'add message')
-        git('update-ref', 'HEAD', commit)
-        return commit
-
-    def _setup(self, tmp_path: Path) -> tuple[PIFeed, str, str]:
-        """Build a feed that has rolled over from epoch 0 to epoch 1."""
-        feed_dir = tmp_path / 'test-feed'
-        (feed_dir / 'git').mkdir(parents=True)
-        old = self._make_epoch(
-            feed_dir / 'git' / '0.git',
-            b'Subject: old epoch\nMessage-ID: <old@example.com>\n\nbody\n',
-            '2026-01-15 12:00:00 +0000',
-        )
-        new = self._make_epoch(
-            feed_dir / 'git' / '1.git',
-            b'Subject: new epoch\nMessage-ID: <new@example.com>\n\nbody\n',
-            '2026-02-20 08:30:00 +0000',
-        )
-        return self._make_feed(feed_dir), old, new
-
-    def _read_epochs(self, feed: PIFeed) -> Dict[str, Any]:
-        state_file = feed.feed_dir / 'korgalore.test-delivery.info'
-        epochs: Dict[str, Any] = json.loads(state_file.read_text())['epochs']
-        return epochs
-
-    def test_explicit_epoch_zero_is_kept(self, tmp_path: Path) -> None:
-        """A commit from 0.git is saved under epoch 0, not the highest epoch."""
-        feed, old, _new = self._setup(tmp_path)
-        assert feed.get_highest_epoch() == 1
-
-        feed.save_delivery_info('test-delivery', 0, latest_commit=old)
-
-        epochs = self._read_epochs(feed)
-        assert list(epochs) == ['0']
-        assert epochs['0']['last'] == old
-        assert epochs['0']['msgid'] == '<old@example.com>'
-        assert epochs['0']['commit_date'].startswith('2026-01-15 12:00:00')
-
-    def test_epoch_zero_without_commit_uses_epoch_zero_top(self, tmp_path: Path) -> None:
-        """Epoch 0 with no commit picks the top of 0.git, not of 1.git."""
-        feed, old, _new = self._setup(tmp_path)
-
-        feed.save_delivery_info('test-delivery', 0)
-
-        assert self._read_epochs(feed)['0']['last'] == old
-
-    def test_no_epoch_defaults_to_highest(self, tmp_path: Path) -> None:
-        """Leaving the epoch out still means the highest epoch."""
-        feed, _old, new = self._setup(tmp_path)
-
-        feed.save_delivery_info('test-delivery')
-
-        epochs = self._read_epochs(feed)
-        assert list(epochs) == ['1']
-        assert epochs['1']['last'] == new
-        assert epochs['1']['msgid'] == '<new@example.com>'
+        make_pi_feed(feed_dir, key='new-feed', highest_epoch=None, top_commit=None)._perform_legacy_migration()

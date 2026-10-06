@@ -89,14 +89,6 @@ class TestRunLeiCommandHeartbeat:
         """Reset user agent plus after each test."""
         korgalore._user_agent_plus = None
 
-    def test_stops_heartbeat_when_command_returns(self) -> None:
-        """The heartbeat thread is not left running after the command."""
-        with mock.patch('subprocess.run') as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stdout=b'out')
-            assert run_lei_command(['q', 'term']) == (0, b'out')
-
-        wait_for_no_heartbeat()
-
     def test_reports_during_a_slow_command(self, korgalore_logs: pytest.LogCaptureFixture) -> None:
         """A command that outlives the interval gets reported on.
 
@@ -126,10 +118,16 @@ class TestRunLeiCommandHeartbeat:
 
         assert mock_thread.call_args.kwargs['args'][2] == 0.25
 
-    def test_stops_heartbeat_when_command_is_missing(self) -> None:
-        """A lei that isn't installed stops the heartbeat too."""
-        with mock.patch('subprocess.run', side_effect=FileNotFoundError):
-            with pytest.raises(PublicInboxError):
-                run_lei_command(['q', 'term'])
+    @pytest.mark.parametrize('outcome', ['returns', 'command-missing'])
+    def test_stops_heartbeat_after_command(self, outcome: str) -> None:
+        """The heartbeat thread is not left running, even if lei isn't installed."""
+        if outcome == 'returns':
+            with mock.patch('subprocess.run') as mock_run:
+                mock_run.return_value = mock.Mock(returncode=0, stdout=b'out')
+                assert run_lei_command(['q', 'term']) == (0, b'out')
+        else:
+            with mock.patch('subprocess.run', side_effect=FileNotFoundError):
+                with pytest.raises(PublicInboxError):
+                    run_lei_command(['q', 'term'])
 
         wait_for_no_heartbeat()

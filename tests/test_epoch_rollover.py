@@ -8,39 +8,26 @@ the old and new epochs.
 
 import json
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from korgalore import GitError, PublicInboxError
 from korgalore.pi_feed import PIFeed
+from tests.conftest import make_pi_feed
 
 
-class MockPIFeed(PIFeed):
-    """PIFeed subclass for testing without real git repositories."""
+def create_feed_with_epochs(tmp_path: Path, epochs: List[int]) -> PIFeed:
+    """Create a feed with the specified epoch directories.
 
-    def __init__(self, feed_dir: Path) -> None:
-        super().__init__(feed_key='test-feed', feed_dir=feed_dir)
-        self.feed_type = 'test'
-        self._default_branch = 'master'
-
-    def _get_default_branch(self, gitdir: Path) -> str:
-        """Return mocked default branch."""
-        return self._default_branch
-
-    def get_subject_at_commit(self, epoch: int, commitish: str) -> str:
-        """Mock implementation."""
-        return f'Test subject for {commitish}'
-
-
-def create_feed_with_epochs(tmp_path: Path, epochs: List[int]) -> MockPIFeed:
-    """Create a mock feed with specified epoch directories."""
+    Epochs are found on disk; the git lookups are left for the test to mock.
+    """
     feed_dir = tmp_path / 'test-feed'
     feed_dir.mkdir()
     for epoch in epochs:
         (feed_dir / 'git' / f'{epoch}.git').mkdir(parents=True)
-    return MockPIFeed(feed_dir)
+    return make_pi_feed(feed_dir, highest_epoch=None, top_commit=None, default_branch='master')
 
 
 def write_delivery_info(feed: PIFeed, delivery_name: str, epochs_data: dict[int, dict[str, str]]) -> None:
@@ -60,101 +47,70 @@ def write_delivery_info(feed: PIFeed, delivery_name: str, epochs_data: dict[int,
 class TestFindEpochs:
     """Tests for epoch discovery."""
 
-    def test_single_epoch(self, tmp_path: Path) -> None:
-        """Single epoch directory is found."""
-        feed = create_feed_with_epochs(tmp_path, [0])
-        epochs = feed.find_epochs()
-        assert epochs == [0]
+    @pytest.mark.parametrize(
+        ('on_disk', 'extra_dirs', 'expected'),
+        [
+            pytest.param([0], [], [0], id='single'),
+            pytest.param([2, 0, 1], [], [0, 1, 2], id='sorted'),
+            pytest.param([0, 2, 5], [], [0, 2, 5], id='non-contiguous'),
+            pytest.param([0, 1], ['not_an_epoch.git', 'random_dir'], [0, 1], id='ignores-non-epoch-dirs'),
+        ],
+    )
+    def test_finds_epochs(self, tmp_path: Path, on_disk: List[int], extra_dirs: List[str], expected: List[int]) -> None:
+        feed = create_feed_with_epochs(tmp_path, on_disk)
+        for name in extra_dirs:
+            (feed.feed_dir / 'git' / name).mkdir()
 
-    def test_multiple_epochs_sorted(self, tmp_path: Path) -> None:
-        """Multiple epochs are returned sorted."""
-        feed = create_feed_with_epochs(tmp_path, [2, 0, 1])
-        epochs = feed.find_epochs()
-        assert epochs == [0, 1, 2]
+        assert feed.find_epochs() == expected
 
-    def test_non_contiguous_epochs(self, tmp_path: Path) -> None:
-        """Non-contiguous epochs are handled."""
-        feed = create_feed_with_epochs(tmp_path, [0, 2, 5])
-        epochs = feed.find_epochs()
-        assert epochs == [0, 2, 5]
-
-    def test_no_epochs_raises(self, tmp_path: Path) -> None:
-        """No epoch directories raises PublicInboxError."""
+    @pytest.mark.parametrize('git_dir_exists', [True, False], ids=['empty-git-dir', 'missing-git-dir'])
+    def test_no_epochs_raises(self, tmp_path: Path, git_dir_exists: bool) -> None:
+        """No epoch directories, or no git directory at all, raises PublicInboxError."""
         feed_dir = tmp_path / 'test-feed'
         feed_dir.mkdir()
-        (feed_dir / 'git').mkdir()
-        feed = MockPIFeed(feed_dir)
+        if git_dir_exists:
+            (feed_dir / 'git').mkdir()
+        feed = make_pi_feed(feed_dir, highest_epoch=None, top_commit=None)
 
         with pytest.raises(PublicInboxError) as exc_info:
             feed.find_epochs()
         assert 'No existing epochs' in str(exc_info.value)
-
-    def test_missing_git_directory_raises(self, tmp_path: Path) -> None:
-        """Missing git directory raises PublicInboxError."""
-        feed_dir = tmp_path / 'test-feed'
-        feed_dir.mkdir()
-        # Do not create the git subdirectory
-        feed = MockPIFeed(feed_dir)
-
-        with pytest.raises(PublicInboxError) as exc_info:
-            feed.find_epochs()
-        assert 'No existing epochs' in str(exc_info.value)
-
-    def test_ignores_non_epoch_directories(self, tmp_path: Path) -> None:
-        """Non-epoch directories are ignored."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1])
-        # Add non-epoch directories
-        (feed.feed_dir / 'git' / 'not_an_epoch.git').mkdir()
-        (feed.feed_dir / 'git' / 'random_dir').mkdir()
-
-        epochs = feed.find_epochs()
-        assert epochs == [0, 1]
 
 
 class TestGetHighestEpoch:
     """Tests for highest epoch detection."""
 
-    def test_single_epoch(self, tmp_path: Path) -> None:
-        """Single epoch returns that epoch."""
-        feed = create_feed_with_epochs(tmp_path, [0])
-        assert feed.get_highest_epoch() == 0
-
-    def test_multiple_epochs(self, tmp_path: Path) -> None:
-        """Multiple epochs returns highest."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1, 2])
-        assert feed.get_highest_epoch() == 2
-
-    def test_non_contiguous(self, tmp_path: Path) -> None:
-        """Non-contiguous epochs returns highest."""
-        feed = create_feed_with_epochs(tmp_path, [0, 5, 10])
-        assert feed.get_highest_epoch() == 10
+    @pytest.mark.parametrize(
+        ('on_disk', 'expected'),
+        [
+            pytest.param([0], 0, id='single'),
+            pytest.param([0, 1, 2], 2, id='multiple'),
+            pytest.param([0, 5, 10], 10, id='non-contiguous'),
+        ],
+    )
+    def test_highest_epoch(self, tmp_path: Path, on_disk: List[int], expected: int) -> None:
+        assert create_feed_with_epochs(tmp_path, on_disk).get_highest_epoch() == expected
 
 
 class TestGetAllCommitsInEpoch:
     """Tests for retrieving all commits in an epoch."""
 
+    @pytest.mark.parametrize(
+        ('stdout', 'expected'),
+        [
+            pytest.param(b'aaa111\nbbb222\nccc333', ['aaa111', 'bbb222', 'ccc333'], id='in-order'),
+            pytest.param(b'', [], id='empty-epoch'),
+        ],
+    )
     @patch('korgalore.pi_feed.run_git_command')
-    def test_returns_commits_in_order(self, mock_git: MagicMock, tmp_path: Path) -> None:
+    def test_returns_commits(self, mock_git: MagicMock, tmp_path: Path, stdout: bytes, expected: List[str]) -> None:
         """Commits are returned in chronological order."""
         feed = create_feed_with_epochs(tmp_path, [0])
-        mock_git.return_value = (0, b'aaa111\nbbb222\nccc333', b'')
+        mock_git.return_value = (0, stdout, b'')
 
-        commits = feed.get_all_commits_in_epoch(0)
-
-        assert commits == ['aaa111', 'bbb222', 'ccc333']
+        assert feed.get_all_commits_in_epoch(0) == expected
         # Verify rev-list was called with --reverse
-        call_args = mock_git.call_args[0]
-        assert '--reverse' in call_args[1]
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_empty_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Empty epoch returns empty list."""
-        feed = create_feed_with_epochs(tmp_path, [0])
-        mock_git.return_value = (0, b'', b'')
-
-        commits = feed.get_all_commits_in_epoch(0)
-
-        assert commits == []
+        assert '--reverse' in mock_git.call_args[0][1]
 
     @patch('korgalore.pi_feed.run_git_command')
     def test_git_error_raises(self, mock_git: MagicMock, tmp_path: Path) -> None:
@@ -167,225 +123,106 @@ class TestGetAllCommitsInEpoch:
 
 
 class TestEpochRolloverDetection:
-    """Tests for epoch rollover detection in get_latest_commits_for_delivery."""
+    """Tests for epoch rollover detection in get_latest_commits_for_delivery.
 
+    The git calls always come in the same order: one cat-file -e to check
+    that the delivery's last commit still exists (in the highest known
+    epoch), then one rev-list for the new commits of that epoch, then, if a
+    newer epoch exists on disk, one rev-list for the highest epoch. Only the
+    highest epoch is read; epochs in between are skipped.
+    """
+
+    @pytest.mark.parametrize(
+        ('on_disk', 'known', 'git_output', 'expected'),
+        [
+            # cat-file -e, rev-list epoch 0 (new commits)
+            pytest.param(
+                [0],
+                {0: 'aaa111'},
+                [b'', b'bbb222\nccc333\nddd444'],
+                [(0, 'bbb222'), (0, 'ccc333'), (0, 'ddd444')],
+                id='no-rollover',
+            ),
+            # cat-file -e, rev-list epoch 0 (nothing new)
+            pytest.param([0], {0: 'aaa111'}, [b'', b''], [], id='no-rollover-no-new-commits'),
+            # cat-file -e, rev-list epoch 0 (one new), rev-list epoch 1 (all commits)
+            pytest.param(
+                [0, 1],
+                {0: 'aaa111'},
+                [b'', b'bbb222', b'xxx111\nyyy222\nzzz333'],
+                [(0, 'bbb222'), (1, 'xxx111'), (1, 'yyy222'), (1, 'zzz333')],
+                id='rollover-both-epochs',
+            ),
+            # cat-file -e, rev-list epoch 0 (nothing new), rev-list epoch 1
+            pytest.param(
+                [0, 1],
+                {0: 'aaa111'},
+                [b'', b'', b'xxx111\nyyy222'],
+                [(1, 'xxx111'), (1, 'yyy222')],
+                id='rollover-nothing-new-in-old-epoch',
+            ),
+            # cat-file -e, rev-list epoch 0 (one new), rev-list epoch 1 (empty)
+            pytest.param([0, 1], {0: 'aaa111'}, [b'', b'bbb222', b''], [(0, 'bbb222')], id='rollover-empty-new-epoch'),
+            # Epoch 1 is missing and 2 is never read: cat-file -e, rev-list
+            # epoch 0, rev-list epoch 3 (the highest)
+            pytest.param(
+                [0, 1, 3],
+                {0: 'aaa111'},
+                [b'', b'bbb222', b'new_commit'],
+                [(0, 'bbb222'), (3, 'new_commit')],
+                id='skipped-and-intermediate-epochs',
+            ),
+            # Same with nothing between the known epoch and the highest one:
+            # cat-file -e, rev-list epoch 0, rev-list epoch 2
+            pytest.param(
+                [0, 2],
+                {0: 'aaa111'},
+                [b'', b'bbb222', b'new_commit'],
+                [(0, 'bbb222'), (2, 'new_commit')],
+                id='skipped-epoch',
+            ),
+            # The delivery already knows epoch 2, so epoch 2 is the only one
+            # read, even though 0 and 1 exist: cat-file -e (epoch 2), rev-list
+            # epoch 2
+            pytest.param(
+                [0, 1, 2],
+                {0: 'epoch0_commit', 1: 'epoch1_commit', 2: 'aaa111'},
+                [b'', b'bbb222\nccc333'],
+                [(2, 'bbb222'), (2, 'ccc333')],
+                id='already-on-latest-epoch',
+            ),
+            # Same call order as rollover-both-epochs: cat-file -e, rev-list
+            # epoch 99, rev-list epoch 100
+            pytest.param(
+                [99, 100],
+                {99: 'aaa111'},
+                [b'', b'bbb222', b'xxx111'],
+                [(99, 'bbb222'), (100, 'xxx111')],
+                id='high-epoch-numbers',
+            ),
+        ],
+    )
     @patch('korgalore.pi_feed.run_git_command')
-    def test_no_rollover_single_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """No rollover - only returns commits from current epoch."""
-        feed = create_feed_with_epochs(tmp_path, [0])
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
+    def test_latest_commits(
+        self,
+        mock_git: MagicMock,
+        tmp_path: Path,
+        on_disk: List[int],
+        known: Dict[int, str],
+        git_output: List[bytes],
+        expected: List[Tuple[int, str]],
+    ) -> None:
+        feed = create_feed_with_epochs(tmp_path, on_disk)
+        write_delivery_info(feed, 'delivery1', {epoch: {'last': last} for epoch, last in known.items()})
+        mock_git.side_effect = [(0, out, b'') for out in git_output]
 
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e (commit exists)
-            (0, b'bbb222\nccc333\nddd444', b''),  # rev-list (new commits)
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        assert result == [(0, 'bbb222'), (0, 'ccc333'), (0, 'ddd444')]
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_no_new_commits_no_rollover(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """No new commits and no rollover returns empty list."""
-        feed = create_feed_with_epochs(tmp_path, [0])
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'', b''),  # rev-list (no new commits)
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        assert result == []
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_rollover_detected_includes_new_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Rollover detected - includes commits from both epochs."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1])  # New epoch exists
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'bbb222', b''),  # rev-list in epoch 0 (one new commit)
-            (0, b'xxx111\nyyy222\nzzz333', b''),  # rev-list in epoch 1 (all commits)
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        # Should have commit from epoch 0 followed by all commits from epoch 1
-        assert result == [
-            (0, 'bbb222'),
-            (1, 'xxx111'),
-            (1, 'yyy222'),
-            (1, 'zzz333'),
-        ]
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_rollover_no_new_commits_in_old_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Rollover with no new commits in old epoch."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1])
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'', b''),  # rev-list epoch 0 (no new commits)
-            (0, b'xxx111\nyyy222', b''),  # rev-list epoch 1
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        # Only commits from new epoch
-        assert result == [(1, 'xxx111'), (1, 'yyy222')]
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_rollover_empty_new_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """New epoch exists but has no commits yet."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1])
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'bbb222', b''),  # rev-list epoch 0
-            (0, b'', b''),  # rev-list epoch 1 (empty)
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        # Only commits from epoch 0
-        assert result == [(0, 'bbb222')]
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_multiple_epoch_rollover(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Multiple new epochs - only highest is fetched."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1, 2, 3])
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'bbb222', b''),  # rev-list epoch 0
-            (0, b'new_commit', b''),  # rev-list epoch 3 (highest)
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        # Note: current implementation only fetches highest epoch, not intermediates
-        assert (0, 'bbb222') in result
-        assert (3, 'new_commit') in result
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_already_on_latest_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Delivery already knows about latest epoch."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1])
-        write_delivery_info(
-            feed,
-            'delivery1',
-            {
-                0: {'last': 'old_commit'},
-                1: {'last': 'aaa111'},  # Already on epoch 1
-            },
-        )
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'bbb222\nccc333', b''),  # rev-list epoch 1
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        # Only new commits from epoch 1
-        assert result == [(1, 'bbb222'), (1, 'ccc333')]
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_skipped_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Epoch numbers are non-contiguous (e.g., 0 -> 2)."""
-        feed = create_feed_with_epochs(tmp_path, [0, 2])  # No epoch 1
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'bbb222', b''),  # rev-list epoch 0
-            (0, b'xxx111', b''),  # rev-list epoch 2
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        assert result == [(0, 'bbb222'), (2, 'xxx111')]
-
-
-class TestEpochRolloverStateManagement:
-    """Tests for state management during epoch rollover."""
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_delivery_with_multiple_known_epochs(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Delivery knows about multiple epochs, uses highest."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1, 2])
-        write_delivery_info(
-            feed,
-            'delivery1',
-            {
-                0: {'last': 'epoch0_commit'},
-                1: {'last': 'epoch1_commit'},
-                2: {'last': 'epoch2_commit'},
-            },
-        )
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e (for epoch 2)
-            (0, b'new_commit', b''),  # rev-list epoch 2
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        # Should query from epoch 2 (highest known)
-        assert result == [(2, 'new_commit')]
+        assert feed.get_latest_commits_for_delivery('delivery1') == expected
+        # No git call was left unused
+        assert mock_git.call_count == len(git_output)
 
 
 class TestEpochRolloverEdgeCases:
     """Edge case tests for epoch rollover."""
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_large_number_of_commits_in_new_epoch(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """Large number of commits in new epoch."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1])
-        write_delivery_info(feed, 'delivery1', {0: {'last': 'aaa111'}})
-
-        # Generate 1000 commits
-        new_epoch_commits = '\n'.join([f'commit_{i:04d}' for i in range(1000)])
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'', b''),  # rev-list epoch 0 (no new)
-            (0, new_epoch_commits.encode(), b''),  # rev-list epoch 1
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        assert len(result) == 1000
-        assert result[0] == (1, 'commit_0000')
-        assert result[-1] == (1, 'commit_0999')
-
-    @patch('korgalore.pi_feed.run_git_command')
-    def test_high_epoch_numbers(self, mock_git: MagicMock, tmp_path: Path) -> None:
-        """High epoch numbers are handled correctly."""
-        feed = create_feed_with_epochs(tmp_path, [99, 100])
-        write_delivery_info(feed, 'delivery1', {99: {'last': 'aaa111'}})
-
-        mock_git.side_effect = [
-            (0, b'', b''),  # cat-file -e
-            (0, b'bbb222', b''),  # rev-list epoch 99
-            (0, b'xxx111', b''),  # rev-list epoch 100
-        ]
-
-        result = feed.get_latest_commits_for_delivery('delivery1')
-
-        assert result == [(99, 'bbb222'), (100, 'xxx111')]
-
-    def test_epoch_zero_only(self, tmp_path: Path) -> None:
-        """Feed with only epoch 0."""
-        feed = create_feed_with_epochs(tmp_path, [0])
-        assert feed.get_highest_epoch() == 0
-        assert feed.find_epochs() == [0]
 
     @patch('korgalore.pi_feed.run_git_command')
     def test_commit_not_found_triggers_recovery(self, mock_git: MagicMock, tmp_path: Path) -> None:
@@ -419,20 +256,3 @@ class TestEpochRolloverEdgeCases:
 
         assert len(result) == 2
         assert result[0] == (0, 'new_commit1')
-
-
-class TestGetGitdir:
-    """Tests for get_gitdir method."""
-
-    def test_returns_correct_path(self, tmp_path: Path) -> None:
-        """Returns correct git directory path for epoch."""
-        feed = create_feed_with_epochs(tmp_path, [0, 1, 2])
-
-        assert feed.get_gitdir(0) == feed.feed_dir / 'git' / '0.git'
-        assert feed.get_gitdir(1) == feed.feed_dir / 'git' / '1.git'
-        assert feed.get_gitdir(2) == feed.feed_dir / 'git' / '2.git'
-
-    def test_high_epoch_number(self, tmp_path: Path) -> None:
-        """High epoch numbers work correctly."""
-        feed = create_feed_with_epochs(tmp_path, [999])
-        assert feed.get_gitdir(999) == feed.feed_dir / 'git' / '999.git'
