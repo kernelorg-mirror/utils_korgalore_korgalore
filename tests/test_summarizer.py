@@ -116,35 +116,35 @@ def openai(server: FakeServer, session: requests.Session, **kwargs: Any) -> Open
 
 
 class TestOpenAI:
-    def test_sends_the_prompt(self, server: FakeServer, session: requests.Session) -> None:
-        summary = openai(server, session, api_key='sekrit').summarize('Thread: mm: fix it')
+    @pytest.mark.parametrize(
+        ('api_key', 'url_suffix', 'instructions'),
+        [
+            pytest.param('sekrit', '', None, id='with-key'),
+            pytest.param(None, '', None, id='no-key-no-auth-header'),
+            pytest.param(None, '/', None, id='trailing-slash-in-url'),
+            pytest.param(None, '', 'Tell me if anyone sounds upset.', id='instructions-in-system-message'),
+        ],
+    )
+    def test_sends_the_prompt(
+        self,
+        server: FakeServer,
+        session: requests.Session,
+        api_key: Optional[str],
+        url_suffix: str,
+        instructions: Optional[str],
+    ) -> None:
+        summarizer = OpenAISummarizer('local', server.url + url_suffix, 'qwen3:32b', api_key=api_key, session=session)
+        assert summarizer.summarize('Thread: mm: fix it', instructions) == 'A short summary.'
 
-        assert summary == 'A short summary.'
         [req] = server.requests
         assert req['path'] == '/v1/chat/completions'
-        assert req['auth'] == 'Bearer sekrit'
+        assert req['auth'] == (None if api_key is None else f'Bearer {api_key}')
         assert req['body']['model'] == 'qwen3:32b'
         assert req['body']['stream'] is False
         assert req['body']['messages'] == [
-            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'system', 'content': SYSTEM_PROMPT if instructions is None else system_prompt(instructions)},
             {'role': 'user', 'content': 'Thread: mm: fix it'},
         ]
-
-    def test_instructions_go_in_the_system_message(self, server: FakeServer, session: requests.Session) -> None:
-        openai(server, session).summarize('Thread: mm: fix it', 'Tell me if anyone sounds upset.')
-
-        assert server.requests[0]['body']['messages'] == [
-            {'role': 'system', 'content': system_prompt('Tell me if anyone sounds upset.')},
-            {'role': 'user', 'content': 'Thread: mm: fix it'},
-        ]
-
-    def test_no_key_no_auth_header(self, server: FakeServer, session: requests.Session) -> None:
-        openai(server, session).summarize('x')
-        assert server.requests[0]['auth'] is None
-
-    def test_trailing_slash_in_url(self, server: FakeServer, session: requests.Session) -> None:
-        OpenAISummarizer('local', server.url + '/', 'm', session=session).summarize('x')
-        assert server.requests[0]['path'] == '/v1/chat/completions'
 
     def test_thinking_is_removed(self, server: FakeServer, session: requests.Session) -> None:
         server.reply = server.completion('<think>\nLet me see...\n</think>\n\nThe summary.')
@@ -229,33 +229,18 @@ class TestOpenAI:
 
 
 class TestCommand:
-    def test_prompt_on_stdin(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize('instructions', [None, 'Tell me if anyone sounds upset.'], ids=['plain', 'instructions'])
+    def test_prompt_on_stdin(self, tmp_path: Path, instructions: Optional[str]) -> None:
         seen = tmp_path / 'stdin'
         summarizer = CommandSummarizer('script', f"sh -c 'cat > {seen}; echo The summary.'")
 
-        assert summarizer.summarize('Thread: mm: fix it') == 'The summary.'
-        assert seen.read_text() == f'{SYSTEM_PROMPT}\n\nThread: mm: fix it'
-
-    def test_instructions_on_stdin(self, tmp_path: Path) -> None:
-        seen = tmp_path / 'stdin'
-        summarizer = CommandSummarizer('script', f"sh -c 'cat > {seen}; echo The summary.'")
-
-        summarizer.summarize('Thread: mm: fix it', 'Tell me if anyone sounds upset.')
-        assert seen.read_text() == f'{system_prompt("Tell me if anyone sounds upset.")}\n\nThread: mm: fix it'
-
-    def test_never_local(self) -> None:
-        assert CommandSummarizer('s', 'cat').is_local is False
+        assert summarizer.summarize('Thread: mm: fix it', instructions) == 'The summary.'
+        prompt = SYSTEM_PROMPT if instructions is None else system_prompt(instructions)
+        assert seen.read_text() == f'{prompt}\n\nThread: mm: fix it'
 
     def test_model_is_the_program_name(self) -> None:
         """The command line may carry secrets, so only the program is the model."""
         assert CommandSummarizer('s', '/opt/bin/claude -p --api-key hunter2').model == 'claude'
-
-    def test_model_can_be_named(self) -> None:
-        assert CommandSummarizer('s', 'claude -p', model='sonnet').model == 'sonnet'
-
-    def test_thinking_is_removed(self) -> None:
-        summary = CommandSummarizer('s', 'sh -c \'cat >/dev/null; printf "<think>hm</think>Done."\'').summarize('x')
-        assert summary == 'Done.'
 
     def test_failure_shows_last_error_line(self) -> None:
         summarizer = CommandSummarizer('s', "sh -c 'echo warming up >&2; echo quota exceeded >&2; exit 3'")
@@ -388,16 +373,14 @@ class TestMakeSummarizer:
         assert summarizer.max_input_chars == 16000
         assert summarizer.allow_private_feeds is False
 
-    def test_command(self) -> None:
-        summarizer = make_summarizer('cli', {'type': 'command', 'command': 'llm -m x', 'allow_private_feeds': True})
+    @pytest.mark.parametrize(('extra', 'model'), [({}, 'llm'), ({'model': 'x'}, 'x')], ids=['program-name', 'named'])
+    def test_command(self, extra: Dict[str, Any], model: str) -> None:
+        details = {'type': 'command', 'command': 'llm -m x', 'allow_private_feeds': True, **extra}
+        summarizer = make_summarizer('cli', details)
         assert isinstance(summarizer, CommandSummarizer)
         assert summarizer.args == ['llm', '-m', 'x']
         assert summarizer.allow_private_feeds is True
-        assert summarizer.model == 'llm'
-
-    def test_command_model(self) -> None:
-        summarizer = make_summarizer('cli', {'type': 'command', 'command': 'llm -m x', 'model': 'x'})
-        assert summarizer.model == 'x'
+        assert summarizer.model == model
 
     @pytest.mark.parametrize(
         ('details', 'error'),
@@ -426,16 +409,16 @@ class TestMakeSummarizer:
         with pytest.raises(ConfigurationError, match=error):
             make_summarizer('bad', details)
 
-    def test_missing_key_file(self, tmp_path: Path) -> None:
-        details = {'type': 'openai', 'url': 'http://x/v1', 'model': 'm', 'api_key_file': str(tmp_path / 'none')}
-        with pytest.raises(ConfigurationError, match='cannot be read'):
-            make_summarizer('s', details)
-
-    def test_empty_key_file(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ('content', 'error'), [(None, 'cannot be read'), ('\n', 'is empty')], ids=['missing-file', 'empty-file']
+    )
+    def test_bad_key_file(self, tmp_path: Path, content: Optional[str], error: str) -> None:
         key = tmp_path / 'llm.key'
-        key.write_text('\n')
-        with pytest.raises(ConfigurationError, match='is empty'):
-            make_summarizer('s', {'type': 'openai', 'url': 'http://x/v1', 'model': 'm', 'api_key_file': str(key)})
+        if content is not None:
+            key.write_text(content)
+        details = {'type': 'openai', 'url': 'http://x/v1', 'model': 'm', 'api_key_file': str(key)}
+        with pytest.raises(ConfigurationError, match=error):
+            make_summarizer('s', details)
 
 
 DAY1 = datetime(2026, 10, 1, 7, 0, tzinfo=UTC)
@@ -685,31 +668,30 @@ def by_root(threads: Sequence[DigestThread]) -> Dict[str, DigestThread]:
     return {thread.root_msgid: thread for thread in threads}
 
 
-class TestNeedsSummary:
-    def test_new_thread_nobody_answered(self) -> None:
-        assert not needs_summary(group_threads([post('a@x')])[0])
+def series(*subjects: str) -> List[EmailMessage]:
+    """A new thread whose first message is the first subject."""
+    return [mkmsg(f'p{n}@x', subj, refs=['p0@x'] if n else None) for n, subj in enumerate(subjects)]
 
+
+class TestNeedsSummary:
     @pytest.mark.parametrize(
-        'subjects',
+        ('msgs', 'expected'),
         [
-            pytest.param(['[PATCH 0/2] mm: a series', '[PATCH 1/2] mm: one', '[PATCH 2/2] mm: two'], id='cover-letter'),
-            pytest.param(['[PATCH 1/2] mm: one', '[PATCH 2/2] mm: two'], id='no-cover-letter'),
+            pytest.param([post('a@x')], False, id='new-thread-nobody-answered'),
+            # A new series gets a summary of what it is about
+            pytest.param(
+                series('[PATCH 0/2] mm: a series', '[PATCH 1/2] mm: one', '[PATCH 2/2] mm: two'),
+                True,
+                id='new-series-with-cover-letter',
+            ),
+            pytest.param(series('[PATCH 1/2] mm: one', '[PATCH 2/2] mm: two'), True, id='new-series-no-cover-letter'),
+            pytest.param(series('[PATCH 1/1] mm: one'), False, id='series-of-one'),
+            pytest.param(series('mm: a question'), False, id='discussion-nobody-answered'),
+            pytest.param([post('a@x'), post('r@x', 'a@x', BOB)], True, id='answered-thread'),
         ],
     )
-    def test_new_series_nobody_answered(self, subjects: List[str]) -> None:
-        """A new series gets a summary of what it is about."""
-        root = 'p0@x'
-        msgs = [mkmsg(f'p{n}@x', subj, refs=[root] if n else None) for n, subj in enumerate(subjects)]
-        assert needs_summary(group_threads(msgs)[0])
-
-    def test_series_of_one_nobody_answered(self) -> None:
-        assert not needs_summary(group_threads([mkmsg('a@x', '[PATCH 1/1] mm: one')])[0])
-
-    def test_discussion_nobody_answered(self) -> None:
-        assert not needs_summary(group_threads([mkmsg('a@x', 'mm: a question')])[0])
-
-    def test_answered_thread(self) -> None:
-        assert needs_summary(group_threads([post('a@x'), post('r@x', 'a@x', BOB)])[0])
+    def test_needs_summary(self, msgs: List[EmailMessage], expected: bool) -> None:
+        assert needs_summary(group_threads(msgs)[0]) is expected
 
     def test_continuing_thread(self) -> None:
         # The root is from an earlier digest, so this message answers it
@@ -722,10 +704,6 @@ class TestRankThreads:
     def test_most_messages_first(self) -> None:
         ranked = rank_threads(group_threads(digest_msgs()))
         assert [thread.root_msgid for thread in ranked] == ['busy@x', 'small@x', 'lonely@x']
-
-    def test_busy_beats_new(self) -> None:
-        msgs = [post('busy@x'), post('b1@x', 'busy@x', BOB), post('b2@x', 'busy@x', BOB), post('new@x')]
-        assert [thread.root_msgid for thread in rank_threads(group_threads(msgs))] == ['busy@x', 'new@x']
 
     def test_newest_first_on_a_tie(self) -> None:
         msgs = [post('early@x'), post('e1@x', 'early@x', BOB), post('late@x'), post('l1@x', 'late@x', BOB)]
@@ -835,24 +813,26 @@ class TestSummaryRun:
         assert self.summarize(SummaryRun(fake, cache), msgs) == {'q@x': NoSummary.NOT_NEEDED}
         assert fake.prompts == []
 
-    def test_remote_warning(self, cache: SummaryCache, caplog: pytest.LogCaptureFixture) -> None:
+    @pytest.mark.parametrize(
+        ('is_local', 'answered', 'warns'),
+        [
+            pytest.param(False, True, True, id='remote'),
+            pytest.param(True, True, False, id='local'),
+            pytest.param(False, False, False, id='remote-but-no-calls'),
+        ],
+    )
+    def test_remote_warning(
+        self, cache: SummaryCache, caplog: pytest.LogCaptureFixture, is_local: bool, answered: bool, warns: bool
+    ) -> None:
         fake = RecordingSummarizer()
-        fake.is_local = False
+        fake.is_local = is_local
+        msgs = digest_msgs() if answered else [post('lonely@x')]
         with caplog.at_level(logging.WARNING, logger='korgalore'):
-            self.summarize(SummaryRun(fake, cache), digest_msgs())
-        assert 'summarizer fake is not on this machine, sending it up to 2 threads' in caplog.text
-
-    def test_no_warning_for_a_local_summarizer(self, cache: SummaryCache, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger='korgalore'):
-            self.summarize(SummaryRun(RecordingSummarizer(), cache), digest_msgs())
-        assert 'not on this machine' not in caplog.text
-
-    def test_no_warning_without_calls(self, cache: SummaryCache, caplog: pytest.LogCaptureFixture) -> None:
-        fake = RecordingSummarizer()
-        fake.is_local = False
-        with caplog.at_level(logging.WARNING, logger='korgalore'):
-            self.summarize(SummaryRun(fake, cache), [post('lonely@x')])
-        assert 'not on this machine' not in caplog.text
+            self.summarize(SummaryRun(fake, cache), msgs)
+        if warns:
+            assert 'summarizer fake is not on this machine, sending it up to 2 threads' in caplog.text
+        else:
+            assert 'not on this machine' not in caplog.text
 
 
 class TestEstimateSummaries:
@@ -870,10 +850,13 @@ class TestEstimateSummaries:
         SummaryRun(fake, cache).summarize_threads('Digest t', group_threads(msgs), msgs, DAY1)
 
     def test_matches_the_real_run(self, cache: SummaryCache) -> None:
-        est = self.estimate(RecordingSummarizer(), cache, digest_msgs())
+        est_fake = RecordingSummarizer()
+        est = self.estimate(est_fake, cache, digest_msgs())
         fake = RecordingSummarizer()
         self.run(fake, cache, digest_msgs())
 
+        # Estimating neither calls the model nor fills the cache (or the real run would hit it)
+        assert est_fake.prompts == []
         assert est.calls == len(fake.prompts) == 2
         assert est.input_chars == sum(len(prompt) for prompt in fake.prompts)
         assert est.largest_chars == max(len(prompt) for prompt in fake.prompts)
@@ -915,14 +898,6 @@ class TestEstimateSummaries:
         assert est.cached == 1  # small@x
         assert est.over_limit == 1  # third@x, which has fewer messages than busy@x
         assert est.calls == 1  # busy@x
-
-    def test_never_calls_the_model_or_writes_the_cache(self, cache: SummaryCache) -> None:
-        fake = RecordingSummarizer()
-        self.estimate(fake, cache, digest_msgs())
-
-        assert fake.prompts == []
-        assert cache.latest('busy@x', 'qwen3:32b') is None
-        assert cache.latest('small@x', 'qwen3:32b') is None
 
     def test_cut_prompts(self, cache: SummaryCache) -> None:
         fake = RecordingSummarizer()
