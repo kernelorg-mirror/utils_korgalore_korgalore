@@ -1,13 +1,13 @@
 """Tests for CLI configuration loading and merging."""
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import click
 import pytest
 
-from korgalore.cli import load_config, merge_config, resolve_target_name
-from korgalore.maintainers import normalize_subsystem_name
+from korgalore import ConfigurationError
+from korgalore.cli import find_tracked_subsystem_config, load_config, merge_config, resolve_target_name
 
 
 class TestMergeConfig:
@@ -233,111 +233,44 @@ class TestLoadConfigWithConfD:
         assert 'extra_delivery' in config['deliveries']
 
 
-def _find_forget_config(conf_d: Path, subsystem_name: str) -> Path:
-    """Replicate the forget path's conf.d matching logic from cli.py."""
-    key = normalize_subsystem_name(subsystem_name)
-    config_file = conf_d / f'{key}.toml'
-    if not config_file.exists() and conf_d.is_dir():
-        candidates: List[Path] = sorted(p for p in conf_d.glob('*.toml') if f'_{key}_' in f'_{p.stem}_')
-        if len(candidates) == 1:
-            config_file = candidates[0]
-    return config_file
-
-
-class TestForgetConfDMatching:
+class TestFindTrackedSubsystemConfig:
     """Tests for --forget conf.d file matching by normalised substring."""
 
-    def test_exact_match(self, tmp_path: Path) -> None:
-        """Exact normalised name matches directly."""
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir()
-        (conf_d / 'register_map_abstraction_layer.toml').touch()
-        result = _find_forget_config(conf_d, 'REGISTER MAP ABSTRACTION LAYER')
-        assert result.name == 'register_map_abstraction_layer.toml'
+    FILES = ['register_map_abstraction_layer.toml', 'selinux_security_module.toml']
 
-    def test_prefix_substring_match(self, tmp_path: Path) -> None:
-        """Substring at the start of the canonical name matches."""
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir()
-        (conf_d / 'register_map_abstraction_layer.toml').touch()
-        result = _find_forget_config(conf_d, 'REGISTER MAP')
-        assert result.name == 'register_map_abstraction_layer.toml'
-
-    def test_middle_substring_match(self, tmp_path: Path) -> None:
-        """Substring in the middle of the canonical name matches."""
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir()
-        (conf_d / 'selinux_security_module.toml').touch()
-        result = _find_forget_config(conf_d, 'SECURITY')
-        assert result.name == 'selinux_security_module.toml'
-
-    def test_suffix_substring_match(self, tmp_path: Path) -> None:
-        """Substring at the end of the canonical name matches."""
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir()
-        (conf_d / 'selinux_security_module.toml').touch()
-        result = _find_forget_config(conf_d, 'SECURITY MODULE')
-        assert result.name == 'selinux_security_module.toml'
+    @pytest.mark.parametrize(
+        ('name', 'expected'),
+        [
+            ('REGISTER MAP ABSTRACTION LAYER', 'register_map_abstraction_layer'),
+            ('REGISTER MAP', 'register_map_abstraction_layer'),
+            ('SECURITY', 'selinux_security_module'),
+            ('SECURITY MODULE', 'selinux_security_module'),
+        ],
+        ids=['exact', 'prefix', 'middle', 'suffix'],
+    )
+    def test_match(self, tmp_path: Path, name: str, expected: str) -> None:
+        for fname in self.FILES:
+            (tmp_path / fname).touch()
+        key, path = find_tracked_subsystem_config(tmp_path, name)
+        assert (key, path) == (expected, tmp_path / f'{expected}.toml')
 
     def test_no_partial_word_match(self, tmp_path: Path) -> None:
-        """Partial word does not match across underscore boundaries."""
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir()
-        (conf_d / 'selinux_security_module.toml').touch()
-        # "CURITY" is a substring of "security" but not on word boundaries
-        result = _find_forget_config(conf_d, 'CURITY')
-        assert not result.exists()
+        """ "CURITY" is a substring of "security" but not on word boundaries."""
+        (tmp_path / 'selinux_security_module.toml').touch()
+        key, path = find_tracked_subsystem_config(tmp_path, 'CURITY')
+        assert key == 'curity'
+        assert not path.exists()
 
+    def test_ambiguous_match_raises(self, tmp_path: Path) -> None:
+        (tmp_path / 'selinux_security_module.toml').touch()
+        (tmp_path / 'apparmor_security_module.toml').touch()
+        with pytest.raises(ConfigurationError, match='Ambiguous') as exc:
+            find_tracked_subsystem_config(tmp_path, 'SECURITY MODULE')
+        assert str(exc.value).splitlines()[1:] == ['  apparmor_security_module.toml', '  selinux_security_module.toml']
 
-class TestTrackSubsystemList:
-    """Tests for track-subsystem --list output."""
-
-    def test_list_with_subsystem_section(self, tmp_path: Path) -> None:
-        """List displays name from [subsystem] section."""
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir(parents=True)
-        (conf_d / 'selinux_security_module.toml').write_text(
-            '[subsystem]\n'
-            "name = 'SELINUX SECURITY MODULE'\n"
-            '\n'
-            '[feeds.selinux_security_module-mailinglist]\n'
-            "url = 'lei:/data/lei/selinux_security_module-mailinglist'\n"
-            '\n'
-            '[deliveries.selinux_security_module-mailinglist]\n'
-            "feed = 'selinux_security_module-mailinglist'\n"
-            "target = 'personal'\n"
-            "labels = ['INBOX', 'UNREAD']\n"
-        )
-        import tomllib
-
-        config = tomllib.loads((conf_d / 'selinux_security_module.toml').read_text())
-        assert config['subsystem']['name'] == 'SELINUX SECURITY MODULE'
-        deliveries = config.get('deliveries', {})
-        assert 'selinux_security_module-mailinglist' in deliveries
-
-    def test_list_fallback_without_subsystem_section(self, tmp_path: Path) -> None:
-        """List falls back to deriving name from filename when [subsystem] is missing."""
-        conf_d = tmp_path / 'conf.d'
-        conf_d.mkdir(parents=True)
-        # Legacy config without [subsystem] section
-        (conf_d / 'amd_gpu.toml').write_text(
-            '[feeds.amd_gpu-patches]\n'
-            "url = 'lei:/data/lei/amd_gpu-patches'\n"
-            '\n'
-            '[deliveries.amd_gpu-patches]\n'
-            "feed = 'amd_gpu-patches'\n"
-            "target = 'personal'\n"
-            "labels = ['INBOX']\n"
-        )
-        import tomllib
-
-        config = tomllib.loads((conf_d / 'amd_gpu.toml').read_text())
-        # No subsystem section — fallback should derive from stem
-        subsystem_info = config.get('subsystem', {})
-        display_name = subsystem_info.get('name')
-        if not display_name:
-            display_name = 'amd_gpu'.replace('_', ' ').upper()
-        assert display_name == 'AMD GPU'
+    def test_missing_conf_d(self, tmp_path: Path) -> None:
+        key, path = find_tracked_subsystem_config(tmp_path / 'conf.d', 'SELINUX')
+        assert (key, path) == ('selinux', tmp_path / 'conf.d' / 'selinux.toml')
 
 
 class TestResolveTargetName:

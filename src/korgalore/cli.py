@@ -3091,6 +3091,31 @@ def gui(ctx: click.Context) -> None:
         raise click.Abort() from e
 
 
+def find_tracked_subsystem_config(conf_d: Path, subsystem_name: str) -> Tuple[str, Path]:
+    """Find the conf.d file that tracks a subsystem.
+
+    The user may supply a substring (e.g., "REGISTER MAP") that was
+    resolved to a longer canonical name during creation (e.g.,
+    "register_map_abstraction_layer.toml"). Match by checking if the
+    normalised key appears as a word-boundary-aligned substring of the
+    config filename, without needing to re-parse MAINTAINERS.
+
+    Returns the key and the path. The path may not exist when nothing
+    matched. Raises ConfigurationError when more than one file matches.
+    """
+    key = normalize_subsystem_name(subsystem_name)
+    config_file = conf_d / f'{key}.toml'
+    if config_file.exists() or not conf_d.is_dir():
+        return key, config_file
+    candidates = sorted(p for p in conf_d.glob('*.toml') if f'_{key}_' in f'_{p.stem}_')
+    if len(candidates) == 1:
+        return candidates[0].stem, candidates[0]
+    if len(candidates) > 1:
+        names = '\n'.join(f'  {c.name}' for c in candidates)
+        raise ConfigurationError(f'Ambiguous match for "{subsystem_name}". Matching config files:\n{names}')
+    return key, config_file
+
+
 @main.command('track-subsystem')
 @click.argument('subsystem_name', type=str, required=False, default=None)
 @click.option(
@@ -3193,25 +3218,12 @@ def track_subsystem(
         config_dir = get_xdg_config_dir()
         data_dir = ctx.obj.get('data_dir', get_xdg_data_dir())
 
-        # Match the normalised user input against existing conf.d/ files.
-        # The user may supply a substring (e.g., "REGISTER MAP") that was
-        # resolved to a longer canonical name during creation (e.g.,
-        # "register_map_abstraction_layer.toml").  Match by checking if
-        # the normalised key appears as a word-boundary-aligned substring
-        # of the config filename, without needing to re-parse MAINTAINERS.
-        key = normalize_subsystem_name(subsystem_name)
         conf_d = config_dir / 'conf.d'
-        config_file = conf_d / f'{key}.toml'
-        if not config_file.exists() and conf_d.is_dir():
-            candidates = sorted(p for p in conf_d.glob('*.toml') if f'_{key}_' in f'_{p.stem}_')
-            if len(candidates) == 1:
-                config_file = candidates[0]
-                key = config_file.stem
-            elif len(candidates) > 1:
-                logger.critical('Ambiguous match for "%s". Matching config files:', subsystem_name)
-                for c in candidates:
-                    logger.critical('  %s', c.name)
-                raise click.Abort()
+        try:
+            key, config_file = find_tracked_subsystem_config(conf_d, subsystem_name)
+        except ConfigurationError as fe:
+            logger.critical('%s', fe)
+            raise click.Abort() from fe
 
         # Read subsystem name from config before removing, for better log output
         forget_display_name = subsystem_name

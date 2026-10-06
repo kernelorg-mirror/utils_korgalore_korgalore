@@ -92,22 +92,6 @@ def mock_feed(temp_feed_dir: Path) -> 'PIFeed':
 
 
 @pytest.fixture
-def sample_deliveries() -> dict[str, tuple[Any, Any, list[str]]]:
-    """Create sample delivery data structure matching cli.py format.
-
-    Returns dict mapping delivery_name -> (feed, target, labels)
-    """
-    feeds: dict[str, tuple[Any, Any, list[str]]] = {}
-    for i in range(5):
-        feed = MagicMock()
-        feed.feed_key = f'feed-{i % 3}'  # 3 unique feeds
-        target = MagicMock()
-        target.identifier = f'target-{i % 2}'
-        feeds[f'delivery-{i}'] = (feed, target, [f'label-{i}'])
-    return feeds
-
-
-@pytest.fixture
 def repo(tmp_path: Path) -> InboxRepo:
     """An empty public-inbox style repository for digest tests."""
     from tests.digest_helpers import InboxRepo

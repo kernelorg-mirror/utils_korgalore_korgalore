@@ -113,28 +113,6 @@ class TestSubfolderTemplateMaildir:
         assert re.match(r'^\d{4}-\d{2}-\d{2}_\d{2}$', refreshed_subfolder)
         assert refreshed_subfolder == initial_subfolder
 
-    def test_invalid_strftime_format_raises(self, tmp_path: Path) -> None:
-        """Invalid strftime format raises ConfigurationError."""
-        maildir_path = tmp_path / 'mail'
-        ctx = create_mock_context({'local': {'type': 'maildir', 'path': str(maildir_path)}})
-        ctx.obj['targets']['local'] = MaildirTarget('local', str(maildir_path))
-
-        deliveries = {
-            'test-delivery': {
-                'feed': 'https://lore.kernel.org/test',
-                'target': 'local',
-                'subfolder': '%Q',  # Invalid format code
-            }
-        }
-
-        with patch('korgalore.cli.get_feed_for_delivery') as mock_feed:
-            mock_feed.return_value = MagicMock(feed_key='test')
-            # Note: Python's strftime doesn't raise on unknown codes,
-            # it just passes them through. So this test verifies the behavior.
-            map_deliveries(ctx, deliveries)
-            # %Q is not a valid strftime code but Python doesn't raise,
-            # it just leaves it as-is or platform-dependent
-
     def test_subfolder_without_template_unchanged(self, tmp_path: Path) -> None:
         """Subfolder without % is not treated as template."""
         maildir_path = tmp_path / 'mail'

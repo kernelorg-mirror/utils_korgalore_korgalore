@@ -448,70 +448,55 @@ class TestSubscribeAdd:
 class TestSubscribeList:
     """Tests for the subscribe list command."""
 
-    def test_list_active_and_paused(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """subscribe list shows both active and paused subscriptions."""
-        from korgalore.cli import subscribe_list
-
+    @staticmethod
+    def _ctx(tmp_path: Path, subs: Dict[str, str]) -> click.Context:
+        """A context whose conf.d holds the given sub-*.toml[.paused] files."""
         config_dir = tmp_path / 'config'
         config_dir.mkdir()
         cfgpath = config_dir / 'korgalore.toml'
         cfgpath.write_text('')
-
-        conf_d = config_dir / 'conf.d'
-        conf_d.mkdir()
-
-        # Active subscription
-        active_content = generate_subscription_config('lkml', 'https://lore.kernel.org/lkml/', 'gmail', ['INBOX'])
-        (conf_d / 'sub-lkml.toml').write_text(active_content)
-
-        # Paused subscription
-        paused_content = generate_subscription_config('netdev', 'https://lore.kernel.org/netdev/', 'gmail', ['INBOX'])
-        (conf_d / 'sub-netdev.toml.paused').write_text(paused_content)
-
+        if subs:
+            conf_d = config_dir / 'conf.d'
+            conf_d.mkdir()
+            for fname, key in subs.items():
+                content = generate_subscription_config(key, f'https://lore.kernel.org/{key}/', 'gmail', ['INBOX'])
+                (conf_d / fname).write_text(content)
         ctx = click.Context(click.Command('test'))
         ctx.ensure_object(dict)
         ctx.obj['cfgpath'] = cfgpath
+        return ctx
 
-        ctx.invoke(subscribe_list, paused=False)
-        # No assertion on output since it goes through logger, but no exception is good
+    BOTH = {'sub-lkml.toml': 'lkml', 'sub-netdev.toml.paused': 'netdev'}
 
-    def test_list_paused_only(self, tmp_path: Path) -> None:
-        """subscribe list --paused shows only paused subscriptions."""
+    @pytest.mark.parametrize(
+        ('subs', 'paused', 'expected', 'absent'),
+        [
+            (BOTH, False, ['  lkml\n', '  netdev [paused]\n', 'URL: https://lore.kernel.org/netdev/'], []),
+            (BOTH, True, ['  netdev [paused]\n'], ['lkml']),
+            ({'sub-lkml.toml': 'lkml'}, True, ['No paused subscriptions.'], ['lkml']),
+            ({}, False, ['No subscriptions found.'], []),
+        ],
+        ids=['active-and-paused', 'paused-only', 'nothing-paused', 'no-conf-d'],
+    )
+    def test_list(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        subs: Dict[str, str],
+        paused: bool,
+        expected: list[str],
+        absent: list[str],
+    ) -> None:
         from korgalore.cli import subscribe_list
 
-        config_dir = tmp_path / 'config'
-        config_dir.mkdir()
-        cfgpath = config_dir / 'korgalore.toml'
-        cfgpath.write_text('')
-
-        conf_d = config_dir / 'conf.d'
-        conf_d.mkdir()
-
-        active_content = generate_subscription_config('lkml', 'https://lore.kernel.org/lkml/', 'gmail', ['INBOX'])
-        (conf_d / 'sub-lkml.toml').write_text(active_content)
-
-        ctx = click.Context(click.Command('test'))
-        ctx.ensure_object(dict)
-        ctx.obj['cfgpath'] = cfgpath
-
-        # Should not raise, and with --paused should report no paused subs
-        ctx.invoke(subscribe_list, paused=True)
-
-    def test_list_empty(self, tmp_path: Path) -> None:
-        """subscribe list with no subscriptions reports empty."""
-        from korgalore.cli import subscribe_list
-
-        config_dir = tmp_path / 'config'
-        config_dir.mkdir()
-        cfgpath = config_dir / 'korgalore.toml'
-        cfgpath.write_text('')
-
-        ctx = click.Context(click.Command('test'))
-        ctx.ensure_object(dict)
-        ctx.obj['cfgpath'] = cfgpath
-
-        # No conf.d directory at all
-        ctx.invoke(subscribe_list, paused=False)
+        ctx = self._ctx(tmp_path, subs)
+        with caplog.at_level('INFO', logger='korgalore'):
+            ctx.invoke(subscribe_list, paused=paused)
+        text = caplog.text
+        for line in expected:
+            assert line in text
+        for word in absent:
+            assert word not in text
 
 
 class TestSubscribePauseResume:
